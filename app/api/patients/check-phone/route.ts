@@ -1,7 +1,8 @@
 import { checkPhoneExists } from '@/lib/data/patients'
-import { requireRole } from '@/lib/auth/session'
+import { requireApiRole, toApiErrorResponse } from '@/lib/auth/session'
 import { NextResponse } from 'next/server'
 import { validateEgyptianPhone } from '@/lib/utils/phone-validation'
+import { enforceRateLimit } from '@/lib/security/rate-limit'
 
 /**
  * GET /api/patients/check-phone?phone=01234567890
@@ -15,7 +16,15 @@ import { validateEgyptianPhone } from '@/lib/utils/phone-validation'
  */
 export async function GET(request: Request) {
   try {
-    await requireRole(['doctor', 'frontdesk'])
+    const rate = await enforceRateLimit(request, 'patient-check-phone', 20, 60_000)
+    if (!rate.allowed) {
+      return NextResponse.json(
+        { error: 'Too many requests. Please try again later.' },
+        { status: 429, headers: { 'Retry-After': String(rate.retryAfterSeconds) } }
+      )
+    }
+
+    await requireApiRole(['doctor', 'frontdesk'])
     
     const { searchParams } = new URL(request.url)
     const phone = searchParams.get('phone')
@@ -54,9 +63,6 @@ export async function GET(request: Request) {
     
   } catch (error: any) {
     console.error('Check phone error:', error)
-    return NextResponse.json(
-      { error: error.message || 'Failed to check phone' },
-      { status: 500 }
-    )
+    return toApiErrorResponse(error, 'Failed to check phone')
   }
 }

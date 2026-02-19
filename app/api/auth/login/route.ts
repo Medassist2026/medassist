@@ -1,9 +1,18 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
+import { enforceRateLimit } from '@/lib/security/rate-limit'
 
 export async function POST(request: Request) {
   try {
+    const rate = await enforceRateLimit(request, 'auth-login', 8, 60_000)
+    if (!rate.allowed) {
+      return NextResponse.json(
+        { error: 'Too many attempts. Please try again later.' },
+        { status: 429, headers: { 'Retry-After': String(rate.retryAfterSeconds) } }
+      )
+    }
+
     const { phone: identifier, password, role } = await request.json()
 
     if (!identifier || !password || !role) {
@@ -14,7 +23,7 @@ export async function POST(request: Request) {
     }
 
     const supabase = await createClient()
-    const admin = createAdminClient()
+    const admin = createAdminClient('auth-login-lookup')
 
     // Determine if input is email or phone
     const isEmail = identifier.includes('@')
@@ -35,7 +44,7 @@ export async function POST(request: Request) {
         .maybeSingle()
 
       if (lookupError || !userByPhone) {
-        return NextResponse.json({ error: 'User not found' }, { status: 404 })
+        return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
       }
 
       // Most accounts authenticate via email even if phone exists in profile.
@@ -62,8 +71,8 @@ export async function POST(request: Request) {
       authError = phoneLogin.error
     } else {
       return NextResponse.json(
-        { error: 'User not found' },
-        { status: 404 }
+        { error: 'Invalid credentials' },
+        { status: 401 }
       )
     }
 
@@ -92,15 +101,15 @@ export async function POST(request: Request) {
       // Keep logout local to this request/session so other active sessions
       // (for the same user in other tabs/devices) are not revoked.
       await supabase.auth.signOut({ scope: 'local' })
-      return NextResponse.json({ error: 'User profile not found' }, { status: 404 })
+      return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
     }
 
     if (existingUser.role !== role) {
       // Role mismatch should not globally revoke other valid sessions.
       await supabase.auth.signOut({ scope: 'local' })
       return NextResponse.json(
-        { error: `This account is registered as a ${existingUser.role}, not a ${role}` },
-        { status: 403 }
+        { error: 'Invalid credentials' },
+        { status: 401 }
       )
     }
 

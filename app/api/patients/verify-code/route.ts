@@ -1,7 +1,8 @@
 import { verifyPatientCode } from '@/lib/data/patients'
-import { requireRole } from '@/lib/auth/session'
+import { requireApiRole, toApiErrorResponse } from '@/lib/auth/session'
 import { NextResponse } from 'next/server'
 import { validateEgyptianPhone } from '@/lib/utils/phone-validation'
+import { enforceRateLimit } from '@/lib/security/rate-limit'
 
 /**
  * POST /api/patients/verify-code
@@ -13,7 +14,15 @@ import { validateEgyptianPhone } from '@/lib/utils/phone-validation'
  */
 export async function POST(request: Request) {
   try {
-    await requireRole(['doctor', 'frontdesk'])
+    const rate = await enforceRateLimit(request, 'patient-verify-code', 12, 60_000)
+    if (!rate.allowed) {
+      return NextResponse.json(
+        { valid: false, error: 'Too many attempts. Please try again later.' },
+        { status: 429, headers: { 'Retry-After': String(rate.retryAfterSeconds) } }
+      )
+    }
+
+    await requireApiRole(['doctor', 'frontdesk'])
     
     const { phone, code } = await request.json()
     
@@ -44,10 +53,8 @@ export async function POST(request: Request) {
     if (!result.valid) {
       return NextResponse.json({
         valid: false,
-        error: result.message,
-        errorAr: result.message === 'Invalid code' 
-          ? 'الكود غير صحيح' 
-          : 'المريض غير موجود'
+        error: 'Verification failed',
+        errorAr: 'فشل التحقق'
       })
     }
     
@@ -61,9 +68,7 @@ export async function POST(request: Request) {
     
   } catch (error: any) {
     console.error('Verify code error:', error)
-    return NextResponse.json(
-      { valid: false, error: error.message || 'Verification failed' },
-      { status: 500 }
-    )
+    const response = toApiErrorResponse(error, 'Verification failed')
+    return response
   }
 }

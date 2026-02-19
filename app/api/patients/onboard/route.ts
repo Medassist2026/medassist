@@ -1,7 +1,10 @@
-import { onboardPatient, checkPhoneExists, verifyPatientCode } from '@/lib/data/patients'
-import { requireRole } from '@/lib/auth/session'
+import { onboardPatient } from '@/lib/data/patients'
+import { requireApiRole, toApiErrorResponse } from '@/lib/auth/session'
+import { createClient } from '@/lib/supabase/server'
+import { ensureDoctorInFrontdeskClinic } from '@/lib/data/frontdesk-scope'
 import { NextResponse } from 'next/server'
 import { validateEgyptianPhone } from '@/lib/utils/phone-validation'
+import { enforceRateLimit } from '@/lib/security/rate-limit'
 
 /**
  * POST /api/patients/onboard
@@ -11,8 +14,16 @@ import { validateEgyptianPhone } from '@/lib/utils/phone-validation'
  */
 export async function POST(request: Request) {
   try {
+    const rate = await enforceRateLimit(request, 'patient-onboard', 20, 60_000)
+    if (!rate.allowed) {
+      return NextResponse.json(
+        { error: 'Too many onboarding attempts. Please try again later.' },
+        { status: 429, headers: { 'Retry-After': String(rate.retryAfterSeconds) } }
+      )
+    }
+
     // Verify doctor or front desk
-    const user = await requireRole(['doctor', 'frontdesk'])
+    const user = await requireApiRole(['doctor', 'frontdesk'])
     
     const body = await request.json()
     const { 
@@ -36,6 +47,21 @@ export async function POST(request: Request) {
         { status: 400 }
       )
     }
+
+    if (user.role === 'frontdesk') {
+      const supabase = await createClient()
+      const doctorInScope = await ensureDoctorInFrontdeskClinic(
+        supabase as any,
+        user.id,
+        assignedDoctorId
+      )
+      if (!doctorInScope) {
+        return NextResponse.json(
+          { error: 'Doctor is outside your clinic scope' },
+          { status: 403 }
+        )
+      }
+    }
     
     // ============================================
     // GHOST MODE - Early exit
@@ -54,7 +80,9 @@ export async function POST(request: Request) {
         success: true,
         isGhostMode: true,
         anonymousNumber: result.anonymousNumber,
-        message: result.message
+        message: result.message,
+        access_level: result.accessLevel || 'ghost',
+        consent_state: result.consentState || 'revoked'
       })
     }
     
@@ -90,6 +118,13 @@ export async function POST(request: Request) {
         { status: 400 }
       )
     }
+    const parsedAge = Number(age)
+    if (!Number.isFinite(parsedAge)) {
+      return NextResponse.json(
+        { error: 'Age must be numeric', errorAr: 'السن يجب أن يكون رقمًا' },
+        { status: 400 }
+      )
+    }
     
     if (!sex || !['Male', 'Female', 'Other'].includes(sex)) {
       return NextResponse.json(
@@ -112,12 +147,24 @@ export async function POST(request: Request) {
     const result = await onboardPatient(assignedDoctorId, {
       phone,
       fullName: fullName.trim(),
-      age: parseInt(age),
+      age: parsedAge,
       sex,
       isDependent: isDependent || false,
       parentPhone,
       patientCode: patientCode?.trim()
     })
+
+    if (!result.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: result.message,
+          access_level: result.accessLevel || 'walk_in_limited',
+          consent_state: result.consentState || 'pending'
+        },
+        { status: 400 }
+      )
+    }
     
     // ============================================
     // RESPONSE
@@ -130,14 +177,13 @@ export async function POST(request: Request) {
       isExisting: result.isExisting,
       isGhostMode: false,
       message: result.message,
-      carrier: phoneValidation.carrier
+      carrier: phoneValidation.carrier,
+      access_level: result.accessLevel || result.relationship?.access_level || 'walk_in_limited',
+      consent_state: result.consentState || result.relationship?.consent_state || 'pending'
     }, { status: result.isExisting ? 200 : 201 })
     
   } catch (error: any) {
     console.error('Patient onboard error:', error)
-    return NextResponse.json(
-      { error: error.message || 'Failed to onboard patient' },
-      { status: 500 }
-    )
+    return toApiErrorResponse(error, 'Failed to onboard patient')
   }
 }
