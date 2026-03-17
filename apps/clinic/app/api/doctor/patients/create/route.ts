@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
 import { createWalkInPatient } from '@shared/lib/data/patients'
 import { createAdminClient } from '@shared/lib/supabase/admin'

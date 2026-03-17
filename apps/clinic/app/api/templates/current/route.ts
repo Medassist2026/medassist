@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
 import { getDoctorProfile } from '@shared/lib/data/users'
 import { getDefaultTemplate } from '@shared/lib/data/templates'

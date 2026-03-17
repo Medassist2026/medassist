@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { getLabTestsCatalog } from '@shared/lib/data/clinical'
 import { NextResponse } from 'next/server'
 

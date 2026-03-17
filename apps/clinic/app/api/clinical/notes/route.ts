@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
 import { createClinicalNote, createMedicationReminders } from '@shared/lib/data/clinical-notes'
 import { getActiveClinicIdFromCookies } from '@shared/lib/data/clinic-context'

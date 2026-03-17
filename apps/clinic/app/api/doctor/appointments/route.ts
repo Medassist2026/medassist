@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@shared/lib/supabase/server'
 import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'

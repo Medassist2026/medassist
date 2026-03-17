@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { getTodayQueue, getQueueByDateRange } from '@shared/lib/data/frontdesk'
 import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
 import { getClinicContext } from '@shared/lib/data/clinic-context'

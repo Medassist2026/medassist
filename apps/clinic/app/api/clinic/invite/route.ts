@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { NextRequest, NextResponse } from 'next/server'
 import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
 import { getClinicContext } from '@shared/lib/data/clinic-context'

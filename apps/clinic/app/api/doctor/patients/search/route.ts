@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
 import { searchMyPatients } from '@shared/lib/data/patients'
 import { NextResponse } from 'next/server'

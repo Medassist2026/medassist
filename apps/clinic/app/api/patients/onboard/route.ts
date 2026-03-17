@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { onboardPatient } from '@shared/lib/data/patients'
 import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
 import { createClient } from '@shared/lib/supabase/server'

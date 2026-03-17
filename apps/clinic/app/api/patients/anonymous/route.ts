@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { getAnonymousVisitCount, getOptOutStats } from '@shared/lib/data/patients'
 import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
 import { NextResponse } from 'next/server'

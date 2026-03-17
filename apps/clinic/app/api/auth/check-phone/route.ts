@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@shared/lib/supabase/admin'
 import { enforceRateLimit } from '@shared/lib/security/rate-limit'

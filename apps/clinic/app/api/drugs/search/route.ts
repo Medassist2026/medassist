@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { searchEgyptianDrugs, getDrugsByCategory, type EgyptianDrug } from '@shared/lib/data/egyptian-drugs'
 import { NextResponse } from 'next/server'
 

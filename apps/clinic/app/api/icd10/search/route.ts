@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { searchICD10 } from '@shared/lib/data/templates'
 import { NextResponse } from 'next/server'
 

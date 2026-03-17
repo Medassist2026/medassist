@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { createDoctorAccount, createPatientAccount, createFrontDeskAccount } from '@shared/lib/data/users'
 import { createAdminClient } from '@shared/lib/supabase/admin'
 import { NextResponse } from 'next/server'

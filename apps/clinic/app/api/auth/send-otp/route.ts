@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { NextResponse } from 'next/server'
 import { createOTP } from '@shared/lib/auth/otp'
 import { sendSMS } from '@shared/lib/sms/twilio-client'

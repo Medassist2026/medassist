@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { checkDrugInteractions, checkAllInteractions } from '@shared/lib/data/drug-interactions'
 import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
 import { NextResponse } from 'next/server'

@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
 import { validateDoctorClinicAccess } from '@shared/lib/data/clinic-context'
 import { cookies } from 'next/headers'

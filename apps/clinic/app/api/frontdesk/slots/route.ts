@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { getAvailableSlots } from '@shared/lib/data/frontdesk'
 import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
 import { createClient } from '@shared/lib/supabase/server'

@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { getMyPatients, searchMyPatients } from '@shared/lib/data/patients'
 import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
 import { getUserClinicId } from '@shared/lib/data/frontdesk-scope'

@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { requireApiAuth, toApiErrorResponse } from '@shared/lib/auth/session'
 import { createAdminClient } from '@shared/lib/supabase/admin'
 import { NextResponse } from 'next/server'

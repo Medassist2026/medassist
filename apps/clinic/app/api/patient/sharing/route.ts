@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { NextResponse } from 'next/server'
 import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
 import { getPatientSharingStatus, revokeVisibility } from '@shared/lib/data/visibility'

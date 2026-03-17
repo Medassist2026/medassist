@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
 import { getLabResults, getPatientLabHistory, LAB_TEST_CATALOG } from '@shared/lib/data/lab-results'
 import { createClient } from '@shared/lib/supabase/server'
