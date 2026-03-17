@@ -1,0 +1,124 @@
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&family=Inter:wght@300;400;500;600;700;800&family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 210 20% 98%;
+    --foreground: 220 20% 10%;
+    --card: 0 0% 100%;
+    --card-foreground: 220 20% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 20% 10%;
+    --primary: 150 100% 33%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 215 16% 47%;
+    --secondary-foreground: 220 20% 10%;
+    --accent: 160 84% 39%;
+    --accent-foreground: 0 0% 100%;
+    --muted: 210 20% 96%;
+    --muted-foreground: 215 16% 47%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 150 100% 33%;
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    --background: 220 20% 6%;
+    --foreground: 210 20% 96%;
+    --card: 220 20% 8%;
+    --card-foreground: 210 20% 96%;
+    --popover: 220 20% 8%;
+    --popover-foreground: 210 20% 96%;
+    --primary: 150 80% 45%;
+    --primary-foreground: 220 20% 6%;
+    --secondary: 215 20% 20%;
+    --secondary-foreground: 210 20% 96%;
+    --muted: 215 20% 18%;
+    --muted-foreground: 215 16% 65%;
+    --accent: 160 60% 30%;
+    --accent-foreground: 210 20% 96%;
+    --destructive: 0 63% 31%;
+    --destructive-foreground: 210 20% 96%;
+    --border: 215 20% 18%;
+    --input: 215 20% 18%;
+    --ring: 150 80% 45%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html[dir="rtl"] {
+    direction: rtl;
+    text-align: right;
+  }
+
+  html[dir="ltr"] {
+    direction: ltr;
+    text-align: left;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Cairo', 'Inter', 'Noto Sans Arabic', system-ui, sans-serif;
+  }
+
+  /* RTL-specific adjustments */
+  [dir="rtl"] {
+    direction: rtl;
+  }
+
+  [dir="rtl"] input,
+  [dir="rtl"] textarea,
+  [dir="rtl"] select {
+    direction: rtl;
+    text-align: right;
+  }
+}
+
+/* Performance optimization for clinical forms */
+@layer utilities {
+  .will-change-transform {
+    will-change: transform;
+  }
+
+  .gpu-accelerate {
+    transform: translateZ(0);
+  }
+}
+
+/* Font utility classes */
+.font-cairo {
+  font-family: 'Cairo', 'Noto Sans Arabic', sans-serif;
+}
+
+.font-inter {
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+/* Animations */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.15s ease-out;
+}
+
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-slide-up {
+  animation: slide-up 0.4s ease-out;
+}

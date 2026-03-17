@@ -1,34 +1,52 @@
-# dependencies
-/node_modules
-/.pnp
+# Dependencies
+node_modules/
+.pnp
 .pnp.js
 
-# testing
-/coverage
+# Build outputs
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
 
-# next.js
-/.next/
-/out/
+# Environment & secrets
+.env
+.env.local
+.env.*.local
 
-# production
-/build
-
-# misc
+# IDE & OS
 .DS_Store
 *.pem
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
 
-# debug
+# Debug logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# local env files
-.env*.local
-.env
+# Testing
+coverage/
 
-# vercel
+# Vercel
 .vercel
 
-# typescript
-*.tsbuildinfo
+# Capacitor (native builds)
+android/
+ios/
+
+# Claude Code worktrees
+.claude/worktrees/
+
+# TypeScript
 next-env.d.ts
+
+# Misc
+cookies.txt
+
+# Deliverables / reports
+*.pdf

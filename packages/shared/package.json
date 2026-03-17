@@ -1,0 +1,50 @@
+{
+  "name": "@medassist/shared",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./index.ts",
+  "types": "./index.ts",
+  "exports": {
+    "./lib/*": "./lib/*",
+    "./components/*": "./components/*",
+    "./styles/*": "./styles/*",
+    "./types/*": "./types/*"
+  },
+  "dependencies": {
+    "@radix-ui/react-accordion": "^1.2.0",
+    "@radix-ui/react-alert-dialog": "^1.1.1",
+    "@radix-ui/react-avatar": "^1.1.0",
+    "@radix-ui/react-checkbox": "^1.1.1",
+    "@radix-ui/react-dialog": "^1.1.1",
+    "@radix-ui/react-dropdown-menu": "^2.1.1",
+    "@radix-ui/react-label": "^2.1.0",
+    "@radix-ui/react-popover": "^1.1.1",
+    "@radix-ui/react-scroll-area": "^1.1.0",
+    "@radix-ui/react-select": "^2.1.1",
+    "@radix-ui/react-separator": "^1.1.0",
+    "@radix-ui/react-slot": "^1.1.0",
+    "@radix-ui/react-tabs": "^1.1.0",
+    "@radix-ui/react-toast": "^1.2.1",
+    "@supabase/ssr": "^0.8.0",
+    "@supabase/supabase-js": "^2.95.3",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.1.0",
+    "cmdk": "^0.2.1",
+    "date-fns": "^3.3.1",
+    "framer-motion": "^11.0.3",
+    "fuse.js": "^7.0.0",
+    "lucide-react": "^0.344.0",
+    "nanoid": "^5.0.5",
+    "tailwind-merge": "^2.2.1",
+    "tailwindcss-animate": "^1.0.7",
+    "zustand": "^4.5.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "typescript": "^5",
+    "tailwindcss": "^3.4.1"
+  }
+}

@@ -2,11 +2,7 @@
   "compilerOptions": {
     "target": "es2017",
     "downlevelIteration": true,
-    "lib": [
-      "dom",
-      "dom.iterable",
-      "esnext"
-    ],
+    "lib": ["dom", "dom.iterable", "esnext"],
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true,
@@ -18,24 +14,11 @@
     "isolatedModules": true,
     "jsx": "preserve",
     "incremental": true,
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ],
     "paths": {
-      "@/*": [
-        "./*"
-      ]
+      "@shared/*": ["./packages/shared/*"],
+      "@ui-clinic/*": ["./packages/ui-clinic/*"]
     }
   },
-  "include": [
-    "next-env.d.ts",
-    "**/*.ts",
-    "**/*.tsx",
-    ".next/types/**/*.ts"
-  ],
-  "exclude": [
-    "node_modules"
-  ]
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": ["node_modules", "apps/*/node_modules", ".next", "out"]
 }

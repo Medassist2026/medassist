@@ -2,9 +2,17 @@
   "name": "medassist",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "dev": "next dev",
+    "dev:clinic": "npm run dev -w @medassist/clinic",
+    "dev:patient": "npm run dev -w @medassist/patient",
     "build": "next build",
+    "build:clinic": "npm run build -w @medassist/clinic",
+    "build:patient": "npm run build -w @medassist/patient",
     "start": "next start",
     "lint": "next lint",
     "type-check": "tsc --noEmit"

@@ -1,0 +1,379 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { ChevronRight, Plus, Building2, Users, Clock, Check, X } from 'lucide-react'
+
+// ============================================================================
+// TYPES
+// ============================================================================
+
+interface ClinicData {
+  id: string
+  name: string
+  uniqueId: string
+  role: string
+  doctorCount?: number
+  staffCount?: number
+  isActive?: boolean
+}
+
+// ============================================================================
+// ADD CLINIC MODAL
+// ============================================================================
+
+function AddClinicModal({
+  isOpen,
+  onClose,
+  onCreated,
+}: {
+  isOpen: boolean
+  onClose: () => void
+  onCreated: (clinic: ClinicData) => void
+}) {
+  const [name, setName] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [error, setError] = useState('')
+
+  const handleCreate = async () => {
+    if (!name.trim() || name.trim().length < 2) {
+      setError('يرجى إدخال اسم العيادة (حرفين على الأقل)')
+      return
+    }
+
+    setCreating(true)
+    setError('')
+
+    try {
+      const res = await fetch('/api/clinic/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim() }),
+      })
+
+      const data = await res.json()
+
+      if (!res.ok) {
+        setError(data.error || 'فشل في إنشاء العيادة')
+        return
+      }
+
+      onCreated({
+        id: data.clinicId,
+        name: name.trim(),
+        uniqueId: data.clinicUniqueId,
+        role: 'owner',
+        doctorCount: 1,
+        staffCount: 0,
+        isActive: false,
+      })
+
+      setName('')
+      onClose()
+    } catch {
+      setError('حدث خطأ. حاول مرة أخرى')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  if (!isOpen) return null
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div className="fixed inset-0 bg-black/40 z-50" onClick={onClose} />
+
+      {/* Modal */}
+      <div className="fixed inset-x-4 top-1/2 -translate-y-1/2 z-50 max-w-sm mx-auto">
+        <div className="bg-white rounded-[16px] shadow-xl overflow-hidden" dir="rtl">
+          {/* Header */}
+          <div className="flex items-center justify-between px-5 pt-5 pb-3">
+            <h2 className="font-cairo text-[16px] font-bold text-[#030712]">
+              إضافة عيادة
+            </h2>
+            <button onClick={onClose} className="w-8 h-8 rounded-full hover:bg-[#F3F4F6] flex items-center justify-center">
+              <X className="w-5 h-5 text-[#6B7280]" />
+            </button>
+          </div>
+
+          {/* Body */}
+          <div className="px-5 pb-5">
+            <label className="font-cairo text-[13px] font-medium text-[#4B5563] block mb-2">
+              اسم العيادة *
+            </label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => { setName(e.target.value); setError('') }}
+              placeholder="مثال: عيادة المعادي الخاصة"
+              className="w-full h-[44px] px-4 rounded-[10px] border-[0.8px] border-[#E5E7EB] font-cairo text-[14px] text-[#030712] placeholder:text-[#9CA3AF] focus:outline-none focus:border-[#16A34A] focus:ring-1 focus:ring-[#16A34A] text-right"
+              autoFocus
+            />
+
+            {error && (
+              <p className="font-cairo text-[12px] text-[#DC2626] mt-2">{error}</p>
+            )}
+
+            {/* Buttons */}
+            <div className="flex gap-3 mt-5">
+              <button
+                onClick={handleCreate}
+                disabled={creating || !name.trim()}
+                className="flex-1 h-[44px] bg-[#16A34A] hover:bg-[#15803D] disabled:opacity-50 disabled:cursor-not-allowed text-white font-cairo text-[14px] font-semibold rounded-[10px] transition-colors flex items-center justify-center gap-2"
+              >
+                {creating ? (
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <Check className="w-4 h-4" />
+                    إنشاء
+                  </>
+                )}
+              </button>
+              <button
+                onClick={onClose}
+                className="flex-1 h-[44px] bg-[#F3F4F6] hover:bg-[#E5E7EB] text-[#4B5563] font-cairo text-[14px] font-medium rounded-[10px] transition-colors"
+              >
+                إلغاء
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  )
+}
+
+// ============================================================================
+// CLINIC CARD COMPONENT
+// ============================================================================
+
+function ClinicCard({
+  clinic,
+  onSwitch,
+}: {
+  clinic: ClinicData
+  onSwitch: (clinicId: string) => void
+}) {
+  return (
+    <div
+      className={`bg-white rounded-[12px] border-[0.8px] p-4 transition-colors ${
+        clinic.isActive ? 'border-[#16A34A] bg-[#FAFFF9]' : 'border-[#E5E7EB]'
+      }`}
+    >
+      <div className="flex items-start gap-3">
+        {/* Clinic icon */}
+        <div className={`w-11 h-11 rounded-[10px] flex items-center justify-center flex-shrink-0 ${
+          clinic.isActive ? 'bg-[#DCFCE7]' : 'bg-[#F3F4F6]'
+        }`}>
+          <Building2 className={`w-5 h-5 ${clinic.isActive ? 'text-[#16A34A]' : 'text-[#6B7280]'}`} />
+        </div>
+
+        {/* Info */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <h3 className="font-cairo text-[15px] font-semibold text-[#030712] truncate">
+              {clinic.name}
+            </h3>
+            {clinic.isActive && (
+              <span className="bg-[#DCFCE7] text-[#16A34A] font-cairo text-[11px] font-bold px-2 py-0.5 rounded-full flex-shrink-0">
+                نشطة
+              </span>
+            )}
+          </div>
+
+          {/* Role */}
+          <p className="font-cairo text-[12px] text-[#9CA3AF] mt-0.5">
+            {clinic.role === 'owner' ? 'مالك العيادة' : 'طبيب'}
+          </p>
+
+          {/* Stats row */}
+          <div className="flex items-center gap-4 mt-2">
+            {clinic.doctorCount !== undefined && (
+              <div className="flex items-center gap-1">
+                <Users className="w-3.5 h-3.5 text-[#9CA3AF]" />
+                <span className="font-cairo text-[12px] text-[#6B7280]">
+                  {clinic.doctorCount} طبيب
+                </span>
+              </div>
+            )}
+            {clinic.staffCount !== undefined && clinic.staffCount > 0 && (
+              <div className="flex items-center gap-1">
+                <Clock className="w-3.5 h-3.5 text-[#9CA3AF]" />
+                <span className="font-cairo text-[12px] text-[#6B7280]">
+                  {clinic.staffCount} مساعد
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Switch button */}
+        {!clinic.isActive && (
+          <button
+            onClick={() => onSwitch(clinic.id)}
+            className="font-cairo text-[12px] font-semibold text-[#16A34A] bg-[#F0FDF4] hover:bg-[#DCFCE7] px-3 py-1.5 rounded-[8px] transition-colors flex-shrink-0"
+          >
+            تبديل
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ============================================================================
+// MAIN PAGE
+// ============================================================================
+
+export default function ClinicsPage() {
+  const router = useRouter()
+  const [clinics, setClinics] = useState<ClinicData[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [switching, setSwitching] = useState(false)
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const res = await fetch('/api/clinic')
+        if (res.ok) {
+          const data = await res.json()
+          if (data.success && data.allClinics) {
+            // Mark the active clinic
+            const enriched: ClinicData[] = data.allClinics.map((c: any) => ({
+              id: c.id,
+              name: c.name,
+              uniqueId: c.uniqueId,
+              role: c.role,
+              isActive: c.id === data.clinic?.id,
+              doctorCount: c.id === data.clinic?.id ? data.doctorCount : undefined,
+              staffCount: c.id === data.clinic?.id ? data.staffCount : undefined,
+            }))
+            setClinics(enriched)
+          }
+        }
+      } catch {
+        // graceful fail
+      }
+      setLoading(false)
+    }
+    load()
+  }, [])
+
+  const handleSwitch = async (clinicId: string) => {
+    setSwitching(true)
+    try {
+      const res = await fetch('/api/clinic/switch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clinicId }),
+      })
+
+      if (res.ok) {
+        // Update UI
+        setClinics(prev => prev.map(c => ({ ...c, isActive: c.id === clinicId })))
+        // Reload after a moment to get fresh data
+        setTimeout(() => {
+          router.push('/doctor/dashboard')
+          router.refresh()
+        }, 300)
+      }
+    } catch {
+      // ignore
+    }
+    setSwitching(false)
+  }
+
+  const handleClinicCreated = (newClinic: ClinicData) => {
+    setClinics(prev => [...prev, newClinic])
+  }
+
+  return (
+    <div className="min-h-screen bg-[#F9FAFB]" dir="rtl">
+      <div className="max-w-md mx-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 pt-4 pb-3">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => router.back()}
+              className="w-[36px] h-[36px] rounded-full border-[0.8px] border-[#E5E7EB] bg-white flex items-center justify-center"
+            >
+              <ChevronRight className="w-[20px] h-[20px] text-[#030712]" />
+            </button>
+            <h1 className="font-cairo text-[18px] leading-[22px] font-semibold text-[#030712]">
+              العيادات
+            </h1>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="px-4 pb-24">
+          {loading ? (
+            <div className="text-center py-16">
+              <div className="w-10 h-10 border-2 border-[#16A34A] border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+              <p className="font-cairo text-[14px] text-[#6B7280]">جاري التحميل...</p>
+            </div>
+          ) : clinics.length === 0 ? (
+            <div className="text-center py-16">
+              <Building2 className="w-12 h-12 text-[#D1D5DB] mx-auto mb-4" />
+              <p className="font-cairo text-[16px] font-semibold text-[#030712] mb-1">
+                لا توجد عيادات
+              </p>
+              <p className="font-cairo text-[14px] text-[#6B7280] mb-6">
+                أنشئ عيادتك الأولى أو انضم لعيادة موجودة
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {clinics.map((clinic) => (
+                <ClinicCard
+                  key={clinic.id}
+                  clinic={clinic}
+                  onSwitch={handleSwitch}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Action Buttons */}
+          <div className="mt-6 space-y-3">
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="w-full h-[48px] bg-[#16A34A] hover:bg-[#15803D] text-white font-cairo text-[14px] font-semibold rounded-[12px] transition-colors flex items-center justify-center gap-2"
+            >
+              <Plus className="w-5 h-5" />
+              إنشاء عيادة جديدة
+            </button>
+
+            <button
+              onClick={() => router.push('/setup?mode=join')}
+              className="w-full h-[48px] bg-white hover:bg-[#F9FAFB] border-[0.8px] border-[#E5E7EB] text-[#4B5563] font-cairo text-[14px] font-medium rounded-[12px] transition-colors flex items-center justify-center gap-2"
+            >
+              <Building2 className="w-5 h-5 text-[#9CA3AF]" />
+              انضم لعيادة بكود الدعوة
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Add Clinic Modal */}
+      <AddClinicModal
+        isOpen={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        onCreated={handleClinicCreated}
+      />
+
+      {/* Switching overlay */}
+      {switching && (
+        <div className="fixed inset-0 bg-white/80 z-50 flex items-center justify-center">
+          <div className="text-center">
+            <div className="w-10 h-10 border-2 border-[#16A34A] border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+            <p className="font-cairo text-[14px] font-medium text-[#4B5563]">جاري تبديل العيادة...</p>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
