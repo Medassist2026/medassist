@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { requireRole } from '@shared/lib/auth/session'
 import { getDoctorProfile } from '@shared/lib/data/users'
 import { getTodayAppointments } from '@shared/lib/data/appointments'

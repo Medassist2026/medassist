@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { redirect } from 'next/navigation'
 import { requireRole } from '@shared/lib/auth/session'
 import { getDoctorProfile } from '@shared/lib/data/users'

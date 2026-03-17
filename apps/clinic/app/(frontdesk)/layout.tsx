@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { redirect } from 'next/navigation'
 import { requireRole, getAssignedDoctors } from '@shared/lib/auth/session'
 import { getUserClinicId } from '@shared/lib/data/frontdesk-scope'
