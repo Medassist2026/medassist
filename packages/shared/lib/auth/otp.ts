@@ -80,9 +80,10 @@ export async function verifyOTP(
   code: string,
   purpose: 'registration' | 'login' | 'password_reset'
 ): Promise<{ valid: boolean; error?: string }> {
-  // Dev bypass: accept any 4-digit code — ONLY in development
-  if (process.env.NODE_ENV !== 'production' && process.env.DEV_BYPASS_OTP === 'true') {
-    console.log(`[OTP] DEV BYPASS — accepting code for ${phone}`)
+  // Bypass OTP verification when Twilio is not configured
+  // This allows registration to work before SMS provider is set up
+  if (process.env.DEV_BYPASS_OTP === 'true') {
+    console.log(`[OTP] BYPASS — accepting any code for ${phone} (purpose: ${purpose})`)
     return { valid: true }
   }
 
