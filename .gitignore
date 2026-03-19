@@ -17,6 +17,7 @@ dist/
 **/public/workbox-*.js.map
 **/public/worker-*.js
 **/public/worker-*.js.map
+**/public/fallback-*.js
 
 # Environment & secrets
 .env
