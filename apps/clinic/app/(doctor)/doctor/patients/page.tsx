@@ -526,7 +526,7 @@ export default function MyPatientsPage() {
   }
 
   return (
-    <div className="space-y-6 max-w-md mx-auto px-4 py-4" dir="rtl">
+    <div className="space-y-6 max-w-md mx-auto px-4 py-4 lg:max-w-none lg:mx-0 lg:px-0 lg:py-6" dir="rtl">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

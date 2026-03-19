@@ -491,7 +491,7 @@ export default function MessagesPage() {
 
   return (
     <div className="min-h-screen bg-[#F9FAFB]" dir="rtl">
-      <div className="max-w-md mx-auto bg-white min-h-screen">
+      <div className="max-w-md mx-auto bg-white min-h-screen lg:max-w-none lg:mx-0 lg:rounded-xl lg:border lg:border-[#E5E7EB] lg:min-h-[calc(100vh-5rem)]">
         {selectedPatient ? (
           /* Chat View */
           <>

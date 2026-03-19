@@ -2,8 +2,10 @@
 
 import { useSearchParams } from 'next/navigation'
 import { useEffect, useState, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import PrescriptionPrint from '@shared/components/clinical/PrescriptionPrint'
 import { ar } from '@shared/lib/i18n/ar'
+import { FileText, ArrowRight } from 'lucide-react'
 
 interface PrescriptionData {
   clinicName?: string
@@ -29,6 +31,7 @@ interface PrescriptionData {
 
 export default function PrescriptionPage() {
   const searchParams = useSearchParams()
+  const router = useRouter()
   const noteId = searchParams.get('noteId')
   const mode = searchParams.get('mode') // 'print-only' or null
 
@@ -145,6 +148,34 @@ export default function PrescriptionPage() {
   }
 
   if (error) {
+    // No session context: show friendly guidance instead of a red error
+    const isNoSession = error === 'لا يوجد معرف للجلسة'
+    if (isNoSession) {
+      return (
+        <div className="flex items-center justify-center min-h-[60vh] px-4" dir="rtl">
+          <div className="text-center max-w-sm w-full">
+            <div className="w-16 h-16 rounded-2xl bg-[#F0FDF4] flex items-center justify-center mx-auto mb-4">
+              <FileText className="w-8 h-8 text-[#16A34A]" strokeWidth={1.5} />
+            </div>
+            <h2 className="font-cairo text-[18px] font-bold text-[#030712] mb-2">
+              الوصفات الطبية
+            </h2>
+            <p className="font-cairo text-[14px] text-[#6B7280] mb-6 leading-relaxed">
+              يتم إنشاء الوصفات أثناء جلسة الكشف. ابدأ جلسة مع مريض لإصدار وصفة طبية.
+            </p>
+            <button
+              onClick={() => router.push('/doctor/dashboard')}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#16A34A] text-white rounded-xl text-[14px] font-cairo font-medium hover:bg-[#15803D] transition-colors"
+            >
+              <ArrowRight className="w-4 h-4" />
+              الذهاب للوحة التحكم
+            </button>
+          </div>
+        </div>
+      )
+    }
+
+    // Actual errors (bad noteId, network, etc.)
     return (
       <div className="max-w-md mx-auto p-6" dir="rtl">
         <div className="bg-red-50 border border-red-200 rounded-2xl p-6 text-center">

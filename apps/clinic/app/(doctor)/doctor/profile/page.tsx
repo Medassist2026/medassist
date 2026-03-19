@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { ChevronRight, ChevronDown, User, Stethoscope, Phone, Mail, Building2, Hash, Users, FileText, Banknote } from 'lucide-react'
 
@@ -34,12 +34,28 @@ interface DoctorStats {
 
 // Specialty Arabic labels
 const SPECIALTY_LABELS: Record<string, string> = {
+  'general': 'طب عام',
   'general-practitioner': 'طب عام',
-  'pediatrics': 'أطفال',
-  'cardiology': 'قلب',
-  'endocrinology': 'غدد صماء',
-  'باطنة': 'باطنة',
+  'general practitioner': 'طب عام',
   'internal-medicine': 'باطنة',
+  'باطنة': 'باطنة',
+  'pediatrics': 'أطفال',
+  'cardiology': 'قلب وأوعية دموية',
+  'obstetrics-gynecology': 'نساء وتوليد',
+  'orthopedics': 'عظام',
+  'dermatology': 'جلدية',
+  'ophthalmology': 'عيون',
+  'ent': 'أنف وأذن وحنجرة',
+  'neurology': 'مخ وأعصاب',
+  'psychiatry': 'نفسية',
+  'urology': 'مسالك بولية',
+  'surgery': 'جراحة عامة',
+  'dentistry': 'أسنان',
+  'radiology': 'أشعة',
+  'laboratory': 'تحاليل',
+  'physiotherapy': 'علاج طبيعي',
+  'nutrition': 'تغذية',
+  'endocrinology': 'غدد صماء',
 }
 
 // ============================================================================
@@ -137,42 +153,45 @@ export default function ProfilePage() {
   const router = useRouter()
   const [data, setData] = useState<DoctorStats | null>(null)
   const [loading, setLoading] = useState(true)
-  // BUG-016 FIX: Track and display errors instead of silent catch
   const [loadError, setLoadError] = useState<string | null>(null)
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const res = await fetch('/api/doctor/stats')
-        if (res.ok) {
-          const json = await res.json()
-          if (json.success) setData(json)
-          else setLoadError('فشل تحميل البيانات')
-        } else {
-          setLoadError('فشل الاتصال بالخادم')
-        }
-      } catch {
-        setLoadError('خطأ في الاتصال. تحقق من الإنترنت')
+  const load = useCallback(async () => {
+    setLoading(true)
+    setLoadError(null)
+    try {
+      const res = await fetch('/api/doctor/stats')
+      if (res.ok) {
+        const json = await res.json()
+        if (json.success) setData(json)
+        else setLoadError('فشل تحميل البيانات')
+      } else {
+        setLoadError('فشل الاتصال بالخادم')
       }
-      setLoading(false)
+    } catch {
+      setLoadError('خطأ في الاتصال. تحقق من الإنترنت')
     }
-    load()
+    setLoading(false)
   }, [])
+
+  useEffect(() => {
+    load()
+  }, [load])
 
   const formatNumber = (n: number) => n.toLocaleString('ar-EG')
 
   return (
     <div className="min-h-screen bg-[#F9FAFB]" dir="rtl">
-      <div className="max-w-md mx-auto">
+      {/* Responsive container: mobile = narrow, desktop = full DoctorShell width */}
+      <div className="max-w-md mx-auto lg:max-w-none lg:mx-0">
         {/* Header */}
-        <div className="flex items-center gap-3 px-4 pt-4 pb-3">
+        <div className="flex items-center gap-3 px-4 pt-4 pb-3 lg:px-0 lg:pt-6 lg:pb-4">
           <button
             onClick={() => router.back()}
-            className="w-[36px] h-[36px] rounded-full border-[0.8px] border-[#E5E7EB] bg-white flex items-center justify-center"
+            className="w-[36px] h-[36px] rounded-full border-[0.8px] border-[#E5E7EB] bg-white flex items-center justify-center lg:hidden"
           >
             <ChevronRight className="w-[20px] h-[20px] text-[#030712]" />
           </button>
-          <h1 className="font-cairo text-[18px] leading-[22px] font-semibold text-[#030712]">
+          <h1 className="font-cairo text-[18px] lg:text-[22px] leading-[22px] font-semibold text-[#030712]">
             الملف الشخصي
           </h1>
         </div>
@@ -182,12 +201,24 @@ export default function ProfilePage() {
             <div className="w-10 h-10 border-2 border-[#16A34A] border-t-transparent rounded-full animate-spin mx-auto mb-3" />
             <p className="font-cairo text-[14px] text-[#6B7280]">جاري التحميل...</p>
           </div>
-        ) : !data ? (
-          <div className="text-center py-16">
-            <p className="font-cairo text-[14px] text-[#6B7280]">تعذر تحميل البيانات</p>
+        ) : loadError ? (
+          <div className="flex flex-col items-center justify-center py-16 gap-4 px-4">
+            <div className="w-12 h-12 rounded-full bg-red-50 flex items-center justify-center">
+              <User className="w-6 h-6 text-red-400" />
+            </div>
+            <p className="font-cairo text-[14px] text-[#6B7280] text-center">{loadError}</p>
+            <button
+              onClick={load}
+              className="px-5 py-2 bg-[#16A34A] text-white rounded-xl font-cairo text-[14px] font-medium hover:bg-[#15803D] transition-colors"
+            >
+              إعادة المحاولة
+            </button>
           </div>
-        ) : (
-          <div className="px-4 pb-24 space-y-4">
+        ) : !data ? null : (
+          {/* Desktop: two-column grid. Mobile: single column stack */}
+          <div className="px-4 pb-24 lg:px-0 lg:pb-10 lg:grid lg:grid-cols-[1fr_320px] lg:gap-6 lg:items-start">
+            {/* LEFT column on desktop (main info) — on mobile this is just a stack */}
+            <div className="space-y-4">
             {/* Profile Header Card */}
             <div className="bg-white rounded-[16px] border-[0.8px] border-[#E5E7EB] p-5 flex items-center gap-4">
               {/* Avatar */}
@@ -290,44 +321,48 @@ export default function ProfilePage() {
                 <p className="font-cairo text-[13px] text-[#9CA3AF] py-3">لا توجد عيادات</p>
               )}
             </AccordionSection>
+            </div>{/* end left column */}
 
-            {/* Stats Section */}
-            <div>
-              <p className="font-cairo text-[14px] font-semibold text-[#4B5563] mb-3 px-1">
-                ملخص هذا الشهر
-              </p>
-              <div className="flex gap-3">
-                <StatCard
-                  icon={<Users className="w-5 h-5 text-[#16A34A]" />}
-                  value={formatNumber(data.stats.totalPatients)}
-                  label="مريض"
-                  color="bg-[#DCFCE7]"
-                />
-                <StatCard
-                  icon={<FileText className="w-5 h-5 text-[#3B82F6]" />}
-                  value={formatNumber(data.stats.totalSessions)}
-                  label="جلسة مكتملة"
-                  color="bg-[#DBEAFE]"
-                />
-              </div>
-            </div>
-
-            {/* Fee Summary */}
-            {data.stats.totalFees > 0 && (
-              <div className="bg-white rounded-[12px] border-[0.8px] border-[#E5E7EB] p-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-[10px] bg-[#FEF9C3] flex items-center justify-center">
-                    <Banknote className="w-5 h-5 text-[#A16207]" />
-                  </div>
-                  <div>
-                    <p className="font-cairo text-[22px] font-bold text-[#030712]">
-                      {formatNumber(data.stats.totalFees)}
-                    </p>
-                    <p className="font-cairo text-[12px] text-[#6B7280]">إجمالي الإيرادات (ج.م)</p>
-                  </div>
+            {/* RIGHT column on desktop / stacks below on mobile */}
+            <div className="space-y-4 mt-4 lg:mt-0">
+              {/* Stats Section */}
+              <div>
+                <p className="font-cairo text-[14px] font-semibold text-[#4B5563] mb-3 px-1">
+                  ملخص هذا الشهر
+                </p>
+                <div className="flex gap-3">
+                  <StatCard
+                    icon={<Users className="w-5 h-5 text-[#16A34A]" />}
+                    value={formatNumber(data.stats.totalPatients)}
+                    label="مريض"
+                    color="bg-[#DCFCE7]"
+                  />
+                  <StatCard
+                    icon={<FileText className="w-5 h-5 text-[#3B82F6]" />}
+                    value={formatNumber(data.stats.totalSessions)}
+                    label="جلسة مكتملة"
+                    color="bg-[#DBEAFE]"
+                  />
                 </div>
               </div>
-            )}
+
+              {/* Fee Summary */}
+              {data.stats.totalFees > 0 && (
+                <div className="bg-white rounded-[12px] border-[0.8px] border-[#E5E7EB] p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-[10px] bg-[#FEF9C3] flex items-center justify-center">
+                      <Banknote className="w-5 h-5 text-[#A16207]" />
+                    </div>
+                    <div>
+                      <p className="font-cairo text-[22px] font-bold text-[#030712]">
+                        {formatNumber(data.stats.totalFees)}
+                      </p>
+                      <p className="font-cairo text-[12px] text-[#6B7280]">إجمالي الإيرادات (ج.م)</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>{/* end right column */}
           </div>
         )}
       </div>

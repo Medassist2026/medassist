@@ -4,6 +4,35 @@ import { useState, useEffect } from 'react'
 import { ar } from '@shared/lib/i18n/ar'
 import { AssistantManager } from '@ui-clinic/components/doctor/AssistantManager'
 
+const SPECIALTY_AR: Record<string, string> = {
+  'general': 'طب عام',
+  'general-practitioner': 'طب عام',
+  'general practitioner': 'طب عام',
+  'internal-medicine': 'باطنة',
+  'باطنة': 'باطنة',
+  'pediatrics': 'أطفال',
+  'cardiology': 'قلب وأوعية دموية',
+  'obstetrics-gynecology': 'نساء وتوليد',
+  'orthopedics': 'عظام',
+  'dermatology': 'جلدية',
+  'ophthalmology': 'عيون',
+  'ent': 'أنف وأذن وحنجرة',
+  'neurology': 'مخ وأعصاب',
+  'psychiatry': 'نفسية',
+  'urology': 'مسالك بولية',
+  'surgery': 'جراحة عامة',
+  'dentistry': 'أسنان',
+  'radiology': 'أشعة',
+  'laboratory': 'تحاليل',
+  'physiotherapy': 'علاج طبيعي',
+  'nutrition': 'تغذية',
+  'endocrinology': 'غدد صماء',
+}
+function toAr(slug?: string) {
+  if (!slug) return ''
+  return SPECIALTY_AR[slug] ?? SPECIALTY_AR[slug.toLowerCase()] ?? slug
+}
+
 interface ClinicData {
   clinicId: string
   clinicName: string
@@ -73,7 +102,7 @@ export default function ClinicSettingsPage() {
   }
 
   return (
-    <div className="max-w-md mx-auto px-4 py-4 space-y-4" dir="rtl">
+    <div className="max-w-md mx-auto px-4 py-4 space-y-4 lg:max-w-2xl lg:px-0 lg:py-6" dir="rtl">
       {/* Clinic Info Header */}
       <div className="bg-white rounded-2xl border border-gray-100 p-4">
         <h2 className="font-bold text-base text-gray-900 mb-1">{clinic.clinicName}</h2>
@@ -107,7 +136,7 @@ export default function ClinicSettingsPage() {
                     )}
                   </div>
                   {doc.specialty && (
-                    <div className="text-xs text-gray-500">{doc.specialty.replace(/-/g, ' ')}</div>
+                    <div className="text-xs text-gray-500">{toAr(doc.specialty)}</div>
                   )}
                 </div>
               </div>

@@ -36,12 +36,12 @@ export function DoctorShell({
       {/* Desktop Sidebar — visible on lg+ */}
       <DesktopSidebar role="doctor" userName={userName} clinicName={clinicName} />
 
-      {/* Main Content */}
-      {/* Mobile: centered max-w-lg. Desktop: offset by sidebar width */}
-      <main className="pb-24 lg:pb-6 max-w-lg mx-auto lg:max-w-none lg:mr-[260px] lg:ml-0 lg:px-8">
-        <div className="lg:max-w-4xl lg:mx-auto">
-          {children}
-        </div>
+      {/* Main Content
+          Mobile  : full width, centered, max-w-lg, with bottom-nav padding
+          Desktop : offset right by sidebar (260px), horizontal padding, no max-w cap
+                    so each page can define its own width constraints              */}
+      <main className="pb-24 lg:pb-10 max-w-lg mx-auto lg:max-w-none lg:mr-[260px] lg:ml-0 lg:px-10 xl:px-14">
+        {children}
       </main>
 
       {/* Bottom Navigation — mobile only */}
