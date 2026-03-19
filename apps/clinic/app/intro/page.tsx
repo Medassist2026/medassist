@@ -50,7 +50,7 @@ export default function SplashPage() {
   return (
     <div
       dir="rtl"
-      className="min-h-screen bg-white flex flex-col items-center justify-center px-6 relative overflow-hidden"
+      className="min-h-screen bg-white flex flex-col items-center justify-center px-6 relative overflow-hidden max-w-md mx-auto"
     >
       {/* Top spacer */}
       <div className="flex-1 min-h-[120px]" />

@@ -1,0 +1,128 @@
+'use client'
+
+import { usePathname } from 'next/navigation'
+import Link from 'next/link'
+import {
+  LayoutDashboard,
+  Users,
+  Calendar,
+  MessageSquare,
+  FileText,
+  UserCog,
+  Settings,
+  LogOut,
+  UserCheck,
+  Banknote,
+  BarChart3,
+  Stethoscope,
+} from 'lucide-react'
+
+export type SidebarRole = 'doctor' | 'frontdesk'
+
+interface NavItem {
+  label: string
+  href: string
+  icon: React.ElementType
+}
+
+const doctorNav: NavItem[] = [
+  { label: 'لوحة التحكم', href: '/doctor/dashboard', icon: LayoutDashboard },
+  { label: 'المرضى', href: '/doctor/patients', icon: Users },
+  { label: 'المواعيد', href: '/doctor/schedule', icon: Calendar },
+  { label: 'الرسائل', href: '/doctor/messages', icon: MessageSquare },
+  { label: 'الوصفات', href: '/doctor/prescription', icon: FileText },
+  { label: 'الملف الشخصي', href: '/doctor/profile', icon: UserCog },
+  { label: 'إعدادات العيادة', href: '/doctor/clinic-settings', icon: Settings },
+]
+
+const frontdeskNav: NavItem[] = [
+  { label: 'الرئيسية', href: '/frontdesk/dashboard', icon: LayoutDashboard },
+  { label: 'تسجيل الوصول', href: '/frontdesk/patients/register', icon: UserCheck },
+  { label: 'المواعيد', href: '/frontdesk/appointments', icon: Calendar },
+  { label: 'المدفوعات', href: '/frontdesk/payments', icon: Banknote },
+  { label: 'التقارير', href: '/frontdesk/reports', icon: BarChart3 },
+]
+
+interface DesktopSidebarProps {
+  role: SidebarRole
+  userName?: string
+  clinicName?: string
+}
+
+export function DesktopSidebar({ role, userName, clinicName }: DesktopSidebarProps) {
+  const pathname = usePathname()
+  const navItems = role === 'doctor' ? doctorNav : frontdeskNav
+
+  return (
+    <aside
+      dir="rtl"
+      className="hidden lg:flex flex-col fixed right-0 top-0 h-screen w-[260px] bg-white border-l border-[#E5E7EB] z-40"
+    >
+      {/* Logo */}
+      <div className="flex items-center gap-3 px-6 py-5 border-b border-[#E5E7EB]">
+        <div className="w-[36px] h-[36px] bg-[#16A34A] rounded-lg flex items-center justify-center flex-shrink-0">
+          <Stethoscope className="w-[20px] h-[20px] text-white" strokeWidth={1.5} />
+        </div>
+        <div className="flex flex-col min-w-0">
+          <span className="font-inter text-[16px] font-semibold text-[#030712]">MedAssist</span>
+          {clinicName && (
+            <span className="font-cairo text-[12px] text-[#6B7280] truncate">{clinicName}</span>
+          )}
+        </div>
+      </div>
+
+      {/* Navigation */}
+      <nav className="flex-1 overflow-y-auto py-3 px-3">
+        <ul className="space-y-1">
+          {navItems.map((item) => {
+            const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
+            const Icon = item.icon
+            return (
+              <li key={item.href}>
+                <Link
+                  href={item.href}
+                  className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-[14px] font-cairo font-medium ${
+                    isActive
+                      ? 'bg-[#F0FDF4] text-[#16A34A]'
+                      : 'text-[#4B5563] hover:bg-[#F9FAFB] hover:text-[#030712]'
+                  }`}
+                >
+                  <Icon className="w-[20px] h-[20px] flex-shrink-0" strokeWidth={1.8} />
+                  <span>{item.label}</span>
+                </Link>
+              </li>
+            )
+          })}
+        </ul>
+      </nav>
+
+      {/* User info at bottom */}
+      <div className="border-t border-[#E5E7EB] px-4 py-4">
+        {userName && (
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-[36px] h-[36px] rounded-full bg-[#E0F2FE] flex items-center justify-center flex-shrink-0">
+              <span className="font-cairo text-[14px] font-bold text-[#2563EB]">
+                {userName.charAt(0)}
+              </span>
+            </div>
+            <div className="flex flex-col min-w-0">
+              <span className="font-cairo text-[13px] font-semibold text-[#030712] truncate">
+                {userName}
+              </span>
+              <span className="font-cairo text-[11px] text-[#6B7280]">
+                {role === 'doctor' ? 'طبيب' : 'استقبال'}
+              </span>
+            </div>
+          </div>
+        )}
+        <Link
+          href="/login"
+          className="flex items-center gap-2 px-3 py-2 rounded-lg text-[13px] font-cairo text-[#DC2626] hover:bg-red-50 transition-colors"
+        >
+          <LogOut className="w-[16px] h-[16px]" strokeWidth={1.8} />
+          <span>تسجيل الخروج</span>
+        </Link>
+      </div>
+    </aside>
+  )
+}

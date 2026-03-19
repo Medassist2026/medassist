@@ -131,7 +131,7 @@ function ResetPasswordPageInner() {
   // Success state
   if (success) {
     return (
-      <div dir="rtl" className="min-h-screen bg-white flex flex-col items-center justify-center px-6">
+      <div dir="rtl" className="min-h-screen bg-white flex flex-col items-center justify-center px-6 max-w-md mx-auto">
         <motion.div
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -150,7 +150,7 @@ function ResetPasswordPageInner() {
   }
 
   return (
-    <div dir="rtl" className="min-h-screen bg-white flex flex-col">
+    <div dir="rtl" className="min-h-screen bg-white flex flex-col max-w-md mx-auto">
       {/* Back button */}
       <div className="px-4 pt-12 pb-2">
         <button

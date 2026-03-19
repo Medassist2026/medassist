@@ -157,7 +157,7 @@ export default function OnboardingPage() {
   return (
     <div
       dir="rtl"
-      className="min-h-screen bg-white flex flex-col items-center relative overflow-hidden"
+      className="min-h-screen bg-white flex flex-col items-center relative overflow-hidden max-w-md mx-auto"
     >
       {/* Top bar — back arrow (faded) + "تخطي" skip + forward arrow */}
       <div className="w-full flex items-center justify-between px-5 pt-12 pb-4">

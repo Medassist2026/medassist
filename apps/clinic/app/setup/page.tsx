@@ -172,7 +172,7 @@ function SetupPageInner() {
   }
 
   return (
-    <div dir="rtl" className="min-h-screen bg-white flex flex-col">
+    <div dir="rtl" className="min-h-screen bg-white flex flex-col max-w-md mx-auto">
       {/* Logo */}
       <div className="flex flex-col items-center pt-16">
         <div className="w-[32px] h-[32px] bg-[#16A34A] rounded-lg flex items-center justify-center">

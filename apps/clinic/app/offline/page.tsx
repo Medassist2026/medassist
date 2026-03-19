@@ -4,7 +4,7 @@ export default function OfflinePage() {
   return (
     <div
       dir="rtl"
-      className="min-h-screen flex items-center justify-center bg-gradient-to-b from-blue-50 to-white px-4"
+      className="min-h-screen flex items-center justify-center bg-gradient-to-b from-blue-50 to-white px-4 max-w-md mx-auto"
     >
       <div className="text-center max-w-md">
         {/* Offline icon */}

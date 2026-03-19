@@ -149,7 +149,7 @@ export default function AuthPage() {
   return (
     <div
       dir="rtl"
-      className="min-h-screen bg-white flex flex-col"
+      className="min-h-screen bg-white flex flex-col max-w-md mx-auto"
     >
       {/* Back button — Figma: 36x36 circle, border 1.2px #E2EEE6 */}
       <div className="px-4 pt-12 pb-2">

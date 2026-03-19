@@ -3,17 +3,14 @@
 import { useState } from 'react'
 import { BottomNav } from '@shared/components/ui/BottomNav'
 import { SettingsDrawer } from './SettingsDrawer'
+import { DesktopSidebar } from '../shared/DesktopSidebar'
 
 /**
  * DoctorShell — Layout wrapper for doctor pages.
  *
- * Figma design: NO sticky header bar at top.
- * Instead, content starts directly with logo + welcome section.
- * Only the bottom nav is fixed.
- *
- * The old sticky header with profile icon + clinic selector + notification bell
- * is replaced by a swipe-down settings drawer accessible via tapping the
- * profile icon in the dashboard header.
+ * Responsive behavior:
+ * - Mobile: Bottom nav + centered content (max-w-lg)
+ * - Desktop (lg+): Right sidebar (RTL) + expanded content area
  */
 
 interface DoctorShellProps {
@@ -36,15 +33,23 @@ export function DoctorShell({
 
   return (
     <div dir="rtl" className="min-h-screen bg-[#F9FAFB]">
-      {/* Main Content — Figma: padding 48px top, 16px horizontal, 34px bottom + nav space */}
-      <main className="pb-24 max-w-lg mx-auto">
-        {children}
+      {/* Desktop Sidebar — visible on lg+ */}
+      <DesktopSidebar role="doctor" userName={userName} clinicName={clinicName} />
+
+      {/* Main Content */}
+      {/* Mobile: centered max-w-lg. Desktop: offset by sidebar width */}
+      <main className="pb-24 lg:pb-6 max-w-lg mx-auto lg:max-w-none lg:mr-[260px] lg:ml-0 lg:px-8">
+        <div className="lg:max-w-4xl lg:mx-auto">
+          {children}
+        </div>
       </main>
 
-      {/* Bottom Navigation */}
-      <BottomNav />
+      {/* Bottom Navigation — mobile only */}
+      <div className="lg:hidden">
+        <BottomNav />
+      </div>
 
-      {/* Settings Drawer — accessible from profile icon tap in DashboardHeader */}
+      {/* Settings Drawer */}
       <SettingsDrawer
         isOpen={drawerOpen}
         onClose={() => setDrawerOpen(false)}

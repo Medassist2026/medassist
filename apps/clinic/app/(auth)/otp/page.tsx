@@ -173,7 +173,7 @@ function OTPVerificationPageInner() {
   }
 
   return (
-    <div dir="rtl" className="min-h-screen bg-white flex flex-col">
+    <div dir="rtl" className="min-h-screen bg-white flex flex-col max-w-md mx-auto">
       {/* Back button — same as login page */}
       <div className="px-4 pt-12 pb-2">
         <button
