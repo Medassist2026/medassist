@@ -215,7 +215,6 @@ export default function ProfilePage() {
             </button>
           </div>
         ) : !data ? null : (
-          {/* Desktop: two-column grid. Mobile: single column stack */}
           <div className="px-4 pb-24 lg:px-0 lg:pb-10 lg:grid lg:grid-cols-[1fr_320px] lg:gap-6 lg:items-start">
             {/* LEFT column on desktop (main info) — on mobile this is just a stack */}
             <div className="space-y-4">
