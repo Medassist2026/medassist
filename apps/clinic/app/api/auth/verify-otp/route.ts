@@ -31,13 +31,19 @@ export async function POST(request: Request) {
       )
     }
 
-    const result = await verifyOTP(phone, code, purpose)
+    // Dev bypass: if OTP_BYPASS_CODE env var is set and the submitted code matches,
+    // skip real OTP verification. Remove this env var in production.
+    const bypassCode = process.env.OTP_BYPASS_CODE
+    const isBypass = bypassCode && code === bypassCode
 
-    if (!result.valid) {
-      return NextResponse.json(
-        { error: result.error || 'رمز التحقق غير صحيح' },
-        { status: 400 }
-      )
+    if (!isBypass) {
+      const result = await verifyOTP(phone, code, purpose)
+      if (!result.valid) {
+        return NextResponse.json(
+          { error: result.error || 'رمز التحقق غير صحيح' },
+          { status: 400 }
+        )
+      }
     }
 
     // For password reset: generate a server-side reset token (10 min expiry)

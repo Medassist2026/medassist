@@ -17,6 +17,15 @@ function isValidEgPhone(v: string) {
   return EG_PHONE_RE.test(v)
 }
 
+// ─── Arabic-Indic → Western digit normalizer ─────────────────────────────────
+// Converts ٠١٢٣٤٥٦٧٨٩ → 0123456789 before stripping non-digits
+const ARABIC_INDIC = '٠١٢٣٤٥٦٧٨٩'
+function normalizeDigits(v: string) {
+  return v
+    .replace(/[٠-٩]/g, d => String(ARABIC_INDIC.indexOf(d)))
+    .replace(/\D/g, '')
+}
+
 // ─── Left panel icons ─────────────────────────────────────────────────────────
 function PrescriptionIcon() {
   return (
@@ -350,7 +359,7 @@ export default function AuthPage() {
                 type="tel"
                 value={phone}
                 onChange={e => {
-                  setPhone(e.target.value.replace(/\D/g, '').slice(0, 11))
+                  setPhone(normalizeDigits(e.target.value).slice(0, 11))
                   setPhoneExists(false)
                   setError('')
                 }}
