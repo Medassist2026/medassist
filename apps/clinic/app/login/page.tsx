@@ -228,7 +228,7 @@ export default function AuthPage() {
       <div className="flex-1 lg:w-[52%] flex flex-col min-h-screen lg:min-h-0 lg:overflow-y-auto">
 
         {/* Back button */}
-        <div className="px-4 pt-10 lg:pt-8 lg:px-10 pb-2 flex-shrink-0">
+        <div className="px-4 pt-10 lg:pt-4 lg:px-10 pb-2 flex-shrink-0">
           <button
             onClick={() => router.back()}
             className="w-9 h-9 rounded-full border-[1.2px] border-[#E2EEE6] flex items-center justify-center hover:bg-[#F0FDF4] transition-colors"
@@ -245,20 +245,8 @@ export default function AuthPage() {
           <span className="mt-2 font-inter text-[18px] font-semibold text-[#030712]">MedAssist</span>
         </div>
 
-        {/* Desktop title */}
-        <div className="hidden lg:block px-10 mt-4 mb-1">
-          <h1 className="font-cairo text-[24px] font-bold text-[#0F172A]">
-            {activeTab === 'login' ? 'أهلاً بعودتك 👋' : 'إنشاء حساب جديد'}
-          </h1>
-          <p className="font-cairo text-[14px] text-[#6B7280] mt-1">
-            {activeTab === 'login'
-              ? 'سجّل دخولك للوصول إلى لوحة التحكم'
-              : 'أنشئ حسابك وابدأ في إدارة عيادتك'}
-          </p>
-        </div>
-
         {/* Tab switcher */}
-        <div className="mx-4 lg:mx-10 mt-4 flex bg-[#F3F4F6] border-[0.8px] border-[#E5E7EB] rounded-lg overflow-hidden flex-shrink-0">
+        <div className="mx-4 lg:mx-10 mt-4 lg:mt-6 flex bg-[#F3F4F6] border-[0.8px] border-[#E5E7EB] rounded-lg overflow-hidden flex-shrink-0">
           <button
             onClick={() => switchTab('register')}
             className={`flex-1 h-[44px] font-cairo text-[14px] transition-all ${
@@ -284,7 +272,7 @@ export default function AuthPage() {
         {/* Form */}
         <form
           onSubmit={handleSubmit}
-          className="flex flex-col px-4 lg:px-10 mt-4 gap-4 flex-1"
+          className="flex flex-col px-4 lg:px-10 mt-4 gap-4 lg:gap-3 flex-1"
         >
           {/* ── Role selector (register only) ── */}
           {activeTab === 'register' && (
@@ -505,9 +493,9 @@ export default function AuthPage() {
             </button>
           )}
 
-          {/* Incomplete hint */}
+          {/* Incomplete hint — mobile only (desktop has greyed-out button as signal) */}
           {!isFormValid && !isLoading && !phoneExists && (
-            <p className="font-cairo text-[12px] text-[#9CA3AF] text-center">
+            <p className="lg:hidden font-cairo text-[12px] text-[#9CA3AF] text-center">
               أكمل جميع الحقول للمتابعة
             </p>
           )}
