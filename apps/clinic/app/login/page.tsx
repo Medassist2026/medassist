@@ -222,60 +222,8 @@ export default function AuthPage() {
     <div dir="rtl" className="min-h-screen bg-white flex flex-col lg:flex-row overflow-hidden">
 
       {/* ══════════════════════════════════════════
-          LEFT PANEL — Brand trust panel (desktop only)
-      ══════════════════════════════════════════ */}
-      <div className="hidden lg:flex lg:w-[48%] bg-gradient-to-br from-[#F0FDF4] via-[#DCFCE7] to-[#BBF7D0] flex-col items-center justify-center px-14 xl:px-20 relative overflow-hidden">
-
-        {/* Soft background ring */}
-        <div className="absolute w-[500px] h-[500px] rounded-full border border-[#16A34A]/10 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none" />
-
-        {/* Logo */}
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          className="flex flex-col items-center text-center"
-        >
-          <div className="w-16 h-16 bg-[#16A34A] rounded-2xl flex items-center justify-center shadow-lg mb-4">
-            <Stethoscope className="w-8 h-8 text-white" strokeWidth={1.5} />
-          </div>
-          <span className="font-inter text-[22px] font-semibold text-[#0F172A]">MedAssist</span>
-          <p className="mt-2 font-cairo text-[15px] text-[#4B5563] leading-relaxed max-w-[280px]">
-            نظام إدارة عيادات متكامل للأطباء وفريق الاستقبال
-          </p>
-        </motion.div>
-
-        {/* Feature highlights */}
-        <div className="mt-10 flex flex-col gap-3 w-full max-w-[320px]">
-          {LEFT_FEATURES.map((f, i) => (
-            <motion.div
-              key={i}
-              initial={{ opacity: 0, x: 16 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.2 + i * 0.12, duration: 0.4 }}
-              className="flex items-center gap-3 bg-white/60 backdrop-blur-sm rounded-2xl px-4 py-3 border border-[#E5E7EB]/60"
-            >
-              <div className="w-9 h-9 rounded-xl bg-[#DCFCE7] text-[#16A34A] flex items-center justify-center flex-shrink-0">
-                {f.icon}
-              </div>
-              <span className="font-cairo text-[14px] font-medium text-[#1F2937]">{f.label}</span>
-            </motion.div>
-          ))}
-        </div>
-
-        {/* Bottom label */}
-        <motion.p
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.8 }}
-          className="absolute bottom-8 font-cairo text-[13px] text-[#15803D]/70"
-        >
-          آمن • موثوق • متاح ٢٤/٧
-        </motion.p>
-      </div>
-
-      {/* ══════════════════════════════════════════
           RIGHT PANEL — Auth form
+          First child in RTL flex = renders on the RIGHT side ✓
       ══════════════════════════════════════════ */}
       <div className="flex-1 lg:w-[52%] flex flex-col min-h-screen lg:min-h-0 lg:overflow-y-auto">
 
@@ -587,6 +535,60 @@ export default function AuthPage() {
             {activeTab === 'login' ? 'أنشئ واحد' : 'سجل دخولك'}
           </button>
         </div>
+      </div>
+
+      {/* ══════════════════════════════════════════
+          LEFT PANEL — Brand trust panel (desktop only)
+          Second child in RTL flex = renders on the LEFT side ✓
+      ══════════════════════════════════════════ */}
+      <div className="hidden lg:flex lg:w-[48%] bg-gradient-to-br from-[#F0FDF4] via-[#DCFCE7] to-[#BBF7D0] flex-col items-center justify-center px-14 xl:px-20 relative overflow-hidden">
+
+        {/* Soft background ring */}
+        <div className="absolute w-[500px] h-[500px] rounded-full border border-[#16A34A]/10 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none" />
+
+        {/* Logo */}
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+          className="flex flex-col items-center text-center"
+        >
+          <div className="w-16 h-16 bg-[#16A34A] rounded-2xl flex items-center justify-center shadow-lg mb-4">
+            <Stethoscope className="w-8 h-8 text-white" strokeWidth={1.5} />
+          </div>
+          <span className="font-inter text-[22px] font-semibold text-[#0F172A]">MedAssist</span>
+          <p className="mt-2 font-cairo text-[15px] text-[#4B5563] leading-relaxed max-w-[280px]">
+            نظام إدارة عيادات متكامل للأطباء وفريق الاستقبال
+          </p>
+        </motion.div>
+
+        {/* Feature highlights */}
+        <div className="mt-10 flex flex-col gap-3 w-full max-w-[320px]">
+          {LEFT_FEATURES.map((f, i) => (
+            <motion.div
+              key={i}
+              initial={{ opacity: 0, x: 16 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.2 + i * 0.12, duration: 0.4 }}
+              className="flex items-center gap-3 bg-white/60 backdrop-blur-sm rounded-2xl px-4 py-3 border border-[#E5E7EB]/60"
+            >
+              <div className="w-9 h-9 rounded-xl bg-[#DCFCE7] text-[#16A34A] flex items-center justify-center flex-shrink-0">
+                {f.icon}
+              </div>
+              <span className="font-cairo text-[14px] font-medium text-[#1F2937]">{f.label}</span>
+            </motion.div>
+          ))}
+        </div>
+
+        {/* Bottom label */}
+        <motion.p
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.8 }}
+          className="absolute bottom-8 font-cairo text-[13px] text-[#15803D]/70"
+        >
+          آمن • موثوق • متاح ٢٤/٧
+        </motion.p>
       </div>
     </div>
   )

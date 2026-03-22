@@ -128,7 +128,109 @@ export default function SplashPage() {
     <div dir="rtl" className="min-h-screen bg-white flex flex-col lg:flex-row overflow-hidden">
 
       {/* ══════════════════════════════════════════
+          RIGHT PANEL — Brand + Features + CTA
+          First child in RTL flex = renders on the RIGHT side ✓
+      ══════════════════════════════════════════ */}
+      <div className="flex-1 lg:w-[48%] flex flex-col items-center justify-center px-6 py-12 lg:px-14 xl:px-20 min-h-screen lg:min-h-0">
+
+        {/* Mobile top spacer */}
+        <div className="flex-1 min-h-[80px] lg:hidden" />
+
+        {/* Brand mark */}
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+          className="flex flex-col items-center lg:items-start w-full max-w-sm lg:max-w-none"
+        >
+          <div className="w-10 h-10 bg-[#16A34A] rounded-xl flex items-center justify-center shadow-sm">
+            <StethoscopeIcon className="w-5 h-5 text-white" />
+          </div>
+          <span className="mt-2.5 font-inter text-[20px] font-semibold text-[#0F172A]">
+            MedAssist
+          </span>
+        </motion.div>
+
+        {/* Tagline */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.55, delay: 0.2 }}
+          className="mt-8 lg:mt-10 w-full max-w-sm lg:max-w-none"
+        >
+          <h1 className="font-cairo text-[30px] lg:text-[38px] font-bold text-[#030712] text-center lg:text-right leading-snug">
+            نظّم. تابع. واطمّن.
+          </h1>
+          <p className="mt-3 font-cairo text-[15px] lg:text-[16px] text-[#6B7280] text-center lg:text-right leading-relaxed">
+            من متابعة مرضاك إلى إدارة العيادة — كل شيء في مكان واحد.
+          </p>
+        </motion.div>
+
+        {/* Feature list — desktop only */}
+        <div className="hidden lg:flex flex-col gap-3 mt-10 w-full">
+          {features.map((f, i) => (
+            <motion.div
+              key={f.title}
+              initial={{ opacity: 0, x: -16 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.45, delay: 0.4 + i * 0.12 }}
+              className="flex items-start gap-4 p-4 rounded-2xl border border-[#F3F4F6] hover:border-[#DCFCE7] hover:bg-[#F9FAFB] transition-all group cursor-default"
+            >
+              <div className="w-10 h-10 rounded-xl bg-[#F0FDF4] group-hover:bg-[#DCFCE7] flex items-center justify-center flex-shrink-0 transition-colors">
+                {f.icon}
+              </div>
+              <div className="text-right">
+                <p className="font-cairo font-semibold text-[#0F172A] text-[14px] leading-5">
+                  {f.title}
+                </p>
+                <p className="font-cairo text-[13px] text-[#9CA3AF] mt-0.5 leading-5">
+                  {f.subtitle}
+                </p>
+              </div>
+            </motion.div>
+          ))}
+        </div>
+
+        {/* Mobile spacer */}
+        <div className="flex-1 min-h-[80px] lg:hidden" />
+
+        {/* CTA */}
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.35 }}
+          className="w-full max-w-[360px] lg:max-w-none mt-10"
+        >
+          <button
+            onClick={() => router.push('/login')}
+            className="w-full py-[14px] rounded-[14px] font-cairo font-semibold text-[16px] bg-[#22C55E] hover:bg-[#16A34A] text-white active:scale-[0.98] transition-all shadow-sm"
+          >
+            ابدأ الآن
+          </button>
+
+          <div className="flex items-center justify-center gap-[5px] mt-4">
+            <span className="font-cairo text-[13px] text-[#4B5563]">لديك حساب؟</span>
+            <button
+              onClick={() => router.push('/login')}
+              className="font-cairo text-[13px] font-semibold text-[#16A34A] hover:underline"
+            >
+              سجّل دخولك
+            </button>
+          </div>
+        </motion.div>
+
+        {/* Pagination dots — mobile only */}
+        <div className="flex lg:hidden items-center justify-center gap-2 mt-6 mb-2">
+          <div className="w-[8px] h-[8px] rounded-full bg-[#22C55E]" />
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="w-[6px] h-[6px] rounded-full bg-[#0F172A]/15" />
+          ))}
+        </div>
+      </div>
+
+      {/* ══════════════════════════════════════════
           LEFT PANEL — Animated illustration (desktop only)
+          Second child in RTL flex = renders on the LEFT side ✓
       ══════════════════════════════════════════ */}
       <div className="hidden lg:flex lg:w-[52%] bg-gradient-to-br from-[#F0FDF4] via-[#DCFCE7] to-[#BBF7D0] items-center justify-center relative overflow-hidden">
 
@@ -188,106 +290,6 @@ export default function SplashPage() {
         >
           نظام إدارة عيادة متكامل
         </motion.p>
-      </div>
-
-      {/* ══════════════════════════════════════════
-          RIGHT PANEL — Brand + Features + CTA
-      ══════════════════════════════════════════ */}
-      <div className="flex-1 lg:w-[48%] flex flex-col items-center justify-center px-6 py-12 lg:px-14 xl:px-20 min-h-screen lg:min-h-0">
-
-        {/* Mobile top spacer */}
-        <div className="flex-1 min-h-[80px] lg:hidden" />
-
-        {/* Brand mark */}
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          className="flex flex-col items-center lg:items-start w-full max-w-sm lg:max-w-none"
-        >
-          <div className="w-10 h-10 bg-[#16A34A] rounded-xl flex items-center justify-center shadow-sm">
-            <StethoscopeIcon className="w-5 h-5 text-white" />
-          </div>
-          <span className="mt-2.5 font-inter text-[20px] font-semibold text-[#0F172A]">
-            MedAssist
-          </span>
-        </motion.div>
-
-        {/* Tagline */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.55, delay: 0.2 }}
-          className="mt-8 lg:mt-10 w-full max-w-sm lg:max-w-none"
-        >
-          <h1 className="font-cairo text-[30px] lg:text-[38px] font-bold text-[#030712] text-center lg:text-right leading-snug">
-            نظّم. تابع. واطمّن.
-          </h1>
-          <p className="mt-3 font-cairo text-[15px] lg:text-[16px] text-[#6B7280] text-center lg:text-right leading-relaxed">
-            من متابعة مرضاك إلى إدارة العيادة — كل شيء في مكان واحد.
-          </p>
-        </motion.div>
-
-        {/* Feature list — desktop only */}
-        <div className="hidden lg:flex flex-col gap-3 mt-10 w-full">
-          {features.map((f, i) => (
-            <motion.div
-              key={f.title}
-              initial={{ opacity: 0, x: 16 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.45, delay: 0.4 + i * 0.12 }}
-              className="flex items-start gap-4 p-4 rounded-2xl border border-[#F3F4F6] hover:border-[#DCFCE7] hover:bg-[#F9FAFB] transition-all group cursor-default"
-            >
-              <div className="w-10 h-10 rounded-xl bg-[#F0FDF4] group-hover:bg-[#DCFCE7] flex items-center justify-center flex-shrink-0 transition-colors">
-                {f.icon}
-              </div>
-              <div className="text-right">
-                <p className="font-cairo font-semibold text-[#0F172A] text-[14px] leading-5">
-                  {f.title}
-                </p>
-                <p className="font-cairo text-[13px] text-[#9CA3AF] mt-0.5 leading-5">
-                  {f.subtitle}
-                </p>
-              </div>
-            </motion.div>
-          ))}
-        </div>
-
-        {/* Mobile spacer */}
-        <div className="flex-1 min-h-[80px] lg:hidden" />
-
-        {/* CTA */}
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.35 }}
-          className="w-full max-w-[360px] lg:max-w-none mt-10"
-        >
-          <button
-            onClick={() => router.push('/login')}
-            className="w-full py-[14px] rounded-[14px] font-cairo font-semibold text-[16px] bg-[#22C55E] hover:bg-[#16A34A] text-white active:scale-[0.98] transition-all shadow-sm"
-          >
-            ابدأ الآن
-          </button>
-
-          <div className="flex items-center justify-center gap-[5px] mt-4">
-            <span className="font-cairo text-[13px] text-[#4B5563]">لديك حساب؟</span>
-            <button
-              onClick={() => router.push('/login')}
-              className="font-cairo text-[13px] font-semibold text-[#16A34A] hover:underline"
-            >
-              سجّل دخولك
-            </button>
-          </div>
-        </motion.div>
-
-        {/* Pagination dots — mobile only */}
-        <div className="flex lg:hidden items-center justify-center gap-2 mt-6 mb-2">
-          <div className="w-[8px] h-[8px] rounded-full bg-[#22C55E]" />
-          {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="w-[6px] h-[6px] rounded-full bg-[#0F172A]/15" />
-          ))}
-        </div>
       </div>
     </div>
   )
