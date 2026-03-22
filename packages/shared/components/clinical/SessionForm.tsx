@@ -789,7 +789,7 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
             onClose={() => setShowPatientHistory(false)}
           />
         )}
-      </div>{/* end outer px wrapper */}
+      </div>
     )
   }
 
