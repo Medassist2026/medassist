@@ -56,7 +56,7 @@ export function PushNotificationManager({
     if (Notification.permission === 'default') {
       const dismissed = localStorage.getItem('push-banner-dismissed')
       if (!dismissed || Date.now() - parseInt(dismissed, 10) > 14 * 24 * 60 * 60 * 1000) {
-        setTimeout(() => setShowBanner(true), 10000) // Show after 10s
+        setTimeout(() => setShowBanner(true), 30000) // Show after 30s
       }
     }
   }, [])
@@ -142,7 +142,7 @@ export function PushNotificationManager({
         <div className="flex gap-2 mt-3">
           <button
             onClick={subscribe}
-            className="flex-1 py-2 bg-blue-600 text-white rounded-xl font-semibold text-sm hover:bg-blue-700 transition-colors font-cairo"
+            className="flex-1 py-2 bg-[#22C55E] text-white rounded-xl font-semibold text-sm hover:bg-[#16A34A] transition-colors font-cairo"
           >
             تفعيل
           </button>

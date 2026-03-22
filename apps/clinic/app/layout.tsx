@@ -1,7 +1,6 @@
 import type { Metadata, Viewport } from "next"
 import "@shared/styles/globals.css"
 import { InstallPrompt } from '@shared/components/pwa/InstallPrompt'
-import { PushNotificationManager } from '@shared/components/pwa/PushNotificationManager'
 
 export const viewport: Viewport = {
   themeColor: '#2563EB',
@@ -86,7 +85,6 @@ export default async function RootLayout({
       <body className="min-h-screen bg-background font-sans antialiased overscroll-none">
         {children}
         <InstallPrompt />
-        <PushNotificationManager />
       </body>
     </html>
   )
