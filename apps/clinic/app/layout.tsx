@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next"
 import "@shared/styles/globals.css"
 import { InstallPrompt } from '@shared/components/pwa/InstallPrompt'
 import { PushNotificationManager } from '@shared/components/pwa/PushNotificationManager'
+import { SpeedInsights } from '@vercel/speed-insights/next'
 
 export const viewport: Viewport = {
   themeColor: '#2563EB',
@@ -87,6 +88,7 @@ export default async function RootLayout({
         {children}
         <InstallPrompt />
         <PushNotificationManager />
+        <SpeedInsights />
       </body>
     </html>
   )
