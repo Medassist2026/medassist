@@ -133,6 +133,9 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
   // ===== MANUAL PATIENT NAME (B02: was uncontrolled) =====
   const [manualPatientName, setManualPatientName] = useState('')
 
+  // ===== MANUAL AGE (separate state so age field is editable when no patient selected) =====
+  const [manualAge, setManualAge] = useState<string>('')
+
   // ===== SPEED METRICS ("faster than paper") =====
   const [sessionStartTime] = useState(() => Date.now())
   const keystrokeCountRef = useRef(0)
@@ -285,7 +288,7 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
     finally { setSearching(false) }
   }, [])
 
-  const selectPatient = (patient: PatientData) => {
+  const selectPatient = async (patient: PatientData) => {
     setSelectedPatient(patient)
     setPatientSearch('')
     setSearchResults([])
@@ -294,6 +297,18 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
     if (patient.lastVisitDate) {
       setVisitType('followup')
     }
+    // Auto-load allergies & chronic conditions from patient record
+    // (patient safety: prevents prescribing allergens even for cross-clinic patients)
+    try {
+      const res = await fetch(`/api/doctor/patients/${patient.id}`)
+      if (res.ok) {
+        const data = await res.json()
+        const p = data.patient
+        if (p?.allergies?.length > 0) setAllergies(p.allergies)
+        if (p?.chronic_conditions?.length > 0) setChronicDiseases(p.chronic_conditions)
+        if (p?.age) setManualAge(String(p.age))
+      }
+    } catch { /* non-critical — patient can fill manually */ }
   }
 
   // ===== TAG HELPERS =====
@@ -469,6 +484,10 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
     }
   }
 
+  // ===== COMMON ALLERGY & CHRONIC DISEASE CHIPS =====
+  const COMMON_ALLERGIES = ['بنسلين', 'أسبرين', 'بروفين', 'سلفا', 'كودين', 'لاتكس', 'مأكولات بحرية', 'مكسرات', 'بيض', 'حليب']
+  const COMMON_CHRONIC   = ['سكري', 'ضغط', 'قلب', 'ربو', 'كلى', 'كبد', 'غدة درقية', 'التهاب مفاصل', 'سمنة', 'قولون عصبي']
+
   // ===== VISIT TYPE CHIPS =====
   const visitTypeChips: { key: VisitType; label: string }[] = [
     { key: 'new', label: 'جديد' },
@@ -482,7 +501,9 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
 
   if (step === 1) {
     return (
-      <div className="px-4 py-4 space-y-4">
+      <div className="px-4 lg:px-2 py-4">
+      {/* Desktop: two-column layout — patient info | allergies & conditions */}
+      <div className="lg:grid lg:grid-cols-2 lg:gap-6 space-y-4 lg:space-y-0">
         {error && (
           <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-[13px] text-red-700 text-center font-cairo">
             {error}
@@ -524,8 +545,9 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
                 </div>
               ) : (
                 <div className="relative">
-                  <div className="flex items-center border border-[#E5E7EB] rounded-[10px] overflow-hidden bg-white focus-within:ring-2 focus-within:ring-[#22C55E] focus-within:border-transparent">
-                    <span className="px-3 text-[14px] font-inter font-medium text-[#4B5563] bg-[#F3F4F6] py-2.5 border-l border-[#E5E7EB]" dir="ltr">+20</span>
+                  {/* dir="ltr" overrides RTL parent so +20 stays on LEFT edge */}
+                  <div className="flex items-center border border-[#E5E7EB] rounded-[10px] overflow-hidden bg-white focus-within:ring-2 focus-within:ring-[#22C55E] focus-within:border-transparent" dir="ltr">
+                    <span className="px-3 text-[14px] font-inter font-medium text-[#4B5563] bg-[#F3F4F6] py-2.5 border-r border-[#E5E7EB]">+20</span>
                     <input
                       type="tel"
                       value={patientSearch}
@@ -606,12 +628,18 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
               <div className="flex items-center gap-2">
                 <input
                   type="number"
-                  value={selectedPatient?.age || ''}
-                  readOnly={!!selectedPatient}
+                  min="0"
+                  max="130"
+                  value={selectedPatient?.age ? String(selectedPatient.age) : manualAge}
+                  readOnly={!!selectedPatient?.age}
+                  onChange={(e) => { if (!selectedPatient?.age) setManualAge(e.target.value) }}
                   placeholder="—"
-                  className="w-20 px-3 py-2.5 border border-[#E5E7EB] rounded-[10px] text-[14px] font-cairo text-center focus:outline-none focus:ring-2 focus:ring-[#22C55E] bg-white"
+                  className={`w-20 px-3 py-2.5 border border-[#E5E7EB] rounded-[10px] text-[14px] font-cairo text-center focus:outline-none focus:ring-2 focus:ring-[#22C55E] ${selectedPatient?.age ? 'bg-[#F9FAFB] text-[#6B7280]' : 'bg-white text-[#030712]'}`}
                 />
                 <span className="font-cairo text-[12px] text-[#4B5563]">سنة</span>
+                {selectedPatient?.age && (
+                  <span className="font-cairo text-[11px] text-[#9CA3AF]">من السجل</span>
+                )}
               </div>
             </div>
           </div>
@@ -624,24 +652,45 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
           </div>
 
           <div className="p-4 space-y-4">
-            {/* Allergies */}
+            {/* Allergies — chip-first input */}
             <div>
-              <label className="block font-cairo text-[12px] font-semibold text-[#4B5563] mb-1.5">الحساسية</label>
+              <div className="flex items-center justify-between mb-2">
+                <label className="font-cairo text-[12px] font-semibold text-[#4B5563]">الحساسية</label>
+                {selectedPatient && allergies.length > 0 && (
+                  <span className="font-cairo text-[11px] text-[#DC2626] bg-[#FEF2F2] px-2 py-0.5 rounded-full">محمّل من السجل</span>
+                )}
+              </div>
+              {/* Selected allergy chips */}
+              {allergies.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {allergies.map((a, i) => (
+                    <span key={i} className="flex items-center gap-1 px-2.5 py-1 bg-[#FEE2E2] text-[#DC2626] text-[12px] font-cairo font-medium rounded-full">
+                      {a}
+                      <button onClick={() => removeTag(allergies, setAllergies, i)} className="hover:text-red-900 text-[14px] leading-none ml-0.5">×</button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              {/* Common allergy suggestion chips */}
               <div className="flex flex-wrap gap-1.5 mb-2">
-                {allergies.map((a, i) => (
-                  <span key={i} className="flex items-center gap-1 px-2.5 py-1 bg-[#FEE2E2] text-[#DC2626] text-[12px] font-cairo font-medium rounded-full">
-                    {a}
-                    <button onClick={() => removeTag(allergies, setAllergies, i)} className="hover:text-red-900 text-[14px] leading-none">×</button>
-                  </span>
+                {COMMON_ALLERGIES.filter(a => !allergies.includes(a)).map((a) => (
+                  <button
+                    key={a}
+                    onClick={() => setAllergies(prev => [...prev, a])}
+                    className="px-2.5 py-1 bg-[#FFF1F2] border border-[#FECDD3] text-[#9F1239] text-[11px] font-cairo rounded-full hover:bg-[#FEE2E2] transition-colors"
+                  >
+                    + {a}
+                  </button>
                 ))}
               </div>
+              {/* Free-type custom allergy */}
               <div className="flex gap-2">
                 <input
                   type="text"
                   value={allergyInput}
                   onChange={(e) => setAllergyInput(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addTag(allergies, setAllergies, allergyInput, setAllergyInput))}
-                  placeholder="اكتب... (مثال: بنسلين)"
+                  placeholder="أو اكتب حساسية أخرى..."
                   className="flex-1 px-3 py-2 border border-[#E5E7EB] rounded-[8px] text-[13px] font-cairo focus:outline-none focus:ring-2 focus:ring-[#22C55E]"
                 />
                 <button
@@ -655,24 +704,45 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
               </div>
             </div>
 
-            {/* Chronic Diseases */}
+            {/* Chronic Diseases — chip-first input */}
             <div>
-              <label className="block font-cairo text-[12px] font-semibold text-[#4B5563] mb-1.5">الأمراض المزمنة</label>
+              <div className="flex items-center justify-between mb-2">
+                <label className="font-cairo text-[12px] font-semibold text-[#4B5563]">الأمراض المزمنة</label>
+                {selectedPatient && chronicDiseases.length > 0 && (
+                  <span className="font-cairo text-[11px] text-[#16A34A] bg-[#F0FDF4] px-2 py-0.5 rounded-full">محمّل من السجل</span>
+                )}
+              </div>
+              {/* Selected chronic disease chips */}
+              {chronicDiseases.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {chronicDiseases.map((c, i) => (
+                    <span key={i} className="flex items-center gap-1 px-2.5 py-1 bg-[#DCFCE7] text-[#16A34A] text-[12px] font-cairo font-medium rounded-full">
+                      {c}
+                      <button onClick={() => removeTag(chronicDiseases, setChronicDiseases, i)} className="hover:text-green-900 text-[14px] leading-none ml-0.5">×</button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              {/* Common chronic disease suggestion chips */}
               <div className="flex flex-wrap gap-1.5 mb-2">
-                {chronicDiseases.map((c, i) => (
-                  <span key={i} className="flex items-center gap-1 px-2.5 py-1 bg-[#DCFCE7] text-[#16A34A] text-[12px] font-cairo font-medium rounded-full">
-                    {c}
-                    <button onClick={() => removeTag(chronicDiseases, setChronicDiseases, i)} className="hover:text-green-900 text-[14px] leading-none">×</button>
-                  </span>
+                {COMMON_CHRONIC.filter(c => !chronicDiseases.includes(c)).map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => setChronicDiseases(prev => [...prev, c])}
+                    className="px-2.5 py-1 bg-[#F0FDF4] border border-[#BBF7D0] text-[#166534] text-[11px] font-cairo rounded-full hover:bg-[#DCFCE7] transition-colors"
+                  >
+                    + {c}
+                  </button>
                 ))}
               </div>
+              {/* Free-type custom chronic disease */}
               <div className="flex gap-2">
                 <input
                   type="text"
                   value={chronicInput}
                   onChange={(e) => setChronicInput(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addTag(chronicDiseases, setChronicDiseases, chronicInput, setChronicInput))}
-                  placeholder="اكتب... (مثال: سكري)"
+                  placeholder="أو اكتب مرض مزمن آخر..."
                   className="flex-1 px-3 py-2 border border-[#E5E7EB] rounded-[8px] text-[13px] font-cairo focus:outline-none focus:ring-2 focus:ring-[#22C55E]"
                 />
                 <button
@@ -688,11 +758,13 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
           </div>
         </div>
 
+        </div>{/* end two-column grid */}
+
         {/* View Patient File Link */}
         {selectedPatient && (
           <button
             onClick={() => setShowPatientHistory(true)}
-            className="w-full text-center font-cairo text-[13px] font-medium text-[#16A34A] underline py-1"
+            className="w-full text-center font-cairo text-[13px] font-medium text-[#16A34A] underline py-1 mt-4"
           >
             عرض ملف المريض
           </button>
@@ -717,7 +789,7 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
             onClose={() => setShowPatientHistory(false)}
           />
         )}
-      </div>
+      </div>{/* end outer px wrapper */}
     )
   }
 
