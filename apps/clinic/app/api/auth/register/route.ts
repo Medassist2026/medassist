@@ -15,9 +15,19 @@ export async function POST(request: Request) {
       )
     }
     
-    if (!fullName || fullName.trim().length < 2) {
+    if (!fullName || fullName.trim().split(/\s+/).length < 2) {
       return NextResponse.json(
-        { error: 'Full name is required (at least 2 characters)' },
+        { error: 'يرجى إدخال الاسم الأول واسم العائلة' },
+        { status: 400 }
+      )
+    }
+
+    // ── Server-side phone format validation ──
+    // Egyptian mobile: +2001[0125][0-9]{8}
+    const EG_PHONE_RE = /^\+2001[0125][0-9]{8}$/
+    if (!EG_PHONE_RE.test(phone)) {
+      return NextResponse.json(
+        { error: 'رقم الموبايل غير صحيح. يجب أن يبدأ بـ 010 أو 011 أو 012 أو 015' },
         { status: 400 }
       )
     }

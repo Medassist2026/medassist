@@ -24,11 +24,22 @@ export async function POST(request: Request) {
       )
     }
 
+    // ── Phone format validation (Egyptian mobile numbers only) ──
+    const isEmail = identifier.includes('@')
+    if (!isEmail) {
+      const EG_PHONE_RE = /^\+2001[0125][0-9]{8}$/
+      if (!EG_PHONE_RE.test(identifier)) {
+        return NextResponse.json(
+          { error: 'رقم الموبايل غير صحيح' },
+          { status: 400 }
+        )
+      }
+    }
+
     const supabase = await createClient()
     const admin = createAdminClient('auth-login-lookup')
 
-    // Determine if input is email or phone
-    const isEmail = identifier.includes('@')
+    // isEmail already determined above for phone format validation
 
     // Sign in with Supabase Auth - use email if available, otherwise phone
     let authData, authError
