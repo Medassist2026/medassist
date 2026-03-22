@@ -47,9 +47,9 @@ export default async function DoctorLayout({
   const profile = await getDoctorProfile(user.id)
   const clinicContext = await getClinicContext(user.id, 'doctor')
 
-  // No clinic yet → redirect to setup
+  // No clinic yet → redirect to setup, passing role so the page skips irrelevant options
   if (!clinicContext) {
-    redirect('/setup')
+    redirect('/setup?role=doctor')
   }
 
   return (

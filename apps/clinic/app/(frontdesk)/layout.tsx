@@ -16,9 +16,10 @@ export default async function FrontDeskLayout({
   const user = await requireRole('frontdesk')
 
   // Resolve clinic — frontdesk must belong to a clinic
+  // Pass role=frontdesk so setup page skips "create" option and goes straight to join
   const clinicId = await getUserClinicId(user.id)
   if (!clinicId) {
-    redirect('/setup')
+    redirect('/setup?role=frontdesk')
   }
 
   const clinicContext = await getClinicContext(user.id, 'frontdesk')
