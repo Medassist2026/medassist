@@ -136,6 +136,12 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
   // ===== MANUAL AGE (separate state so age field is editable when no patient selected) =====
   const [manualAge, setManualAge] = useState<string>('')
 
+  // ===== MANUAL SEX (for new patient creation) =====
+  const [manualSex, setManualSex] = useState<'Male' | 'Female' | null>(null)
+
+  // ===== CREATING NEW PATIENT (inline creation state) =====
+  const [creatingPatient, setCreatingPatient] = useState(false)
+
   // ===== SPEED METRICS ("faster than paper") =====
   const [sessionStartTime] = useState(() => Date.now())
   const keystrokeCountRef = useRef(0)
@@ -343,16 +349,65 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
     showToastMessage(`تمت إضافة ${template.medications.length} أدوية`)
   }
 
-  // ===== STEP TRANSITION =====
-  const goToStep2 = () => {
-    if (!selectedPatient) {
-      setError('يرجى اختيار مريض أولاً')
+  // ===== STEP TRANSITION (creates patient inline if new) =====
+  const goToStep2 = async () => {
+    setError('')
+
+    // Already selected from search — just advance
+    if (selectedPatient) {
+      setStep(2)
+      window.scrollTo({ top: 0, behavior: 'smooth' })
       return
     }
-    setError('')
-    setStep(2)
-    // Auto-scroll to top
-    window.scrollTo({ top: 0, behavior: 'smooth' })
+
+    // NEW PATIENT PATH: phone + name typed manually → create then advance
+    const phone = patientSearch.replace(/\D/g, '')
+    const name  = manualPatientName.trim()
+
+    if (!phone || phone.length < 8) {
+      setError('يرجى إدخال رقم الموبايل')
+      return
+    }
+    if (!name || name.split(/\s+/).filter(Boolean).length < 2) {
+      setError('يرجى إدخال الاسم الأول واسم العائلة')
+      return
+    }
+
+    setCreatingPatient(true)
+    try {
+      const res = await fetch('/api/doctor/patients/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone,
+          name,
+          age: manualAge ? Number(manualAge) : undefined,
+          sex: manualSex || undefined,
+        }),
+      })
+
+      const data = await res.json()
+
+      if (!res.ok) {
+        setError(data.error || 'فشل إنشاء سجل المريض')
+        return
+      }
+
+      const p: PatientData = {
+        id: data.patient.id,
+        name: data.patient.name || name,
+        phone: data.patient.phone || phone,
+        age: manualAge ? Number(manualAge) : undefined,
+        sex: manualSex || undefined,
+      }
+      setSelectedPatient(p)
+      setStep(2)
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    } catch {
+      setError('حدث خطأ. حاول مرة أخرى')
+    } finally {
+      setCreatingPatient(false)
+    }
   }
 
   // ===== FOLLOW-UP QUICK CHIPS =====
@@ -488,6 +543,14 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
   const COMMON_ALLERGIES = ['بنسلين', 'أسبرين', 'بروفين', 'سلفا', 'كودين', 'لاتكس', 'مأكولات بحرية', 'مكسرات', 'بيض', 'حليب']
   const COMMON_CHRONIC   = ['سكري', 'ضغط', 'قلب', 'ربو', 'كلى', 'كبد', 'غدة درقية', 'التهاب مفاصل', 'سمنة', 'قولون عصبي']
 
+  // ===== NEW PATIENT MODE: phone entered, search done, no results =====
+  // Triggers the inline create-patient flow
+  const isCreatingNew =
+    !selectedPatient &&
+    patientSearch.replace(/\D/g, '').length >= 8 &&
+    searchResults.length === 0 &&
+    !searching
+
   // ===== VISIT TYPE CHIPS =====
   const visitTypeChips: { key: VisitType; label: string }[] = [
     { key: 'new', label: 'جديد' },
@@ -511,9 +574,25 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
         )}
 
         {/* ===== PATIENT INFO CARD ===== */}
-        <div className="bg-white rounded-[12px] border border-[#E5E7EB] overflow-hidden">
-          <div className="px-4 py-3 bg-[#F9FAFB] border-b border-[#E5E7EB]">
+        <div className={`bg-white rounded-[12px] border overflow-hidden transition-colors ${isCreatingNew ? 'border-[#22C55E] ring-2 ring-[#22C55E]/20' : 'border-[#E5E7EB]'}`}>
+          <div className={`px-4 py-3 border-b flex items-center justify-between ${isCreatingNew ? 'bg-[#F0FDF4] border-[#BBF7D0]' : 'bg-[#F9FAFB] border-[#E5E7EB]'}`}>
             <h3 className="font-cairo font-bold text-[14px] text-[#030712]">معلومات المريض</h3>
+            {isCreatingNew && (
+              <span className="flex items-center gap-1 px-2 py-0.5 bg-[#22C55E] text-white text-[11px] font-cairo font-bold rounded-full">
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                </svg>
+                مريض جديد
+              </span>
+            )}
+            {selectedPatient && (
+              <span className="flex items-center gap-1 px-2 py-0.5 bg-[#DCFCE7] text-[#16A34A] text-[11px] font-cairo font-bold rounded-full">
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+                تم التعرف
+              </span>
+            )}
           </div>
 
           <div className="p-4 space-y-4">
@@ -588,18 +667,54 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
               )}
             </div>
 
-            {/* Patient Name (B02: controlled input for manual walk-in entry) */}
+            {/* New patient fields: name + sex (shown when search returned no results) */}
             {!selectedPatient && (
-              <div>
-                <label className="block font-cairo text-[12px] font-semibold text-[#4B5563] mb-1.5">الاسم</label>
-                <input
-                  type="text"
-                  value={manualPatientName}
-                  onChange={(e) => setManualPatientName(e.target.value)}
-                  placeholder="اكتب اسم المريض"
-                  className="w-full px-3 py-2.5 border border-[#E5E7EB] rounded-[10px] text-[14px] font-cairo focus:outline-none focus:ring-2 focus:ring-[#22C55E] focus:border-transparent bg-white"
-                />
-              </div>
+              <>
+                <div>
+                  <label className="block font-cairo text-[12px] font-semibold text-[#4B5563] mb-1.5">
+                    الاسم
+                    {isCreatingNew && <span className="text-[#DC2626] mr-0.5">*</span>}
+                  </label>
+                  <input
+                    type="text"
+                    value={manualPatientName}
+                    onChange={(e) => setManualPatientName(e.target.value)}
+                    placeholder="الاسم الأول واسم العائلة"
+                    className={`w-full px-3 py-2.5 border rounded-[10px] text-[14px] font-cairo focus:outline-none focus:ring-2 focus:ring-[#22C55E] focus:border-transparent bg-white transition-colors ${
+                      isCreatingNew && !manualPatientName.trim() ? 'border-[#FCA5A5]' : 'border-[#E5E7EB]'
+                    }`}
+                  />
+                  {isCreatingNew && (
+                    <p className="mt-1 font-cairo text-[11px] text-[#6B7280]">يرجى إدخال الاسم الأول واسم العائلة</p>
+                  )}
+                </div>
+
+                {/* Sex selector — only shown in new patient mode */}
+                {isCreatingNew && (
+                  <div>
+                    <label className="block font-cairo text-[12px] font-semibold text-[#4B5563] mb-1.5">الجنس</label>
+                    <div className="flex gap-2">
+                      {([
+                        { key: 'Male',   label: 'ذكر',  icon: '♂' },
+                        { key: 'Female', label: 'أنثى', icon: '♀' },
+                      ] as const).map(({ key, label, icon }) => (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => setManualSex(prev => prev === key ? null : key)}
+                          className={`flex-1 py-2.5 font-cairo text-[13px] font-semibold rounded-[10px] border transition-colors ${
+                            manualSex === key
+                              ? 'bg-[#22C55E] border-[#22C55E] text-white'
+                              : 'bg-white border-[#E5E7EB] text-[#4B5563] hover:border-[#22C55E]'
+                          }`}
+                        >
+                          <span className="ml-1 text-[15px]">{icon}</span>{label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
             )}
 
             {/* Visit Type Chips */}
@@ -622,9 +737,12 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
               </div>
             </div>
 
-            {/* Age */}
+            {/* Age — always visible; read-only when patient selected from DB with known age */}
             <div>
-              <label className="block font-cairo text-[12px] font-semibold text-[#4B5563] mb-1.5">العمر</label>
+              <label className="block font-cairo text-[12px] font-semibold text-[#4B5563] mb-1.5">
+                العمر
+                {isCreatingNew && <span className="font-cairo text-[11px] font-normal text-[#9CA3AF] mr-1">(اختياري)</span>}
+              </label>
               <div className="flex items-center gap-2">
                 <input
                   type="number"
@@ -771,15 +889,44 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
         )}
 
         {/* ===== STEP 1 → STEP 2 BUTTON ===== */}
-        <div className="sticky bottom-16 bg-white border-t border-[#E5E7EB] p-4 -mx-4">
-          <button
-            onClick={goToStep2}
-            disabled={!selectedPatient}
-            className="w-full py-3.5 bg-[#16A34A] text-white rounded-[12px] font-cairo font-bold text-[14px] hover:bg-[#15803d] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            ابدأ الروشتة
-          </button>
-        </div>
+        {(() => {
+          // Button is enabled when:
+          // (a) a patient was found & selected from search, OR
+          // (b) new patient mode: phone ≥ 8 digits + name has ≥ 2 words
+          const hasPhone = patientSearch.replace(/\D/g, '').length >= 8
+          const hasName  = manualPatientName.trim().split(/\s+/).filter(Boolean).length >= 2
+          const canProceed = !!selectedPatient || (isCreatingNew && hasPhone && hasName)
+          const buttonLabel = creatingPatient
+            ? 'جاري الإضافة...'
+            : isCreatingNew
+              ? 'إضافة المريض وبدء الروشتة'
+              : 'ابدأ الروشتة'
+
+          return (
+            <div className="sticky bottom-16 bg-white border-t border-[#E5E7EB] p-4 -mx-4">
+              {/* Helper hint when in new-patient mode but name is missing */}
+              {isCreatingNew && !hasName && hasPhone && (
+                <p className="text-center font-cairo text-[12px] text-[#6B7280] mb-2">
+                  أدخل الاسم الأول واسم العائلة للمتابعة
+                </p>
+              )}
+              <button
+                onClick={goToStep2}
+                disabled={!canProceed || creatingPatient}
+                className={`w-full py-3.5 text-white rounded-[12px] font-cairo font-bold text-[14px] transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                  isCreatingNew && canProceed
+                    ? 'bg-[#22C55E] hover:bg-[#16A34A]'
+                    : 'bg-[#16A34A] hover:bg-[#15803d]'
+                }`}
+              >
+                {creatingPatient && (
+                  <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin ml-2 align-middle" />
+                )}
+                {buttonLabel}
+              </button>
+            </div>
+          )
+        })()}
 
         {/* Patient History Bottom Sheet */}
         {showPatientHistory && selectedPatient && (
