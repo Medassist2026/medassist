@@ -25,6 +25,9 @@ interface PatientData {
   sex?: string
   lastVisitReason?: string
   lastVisitDate?: string
+  // P3: relationship metadata — used to offer code-upgrade to verified_consented
+  isRegistered?: boolean   // patient has a MedAssist app account
+  accessLevel?: string     // 'walk_in_limited' | 'verified_consented' | 'ghost'
 }
 
 export interface SessionFormData {
@@ -167,6 +170,15 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
   const [isDependent, setIsDependent]       = useState(false)
   const [dependentType, setDependentType]   = useState<'child' | 'elderly' | 'special' | null>(null)
 
+  // ===== P3: RELATIONSHIP UPGRADE (walk_in_limited → verified_consented) =====
+  // Shown when an existing patient who has a MedAssist account shares their code in-session,
+  // unlocking full cross-visit medical history for this doctor.
+  const [p3Code, setP3Code]         = useState('')
+  const [p3ShowInput, setP3ShowInput] = useState(false)
+  const [p3Verifying, setP3Verifying] = useState(false)
+  const [p3Upgraded, setP3Upgraded]   = useState(false)
+  const [p3Error, setP3Error]         = useState('')
+
   // ===== SPEED METRICS ("faster than paper") =====
   const [sessionStartTime] = useState(() => Date.now())
   const keystrokeCountRef = useRef(0)
@@ -277,7 +289,13 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
               phone: patient.phone,
               age: patient.age,
               sex: patient.sex,
+              isRegistered: patient.is_registered ?? false,
+              accessLevel: patient.access_level || 'walk_in_limited',
             }
+            setP3Code('')
+            setP3ShowInput(false)
+            setP3Upgraded(false)
+            setP3Error('')
             setSelectedPatient(p)
             if (patient.allergies) setAllergies(patient.allergies)
             if (patient.chronic_conditions) setChronicDiseases(patient.chronic_conditions)
@@ -313,6 +331,8 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
           sex: p.sex,
           lastVisitReason: p.last_visit_reason,
           lastVisitDate: p.last_visit_date,
+          isRegistered: p.is_registered ?? false,
+          accessLevel: p.access_level || 'walk_in_limited',
         })))
       }
     } catch { /* ignore */ }
@@ -373,10 +393,42 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
     }
   }
 
+  // ===== P3: UPGRADE RELATIONSHIP HANDLER =====
+  const upgradeRelationship = async () => {
+    if (!selectedPatient || !p3Code.trim()) return
+    setP3Verifying(true)
+    setP3Error('')
+    try {
+      const res = await fetch('/api/patients/upgrade-relationship', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ patientId: selectedPatient.id, code: p3Code.trim().toUpperCase() }),
+      })
+      const data = await res.json()
+      if (data.success) {
+        setP3Upgraded(true)
+        setP3ShowInput(false)
+        // Update in-memory patient record so the banner disappears on re-selection
+        setSelectedPatient(prev => prev ? { ...prev, accessLevel: 'verified_consented' } : prev)
+      } else {
+        setP3Error(data.errorAr || 'الكود غير صحيح — تأكد من المريض وأعد المحاولة')
+      }
+    } catch {
+      setP3Error('حدث خطأ في الاتصال — حاول مرة أخرى')
+    } finally {
+      setP3Verifying(false)
+    }
+  }
+
   const selectPatient = async (patient: PatientData) => {
     setSelectedPatient(patient)
     setPatientSearch('')
     setSearchResults([])
+    // Reset P3 state for new selection
+    setP3Code('')
+    setP3ShowInput(false)
+    setP3Upgraded(false)
+    setP3Error('')
     loadDraft(patient.id)
     // B09: Auto-detect follow-up — if patient has a previous visit, set to "followup"
     if (patient.lastVisitDate) {
@@ -766,6 +818,10 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
                       setManualPatientName('')
                       setIsDependent(false)
                       setDependentType(null)
+                      setP3Code('')
+                      setP3ShowInput(false)
+                      setP3Upgraded(false)
+                      setP3Error('')
                     }}
                     className="font-cairo text-[12px] font-medium text-[#16A34A]"
                   >
@@ -925,6 +981,81 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
                 </div>
               )}
             </div>
+
+            {/* ===== P3: REGISTERED PATIENT UPGRADE BANNER (Step 1) ===== */}
+            {/* Shown when an EXISTING patient in doctor's list is a MedAssist user */}
+            {/* but relationship is still walk_in_limited — doctor can ask for code  */}
+            {selectedPatient && selectedPatient.isRegistered && selectedPatient.accessLevel !== 'verified_consented' && !p3Upgraded && (
+              <div className="rounded-[10px] border border-[#BFDBFE] bg-[#EFF6FF] p-3">
+                <div className="flex items-start gap-2">
+                  <div className="mt-0.5 w-5 h-5 rounded-full bg-[#3B82F6] flex-shrink-0 flex items-center justify-center">
+                    <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-cairo font-semibold text-[13px] text-[#1E40AF]">المريض لديه ملف في MedAssist</p>
+                    <p className="font-cairo text-[12px] text-[#3B82F6] mt-0.5">
+                      اطلب منه الكود للوصول للتاريخ الطبي الكامل والربط الموثّق
+                    </p>
+                    {!p3ShowInput && !p3Upgraded && (
+                      <button
+                        type="button"
+                        onClick={() => setP3ShowInput(true)}
+                        className="mt-2 px-3 py-1.5 bg-[#3B82F6] text-white text-[12px] font-cairo font-semibold rounded-[8px] hover:bg-[#2563EB] transition-colors"
+                      >
+                        أدخل الكود
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {p3ShowInput && (
+                  <div className="mt-3 pt-3 border-t border-[#BFDBFE]">
+                    <p className="font-cairo text-[11px] text-[#6B7280] mb-2">اطلب من المريض فتح التطبيق وإظهار الكود</p>
+                    <div className="flex gap-2" dir="ltr">
+                      <input
+                        type="text"
+                        value={p3Code}
+                        onChange={(e) => { setP3Code(e.target.value.toUpperCase()); setP3Error('') }}
+                        onKeyDown={(e) => e.key === 'Enter' && upgradeRelationship()}
+                        placeholder="مثال: AB12CD"
+                        maxLength={12}
+                        className="flex-1 px-3 py-2 border border-[#BFDBFE] rounded-[8px] text-[14px] font-mono bg-white focus:outline-none focus:ring-2 focus:ring-[#3B82F6] tracking-widest text-center uppercase"
+                        dir="ltr"
+                      />
+                      <button
+                        type="button"
+                        onClick={upgradeRelationship}
+                        disabled={!p3Code.trim() || p3Verifying}
+                        className="px-3 py-2 bg-[#3B82F6] text-white text-[12px] font-cairo font-semibold rounded-[8px] hover:bg-[#2563EB] disabled:opacity-50 transition-colors whitespace-nowrap"
+                      >
+                        {p3Verifying ? (
+                          <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        ) : 'ربط'}
+                      </button>
+                    </div>
+                    {p3Error && (
+                      <p className="mt-1.5 font-cairo text-[12px] text-[#DC2626]">❌ {p3Error}</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* P3 upgrade success state */}
+            {(p3Upgraded || selectedPatient?.accessLevel === 'verified_consented') && selectedPatient && (
+              <div className="rounded-[10px] border border-[#BBF7D0] bg-[#F0FDF4] p-3 flex items-center gap-2">
+                <div className="w-6 h-6 rounded-full bg-[#22C55E] flex-shrink-0 flex items-center justify-center">
+                  <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+                <div>
+                  <p className="font-cairo font-semibold text-[13px] text-[#16A34A]">تم الربط الموثّق ✓</p>
+                  <p className="font-cairo text-[11px] text-[#4B5563]">يمكنك الآن الوصول للتاريخ الطبي الكامل للمريض</p>
+                </div>
+              </div>
+            )}
 
             {/* New patient fields: name + sex (shown when search returned no results) */}
             {!selectedPatient && (
@@ -1287,6 +1418,74 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
           </div>
         )}
       </div>
+
+      {/* ===== P3: UPGRADE BANNER IN STEP 2 ===== */}
+      {/* For preselected patients (queue handoff): show before prescription starts */}
+      {selectedPatient && selectedPatient.isRegistered && selectedPatient.accessLevel !== 'verified_consented' && !p3Upgraded && (
+        <div className="bg-white rounded-[12px] border border-[#BFDBFE] p-3">
+          <div className="flex items-start gap-2">
+            <div className="mt-0.5 w-5 h-5 rounded-full bg-[#3B82F6] flex-shrink-0 flex items-center justify-center">
+              <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-cairo font-semibold text-[13px] text-[#1E40AF]">المريض لديه ملف في MedAssist — اطلب الكود</p>
+              <p className="font-cairo text-[12px] text-[#3B82F6] mt-0.5">
+                الربط يتيح لك التاريخ الطبي الكامل، أو تابع بدونه
+              </p>
+              {!p3ShowInput && (
+                <button
+                  type="button"
+                  onClick={() => setP3ShowInput(true)}
+                  className="mt-2 px-3 py-1.5 bg-[#3B82F6] text-white text-[12px] font-cairo font-semibold rounded-[8px] hover:bg-[#2563EB] transition-colors"
+                >
+                  أدخل الكود
+                </button>
+              )}
+            </div>
+          </div>
+          {p3ShowInput && (
+            <div className="mt-3 pt-3 border-t border-[#BFDBFE]">
+              <div className="flex gap-2" dir="ltr">
+                <input
+                  type="text"
+                  value={p3Code}
+                  onChange={(e) => { setP3Code(e.target.value.toUpperCase()); setP3Error('') }}
+                  onKeyDown={(e) => e.key === 'Enter' && upgradeRelationship()}
+                  placeholder="مثال: AB12CD"
+                  maxLength={12}
+                  className="flex-1 px-3 py-2 border border-[#BFDBFE] rounded-[8px] text-[14px] font-mono bg-white focus:outline-none focus:ring-2 focus:ring-[#3B82F6] tracking-widest text-center uppercase"
+                  dir="ltr"
+                />
+                <button
+                  type="button"
+                  onClick={upgradeRelationship}
+                  disabled={!p3Code.trim() || p3Verifying}
+                  className="px-3 py-2 bg-[#3B82F6] text-white text-[12px] font-cairo font-semibold rounded-[8px] hover:bg-[#2563EB] disabled:opacity-50 transition-colors whitespace-nowrap"
+                >
+                  {p3Verifying ? (
+                    <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : 'ربط'}
+                </button>
+              </div>
+              {p3Error && (
+                <p className="mt-1.5 font-cairo text-[12px] text-[#DC2626]">❌ {p3Error}</p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+      {(p3Upgraded || selectedPatient?.accessLevel === 'verified_consented') && selectedPatient && (
+        <div className="bg-white rounded-[12px] border border-[#BBF7D0] p-3 flex items-center gap-2">
+          <div className="w-6 h-6 rounded-full bg-[#22C55E] flex-shrink-0 flex items-center justify-center">
+            <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <p className="font-cairo font-semibold text-[13px] text-[#16A34A]">ملف موثّق ✓ — تم ربط التاريخ الطبي الكامل</p>
+        </div>
+      )}
 
       {/* ===== CHIEF COMPLAINT — Tap chips + free text ===== */}
       <div className="bg-white rounded-[12px] border border-[#E5E7EB] overflow-hidden">

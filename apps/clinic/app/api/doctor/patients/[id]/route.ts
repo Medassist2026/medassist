@@ -107,6 +107,14 @@ export async function GET(
     // Sort timeline by date descending
     timeline.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
 
+    // P3: Fetch relationship access_level so SessionForm can show upgrade prompt
+    const { data: relationship } = await admin
+      .from('doctor_patient_relationships')
+      .select('access_level')
+      .eq('doctor_id', user.id)
+      .eq('patient_id', patientId)
+      .maybeSingle()
+
     return NextResponse.json({
       patient: {
         id: patient.id,
@@ -117,7 +125,10 @@ export async function GET(
         gender: patient.sex || patient.gender || '',
         national_id: patient.national_id || '',
         blood_type: patient.blood_type || '',
-        created_at: patient.created_at
+        created_at: patient.created_at,
+        // P3 fields
+        is_registered: patient.registered || false,
+        access_level: relationship?.access_level || 'walk_in_limited',
       },
       conditions: [], // Will be populated when conditions table is created
       medications,
