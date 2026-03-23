@@ -142,6 +142,25 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
   // ===== CREATING NEW PATIENT (inline creation state) =====
   const [creatingPatient, setCreatingPatient] = useState(false)
 
+  // ===== P1: PHONE CHECK (registered patient detection) =====
+  const [phoneCheckResult, setPhoneCheckResult] = useState<{
+    exists: boolean
+    isRegistered: boolean
+    valid: boolean
+    formatted?: string
+    carrier?: string
+  } | null>(null)
+  const [phoneCheckLoading, setPhoneCheckLoading] = useState(false)
+
+  // ===== P1: CODE VERIFICATION (patient shares their unique code) =====
+  const [showCodeInput, setShowCodeInput] = useState(false)
+  const [patientCode, setPatientCode]     = useState('')
+  const [codeVerifying, setCodeVerifying] = useState(false)
+  const [codeVerified, setCodeVerified]   = useState<{
+    valid: boolean
+    patient?: { fullName: string | null; age: number | null; sex: string | null }
+  } | null>(null)
+
   // ===== SPEED METRICS ("faster than paper") =====
   const [sessionStartTime] = useState(() => Date.now())
   const keystrokeCountRef = useRef(0)
@@ -294,6 +313,60 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
     finally { setSearching(false) }
   }, [])
 
+  // ===== P1: DEBOUNCED PHONE CHECK =====
+  // Fires after 600ms when phone reaches 10+ digits and no patient is yet selected.
+  // Detects whether the phone belongs to a registered app user.
+  useEffect(() => {
+    if (selectedPatient) return
+    const digits = patientSearch.replace(/\D/g, '')
+    if (digits.length < 10) {
+      setPhoneCheckResult(null)
+      setShowCodeInput(false)
+      setCodeVerified(null)
+      setPatientCode('')
+      return
+    }
+    setPhoneCheckLoading(true)
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/patients/check-phone?phone=${encodeURIComponent(digits)}`)
+        if (res.ok) {
+          const data = await res.json()
+          setPhoneCheckResult(data)
+        }
+      } catch { /* non-critical */ }
+      finally { setPhoneCheckLoading(false) }
+    }, 600)
+    return () => { clearTimeout(timer); setPhoneCheckLoading(false) }
+  }, [patientSearch, selectedPatient])
+
+  // ===== P1: CODE VERIFICATION HANDLER =====
+  const verifyCode = async () => {
+    const digits = patientSearch.replace(/\D/g, '')
+    if (!patientCode.trim() || !digits) return
+    setCodeVerifying(true)
+    setCodeVerified(null)
+    try {
+      const res = await fetch('/api/patients/verify-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: digits, code: patientCode.trim().toUpperCase() }),
+      })
+      const data = await res.json()
+      setCodeVerified({ valid: data.valid, patient: data.patient })
+      if (data.valid && data.patient) {
+        // Auto-fill patient info from their verified record
+        if (data.patient.fullName)   setManualPatientName(data.patient.fullName)
+        if (data.patient.age)        setManualAge(String(data.patient.age))
+        if (data.patient.sex === 'Male' || data.patient.sex === 'Female') setManualSex(data.patient.sex)
+      }
+    } catch {
+      setCodeVerified({ valid: false })
+    } finally {
+      setCodeVerifying(false)
+    }
+  }
+
   const selectPatient = async (patient: PatientData) => {
     setSelectedPatient(patient)
     setPatientSearch('')
@@ -375,28 +448,49 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
 
     setCreatingPatient(true)
     try {
-      const res = await fetch('/api/doctor/patients/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          phone,
-          name,
-          age: manualAge ? Number(manualAge) : undefined,
-          sex: manualSex || undefined,
-        }),
-      })
+      let res: Response
+      let data: any
 
-      const data = await res.json()
+      if (codeVerified?.valid) {
+        // CODE VERIFIED PATH: use onboard endpoint → verified_consented relationship
+        // onboard requires age + sex (filled by verify-code auto-fill above)
+        res = await fetch('/api/patients/onboard', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            phone,
+            fullName: name,
+            age: manualAge ? Number(manualAge) : 0,
+            sex: manualSex || 'Other',
+            patientCode: patientCode.trim().toUpperCase(),
+          }),
+        })
+      } else {
+        // WALK-IN PATH: standard create → walk_in_limited relationship
+        res = await fetch('/api/doctor/patients/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            phone,
+            name,
+            age: manualAge ? Number(manualAge) : undefined,
+            sex: manualSex || undefined,
+          }),
+        })
+      }
+
+      data = await res.json()
 
       if (!res.ok) {
-        setError(data.error || 'فشل إنشاء سجل المريض')
+        setError(data.errorAr || data.error || 'فشل إنشاء سجل المريض')
         return
       }
 
+      const patientPayload = data.patient
       const p: PatientData = {
-        id: data.patient.id,
-        name: data.patient.name || name,
-        phone: data.patient.phone || phone,
+        id: patientPayload.id,
+        name: patientPayload.full_name || patientPayload.name || name,
+        phone: patientPayload.phone || phone,
         age: manualAge ? Number(manualAge) : undefined,
         sex: manualSex || undefined,
       }
@@ -616,7 +710,18 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
                     </div>
                   </div>
                   <button
-                    onClick={() => { setSelectedPatient(null); setAllergies([]); setChronicDiseases([]) }}
+                    onClick={() => {
+                      setSelectedPatient(null)
+                      setAllergies([])
+                      setChronicDiseases([])
+                      setPhoneCheckResult(null)
+                      setShowCodeInput(false)
+                      setPatientCode('')
+                      setCodeVerified(null)
+                      setManualSex(null)
+                      setManualAge('')
+                      setManualPatientName('')
+                    }}
                     className="font-cairo text-[12px] font-medium text-[#16A34A]"
                   >
                     تغيير
@@ -635,10 +740,29 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
                       className="flex-1 px-3 py-2.5 text-[14px] font-cairo focus:outline-none bg-transparent"
                       dir="ltr"
                     />
+                    {/* Carrier badge + phone-check status */}
+                    {phoneCheckLoading && (
+                      <span className="px-2">
+                        <span className="inline-block w-3.5 h-3.5 border-2 border-[#9CA3AF] border-t-transparent rounded-full animate-spin" />
+                      </span>
+                    )}
+                    {!phoneCheckLoading && phoneCheckResult?.carrier && (
+                      <span className={`px-2 py-0.5 mx-1.5 text-[10px] font-bold rounded-full whitespace-nowrap ${
+                        phoneCheckResult.carrier.toLowerCase().includes('vodafone') ? 'bg-red-100 text-red-700' :
+                        phoneCheckResult.carrier.toLowerCase().includes('orange')   ? 'bg-orange-100 text-orange-700' :
+                        phoneCheckResult.carrier.toLowerCase().includes('etisalat') || phoneCheckResult.carrier.toLowerCase().includes('e&') ? 'bg-purple-100 text-purple-700' :
+                        phoneCheckResult.carrier.toLowerCase().includes('we') || phoneCheckResult.carrier.toLowerCase().includes('telecom') ? 'bg-blue-100 text-blue-700' :
+                        'bg-gray-100 text-gray-600'
+                      }`}>
+                        {phoneCheckResult.carrier}
+                      </span>
+                    )}
                   </div>
+
                   {searching && (
                     <div className="absolute left-3 top-3 text-[11px] text-[#4B5563] font-cairo">جاري البحث...</div>
                   )}
+
                   {/* Patient Search Results Dropdown */}
                   {searchResults.length > 0 && (
                     <div className="absolute z-30 w-full mt-1 bg-white border border-[#E5E7EB] rounded-[12px] shadow-lg max-h-[200px] overflow-y-auto">
@@ -661,6 +785,83 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
                           </div>
                         </button>
                       ))}
+                    </div>
+                  )}
+
+                  {/* ===== P1: REGISTERED PATIENT BANNER ===== */}
+                  {/* Shown when phone is registered in the app but not in this doctor's list */}
+                  {isCreatingNew && phoneCheckResult?.isRegistered && !codeVerified?.valid && (
+                    <div className="mt-2 rounded-[10px] border border-[#BFDBFE] bg-[#EFF6FF] p-3">
+                      <div className="flex items-start gap-2">
+                        <div className="mt-0.5 w-5 h-5 rounded-full bg-[#3B82F6] flex-shrink-0 flex items-center justify-center">
+                          <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-cairo font-semibold text-[13px] text-[#1E40AF]">هذا المريض لديه حساب في MedAssist</p>
+                          <p className="font-cairo text-[12px] text-[#3B82F6] mt-0.5">
+                            اطلب من المريض مشاركة كود ملفه للوصول للتاريخ الكامل، أو تابع كزيارة عادية
+                          </p>
+                          {!showCodeInput && (
+                            <button
+                              type="button"
+                              onClick={() => setShowCodeInput(true)}
+                              className="mt-2 px-3 py-1.5 bg-[#3B82F6] text-white text-[12px] font-cairo font-semibold rounded-[8px] hover:bg-[#2563EB] transition-colors"
+                            >
+                              أدخل الكود
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Code input panel */}
+                      {showCodeInput && (
+                        <div className="mt-3 pt-3 border-t border-[#BFDBFE]">
+                          <p className="font-cairo text-[11px] text-[#6B7280] mb-2">اطلب من المريض فتح التطبيق وإظهار الكود</p>
+                          <div className="flex gap-2" dir="ltr">
+                            <input
+                              type="text"
+                              value={patientCode}
+                              onChange={(e) => { setPatientCode(e.target.value.toUpperCase()); setCodeVerified(null) }}
+                              onKeyDown={(e) => e.key === 'Enter' && verifyCode()}
+                              placeholder="مثال: AB12CD"
+                              maxLength={12}
+                              className="flex-1 px-3 py-2 border border-[#BFDBFE] rounded-[8px] text-[14px] font-mono bg-white focus:outline-none focus:ring-2 focus:ring-[#3B82F6] tracking-widest text-center uppercase"
+                              dir="ltr"
+                            />
+                            <button
+                              type="button"
+                              onClick={verifyCode}
+                              disabled={!patientCode.trim() || codeVerifying}
+                              className="px-3 py-2 bg-[#3B82F6] text-white text-[12px] font-cairo font-semibold rounded-[8px] hover:bg-[#2563EB] disabled:opacity-50 transition-colors whitespace-nowrap"
+                            >
+                              {codeVerifying ? (
+                                <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                              ) : 'تحقق'}
+                            </button>
+                          </div>
+                          {/* Verification result */}
+                          {codeVerified && !codeVerified.valid && (
+                            <p className="mt-1.5 font-cairo text-[12px] text-[#DC2626]">❌ الكود غير صحيح — تحقق من المريض وأعد المحاولة</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Code verified — success state */}
+                  {isCreatingNew && codeVerified?.valid && (
+                    <div className="mt-2 rounded-[10px] border border-[#BBF7D0] bg-[#F0FDF4] p-3 flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-full bg-[#22C55E] flex-shrink-0 flex items-center justify-center">
+                        <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                      </div>
+                      <div>
+                        <p className="font-cairo font-semibold text-[13px] text-[#16A34A]">تم التحقق ✓</p>
+                        <p className="font-cairo text-[11px] text-[#4B5563]">سيتم ربط السجل الكامل للمريض بعد البدء</p>
+                      </div>
                     </div>
                   )}
                 </div>
