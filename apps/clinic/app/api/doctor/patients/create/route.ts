@@ -24,11 +24,13 @@ export async function POST(request: Request) {
     const body = await request.json()
 
     // Accept both modal shape and canonical patient-create shape
-    const name = body.name || body.fullName || body.full_name
-    const phone = body.phone
-    const sexRaw = body.gender || body.sex
-    const ageRaw = body.age
+    const name       = body.name || body.fullName || body.full_name
+    const rawPhone   = body.phone
+    const sexRaw     = body.gender || body.sex
+    const ageRaw     = body.age
     const dateOfBirth = body.date_of_birth || body.dateOfBirth
+    const isDependent = body.isDependent ?? body.is_dependent ?? false
+    const parentPhone = body.parentPhone || body.parent_phone || body.guardian_phone
 
     if (!name || typeof name !== 'string' || name.trim().length < 2) {
       return NextResponse.json(
@@ -37,11 +39,22 @@ export async function POST(request: Request) {
       )
     }
 
-    if (!phone || typeof phone !== 'string') {
-      return NextResponse.json(
-        { error: 'Phone number is required' },
-        { status: 400 }
-      )
+    // Dependents (children, elderly, etc.) have no personal phone.
+    // The caregiver's phone is stored in parentPhone.
+    // We generate a unique placeholder so the patient gets their own record.
+    let phone: string
+    if (!rawPhone || (typeof rawPhone === 'string' && rawPhone.trim() === '')) {
+      if (isDependent && parentPhone) {
+        // Generate unique placeholder: DEP_ prefix + timestamp + random suffix
+        phone = `DEP_${Date.now()}_${Math.random().toString(36).slice(2, 7).toUpperCase()}`
+      } else {
+        return NextResponse.json(
+          { error: 'Phone number is required' },
+          { status: 400 }
+        )
+      }
+    } else {
+      phone = rawPhone
     }
 
     const normalizedSex = sexRaw

@@ -161,6 +161,12 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
     patient?: { fullName: string | null; age: number | null; sex: string | null }
   } | null>(null)
 
+  // ===== P2: CAREGIVER / DEPENDENT =====
+  // isDependent: patient is a child, elderly, or dependent — phone belongs to caregiver
+  // dependentType: optional sub-type for documentation (no clinical impact)
+  const [isDependent, setIsDependent]       = useState(false)
+  const [dependentType, setDependentType]   = useState<'child' | 'elderly' | 'special' | null>(null)
+
   // ===== SPEED METRICS ("faster than paper") =====
   const [sessionStartTime] = useState(() => Date.now())
   const keystrokeCountRef = useRef(0)
@@ -463,6 +469,8 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
             age: manualAge ? Number(manualAge) : 0,
             sex: manualSex || 'Other',
             patientCode: patientCode.trim().toUpperCase(),
+            isDependent,
+            parentPhone: isDependent ? phone : undefined,
           }),
         })
       } else {
@@ -471,10 +479,12 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            phone,
+            phone: isDependent ? undefined : phone,  // dependent has no personal phone
             name,
             age: manualAge ? Number(manualAge) : undefined,
             sex: manualSex || undefined,
+            isDependent,
+            parentPhone: isDependent ? phone : undefined,
           }),
         })
       }
@@ -638,12 +648,14 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
   const COMMON_CHRONIC   = ['سكري', 'ضغط', 'قلب', 'ربو', 'كلى', 'كبد', 'غدة درقية', 'التهاب مفاصل', 'سمنة', 'قولون عصبي']
 
   // ===== NEW PATIENT MODE: phone entered, search done, no results =====
-  // Triggers the inline create-patient flow
+  // Triggers the inline create-patient flow.
+  // In dependent mode: always true once caregiver phone ≥ 8 digits
+  // (search results are irrelevant — we're looking up caregiver, creating for patient)
   const isCreatingNew =
-    !selectedPatient &&
-    patientSearch.replace(/\D/g, '').length >= 8 &&
-    searchResults.length === 0 &&
-    !searching
+    !selectedPatient && (
+      (isDependent && patientSearch.replace(/\D/g, '').length >= 8) ||
+      (patientSearch.replace(/\D/g, '').length >= 8 && searchResults.length === 0 && !searching)
+    )
 
   // ===== VISIT TYPE CHIPS =====
   const visitTypeChips: { key: VisitType; label: string }[] = [
@@ -668,31 +680,62 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
         )}
 
         {/* ===== PATIENT INFO CARD ===== */}
-        <div className={`bg-white rounded-[12px] border overflow-hidden transition-colors ${isCreatingNew ? 'border-[#22C55E] ring-2 ring-[#22C55E]/20' : 'border-[#E5E7EB]'}`}>
-          <div className={`px-4 py-3 border-b flex items-center justify-between ${isCreatingNew ? 'bg-[#F0FDF4] border-[#BBF7D0]' : 'bg-[#F9FAFB] border-[#E5E7EB]'}`}>
+        <div className={`bg-white rounded-[12px] border overflow-hidden transition-colors ${
+          isDependent && isCreatingNew ? 'border-[#F59E0B] ring-2 ring-[#F59E0B]/20' :
+          isCreatingNew               ? 'border-[#22C55E] ring-2 ring-[#22C55E]/20' :
+                                        'border-[#E5E7EB]'
+        }`}>
+          <div className={`px-4 py-3 border-b flex items-center justify-between ${
+            isDependent && isCreatingNew ? 'bg-[#FFFBEB] border-[#FDE68A]' :
+            isCreatingNew               ? 'bg-[#F0FDF4] border-[#BBF7D0]' :
+                                          'bg-[#F9FAFB] border-[#E5E7EB]'
+          }`}>
             <h3 className="font-cairo font-bold text-[14px] text-[#030712]">معلومات المريض</h3>
-            {isCreatingNew && (
-              <span className="flex items-center gap-1 px-2 py-0.5 bg-[#22C55E] text-white text-[11px] font-cairo font-bold rounded-full">
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-                </svg>
-                مريض جديد
-              </span>
-            )}
-            {selectedPatient && (
-              <span className="flex items-center gap-1 px-2 py-0.5 bg-[#DCFCE7] text-[#16A34A] text-[11px] font-cairo font-bold rounded-full">
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
-                تم التعرف
-              </span>
-            )}
+            <div className="flex items-center gap-2">
+              {/* Dependent toggle — always shown when no patient selected */}
+              {!selectedPatient && (
+                <button
+                  type="button"
+                  onClick={() => { setIsDependent(p => !p); setDependentType(null) }}
+                  className={`flex items-center gap-1 px-2 py-0.5 text-[11px] font-cairo font-semibold rounded-full border transition-colors ${
+                    isDependent
+                      ? 'bg-[#F59E0B] border-[#F59E0B] text-white'
+                      : 'bg-white border-[#E5E7EB] text-[#6B7280] hover:border-[#F59E0B] hover:text-[#F59E0B]'
+                  }`}
+                >
+                  👶 تابع
+                </button>
+              )}
+              {isCreatingNew && !isDependent && (
+                <span className="flex items-center gap-1 px-2 py-0.5 bg-[#22C55E] text-white text-[11px] font-cairo font-bold rounded-full">
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                  </svg>
+                  مريض جديد
+                </span>
+              )}
+              {isDependent && isCreatingNew && (
+                <span className="flex items-center gap-1 px-2 py-0.5 bg-[#F59E0B] text-white text-[11px] font-cairo font-bold rounded-full">
+                  مريض تابع
+                </span>
+              )}
+              {selectedPatient && (
+                <span className="flex items-center gap-1 px-2 py-0.5 bg-[#DCFCE7] text-[#16A34A] text-[11px] font-cairo font-bold rounded-full">
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                  تم التعرف
+                </span>
+              )}
+            </div>
           </div>
 
           <div className="p-4 space-y-4">
             {/* Phone Number */}
             <div>
-              <label className="block font-cairo text-[12px] font-semibold text-[#4B5563] mb-1.5">رقم الموبايل</label>
+              <label className="block font-cairo text-[12px] font-semibold text-[#4B5563] mb-1.5">
+                {isDependent ? 'رقم موبايل ولي الأمر / المرافق' : 'رقم الموبايل'}
+              </label>
               {selectedPatient ? (
                 <div className="flex items-center justify-between bg-[#DCFCE7] rounded-[10px] p-3">
                   <div className="flex items-center gap-3">
@@ -721,6 +764,8 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
                       setManualSex(null)
                       setManualAge('')
                       setManualPatientName('')
+                      setIsDependent(false)
+                      setDependentType(null)
                     }}
                     className="font-cairo text-[12px] font-medium text-[#16A34A]"
                   >
@@ -763,8 +808,8 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
                     <div className="absolute left-3 top-3 text-[11px] text-[#4B5563] font-cairo">جاري البحث...</div>
                   )}
 
-                  {/* Patient Search Results Dropdown */}
-                  {searchResults.length > 0 && (
+                  {/* Patient Search Results Dropdown — hidden in dependent mode (phone = caregiver) */}
+                  {searchResults.length > 0 && !isDependent && (
                     <div className="absolute z-30 w-full mt-1 bg-white border border-[#E5E7EB] rounded-[12px] shadow-lg max-h-[200px] overflow-y-auto">
                       {searchResults.map((p) => (
                         <button
@@ -785,6 +830,19 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
                           </div>
                         </button>
                       ))}
+                    </div>
+                  )}
+
+                  {/* ===== P2: CAREGIVER INFO BOX ===== */}
+                  {isDependent && patientSearch.replace(/\D/g, '').length >= 8 && (
+                    <div className="mt-2 rounded-[10px] border border-[#FDE68A] bg-[#FFFBEB] p-3 flex items-start gap-2">
+                      <svg className="w-4 h-4 text-[#D97706] mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                      <div>
+                        <p className="font-cairo font-semibold text-[12px] text-[#92400E]">رقم المرافق — ليس رقم المريض</p>
+                        <p className="font-cairo text-[11px] text-[#B45309] mt-0.5">سيُحفظ كرقم التواصل لولي الأمر. اسم المريض (التابع) أدناه</p>
+                      </div>
                     </div>
                   )}
 
@@ -873,20 +931,22 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
               <>
                 <div>
                   <label className="block font-cairo text-[12px] font-semibold text-[#4B5563] mb-1.5">
-                    الاسم
+                    {isDependent ? 'اسم المريض (التابع)' : 'الاسم'}
                     {isCreatingNew && <span className="text-[#DC2626] mr-0.5">*</span>}
                   </label>
                   <input
                     type="text"
                     value={manualPatientName}
                     onChange={(e) => setManualPatientName(e.target.value)}
-                    placeholder="الاسم الأول واسم العائلة"
+                    placeholder={isDependent ? 'اسم الطفل / التابع' : 'الاسم الأول واسم العائلة'}
                     className={`w-full px-3 py-2.5 border rounded-[10px] text-[14px] font-cairo focus:outline-none focus:ring-2 focus:ring-[#22C55E] focus:border-transparent bg-white transition-colors ${
                       isCreatingNew && !manualPatientName.trim() ? 'border-[#FCA5A5]' : 'border-[#E5E7EB]'
                     }`}
                   />
                   {isCreatingNew && (
-                    <p className="mt-1 font-cairo text-[11px] text-[#6B7280]">يرجى إدخال الاسم الأول واسم العائلة</p>
+                    <p className="mt-1 font-cairo text-[11px] text-[#6B7280]">
+                      {isDependent ? 'اسم المريض التابع (وليس المرافق)' : 'يرجى إدخال الاسم الأول واسم العائلة'}
+                    </p>
                   )}
                 </div>
 
@@ -910,6 +970,36 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
                           }`}
                         >
                           <span className="ml-1 text-[15px]">{icon}</span>{label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Dependent type chips — only in dependent + creating mode */}
+                {isCreatingNew && isDependent && (
+                  <div>
+                    <label className="block font-cairo text-[12px] font-semibold text-[#4B5563] mb-1.5">
+                      نوع التبعية
+                      <span className="font-cairo text-[11px] font-normal text-[#9CA3AF] mr-1">(اختياري)</span>
+                    </label>
+                    <div className="flex gap-2 flex-wrap">
+                      {([
+                        { key: 'child',   label: '👶 طفل / رضيع' },
+                        { key: 'elderly', label: '🧓 مسن' },
+                        { key: 'special', label: '♿ ذوي احتياجات' },
+                      ] as const).map(({ key, label }) => (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => setDependentType(prev => prev === key ? null : key)}
+                          className={`px-3 py-1.5 font-cairo text-[12px] font-semibold rounded-full border transition-colors ${
+                            dependentType === key
+                              ? 'bg-[#F59E0B] border-[#F59E0B] text-white'
+                              : 'bg-white border-[#E5E7EB] text-[#4B5563] hover:border-[#F59E0B]'
+                          }`}
+                        >
+                          {label}
                         </button>
                       ))}
                     </div>
@@ -1099,7 +1189,9 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
           const canProceed = !!selectedPatient || (isCreatingNew && hasPhone && hasName)
           const buttonLabel = creatingPatient
             ? 'جاري الإضافة...'
-            : isCreatingNew
+            : isCreatingNew && isDependent
+              ? 'إضافة المريض التابع وبدء الروشتة'
+              : isCreatingNew
               ? 'إضافة المريض وبدء الروشتة'
               : 'ابدأ الروشتة'
 
