@@ -745,20 +745,29 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
             isCreatingNew               ? 'bg-[#F0FDF4] border-[#BBF7D0]' :
                                           'bg-[#F9FAFB] border-[#E5E7EB]'
           }`}>
-            <h3 className="font-cairo font-bold text-[14px] text-[#030712]">معلومات المريض</h3>
+            <div className="flex items-center gap-2">
+              <span className="w-6 h-6 rounded-[6px] bg-[#DCFCE7] flex items-center justify-center flex-shrink-0">
+                <svg className="w-3.5 h-3.5 text-[#16A34A]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                </svg>
+              </span>
+              <h3 className="font-cairo font-bold text-[14px] text-[#030712]">معلومات المريض</h3>
+            </div>
             <div className="flex items-center gap-2">
               {/* Dependent toggle — always shown when no patient selected */}
               {!selectedPatient && (
                 <button
                   type="button"
                   onClick={() => { setIsDependent(p => !p); setDependentType(null) }}
-                  className={`flex items-center gap-1 px-2 py-0.5 text-[11px] font-cairo font-semibold rounded-full border transition-colors ${
+                  title="المريض طفل أو يُعالَج بواسطة مرافق"
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-cairo font-semibold rounded-full border transition-all ${
                     isDependent
-                      ? 'bg-[#F59E0B] border-[#F59E0B] text-white'
-                      : 'bg-white border-[#E5E7EB] text-[#6B7280] hover:border-[#F59E0B] hover:text-[#F59E0B]'
+                      ? 'bg-[#F59E0B] border-[#F59E0B] text-white shadow-sm'
+                      : 'bg-[#FFFBEB] border-[#FDE68A] text-[#92400E] hover:bg-[#FEF3C7]'
                   }`}
                 >
-                  👶 تابع
+                  <span className="text-[14px] leading-none">👶</span>
+                  <span>{isDependent ? 'تابع ✓' : 'تابع / مرافق'}</span>
                 </button>
               )}
               {isCreatingNew && !isDependent && (
@@ -1198,7 +1207,12 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
 
         {/* ===== ALLERGIES & CHRONIC DISEASES ===== */}
         <div className="bg-white rounded-[12px] border border-[#E5E7EB] overflow-hidden">
-          <div className="px-4 py-3 bg-[#F9FAFB] border-b border-[#E5E7EB]">
+          <div className="px-4 py-3 bg-[#FFF8F8] border-b border-[#FFE4E6] flex items-center gap-2">
+            <span className="w-6 h-6 rounded-[6px] bg-[#FEE2E2] flex items-center justify-center flex-shrink-0">
+              <svg className="w-3.5 h-3.5 text-[#DC2626]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </span>
             <h3 className="font-cairo font-bold text-[14px] text-[#030712]">الحساسية والأمراض المزمنة</h3>
           </div>
 
@@ -1388,43 +1402,46 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
       )}
 
       {/* ===== PATIENT SUMMARY BAR ===== */}
-      <div className="bg-white rounded-[12px] border border-[#E5E7EB] p-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-full bg-[#DCFCE7] flex items-center justify-center">
-              <svg className="w-4 h-4 text-[#16A34A]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <div className="bg-gradient-to-l from-[#F0FDF4] to-white rounded-[12px] border border-[#BBF7D0] p-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-9 h-9 rounded-full bg-[#16A34A] flex items-center justify-center flex-shrink-0">
+              <svg className="w-4.5 h-4.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
               </svg>
             </div>
-            <div>
-              <span className="font-cairo font-bold text-[14px] text-[#030712]">{selectedPatient?.name}</span>
-              <div className="flex items-center gap-2 text-[11px] font-cairo text-[#4B5563]">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-cairo font-bold text-[14px] text-[#030712]">{selectedPatient?.name}</span>
+                {allergies.length > 0 && (
+                  <span className="px-1.5 py-0.5 bg-[#FEE2E2] text-[#DC2626] text-[10px] font-cairo font-bold rounded-full flex-shrink-0">
+                    ⚠ حساسية
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2 text-[11px] font-cairo text-[#6B7280] mt-0.5 flex-wrap">
                 <span dir="ltr">{selectedPatient?.phone}</span>
                 {selectedPatient?.age && <span>· {selectedPatient.age} سنة</span>}
-                {allergies.length > 0 && (
-                  <span className="text-[#DC2626] font-medium">
-                    · حساسية: {allergies.join('، ')}
-                  </span>
+                {selectedPatient?.sex && <span>· {selectedPatient.sex === 'male' ? 'ذكر' : 'أنثى'}</span>}
+                {chronicDiseases.length > 0 && (
+                  <span className="text-[#6B7280]">· {chronicDiseases.slice(0, 2).join('، ')}{chronicDiseases.length > 2 ? `...` : ''}</span>
                 )}
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            {/* Active session badge */}
-            <span className="px-2 py-0.5 bg-[#DCFCE7] text-[#16A34A] text-[11px] font-cairo font-semibold rounded-full">
-              جلسة نشطة
-            </span>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <span className="w-2 h-2 rounded-full bg-[#22C55E] animate-pulse" />
             <button
               onClick={() => setStep(1)}
-              className="font-cairo text-[11px] font-medium text-[#4B5563]"
+              className="font-cairo text-[12px] font-semibold text-[#16A34A] hover:text-[#15803d] transition-colors"
             >
               تعديل
             </button>
           </div>
         </div>
-        {/* Auto-save indicator */}
         {lastSaved && (
-          <div className="mt-1 text-[10px] font-cairo text-[#9CA3AF] text-left" dir="ltr">
+          <div className="mt-1.5 text-[10px] font-cairo text-[#9CA3AF] flex items-center gap-1" dir="ltr">
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
             حُفظ تلقائياً {lastSaved.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}
           </div>
         )}
@@ -1500,11 +1517,19 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
 
       {/* ===== CHIEF COMPLAINT — Tap chips + free text ===== */}
       <div className="bg-white rounded-[12px] border border-[#E5E7EB] overflow-hidden">
-        <div className="px-4 py-3 bg-[#F9FAFB] border-b border-[#E5E7EB]">
-          <div className="flex items-center justify-between">
-            <h3 className="font-cairo font-bold text-[14px] text-[#030712]">الشكوى</h3>
-            <span className="font-cairo text-[11px] text-[#9CA3AF]">اختياري</span>
+        <div className="px-4 py-3 bg-[#F9FAFB] border-b border-[#E5E7EB] flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="w-6 h-6 rounded-[6px] bg-[#FEF3C7] flex items-center justify-center flex-shrink-0">
+              <svg className="w-3.5 h-3.5 text-[#D97706]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              </svg>
+            </span>
+            <h3 className="font-cairo font-bold text-[14px] text-[#030712]">الشكوى الرئيسية</h3>
+            {chiefComplaint && (
+              <span className="w-2 h-2 rounded-full bg-[#22C55E]" />
+            )}
           </div>
+          <span className="font-cairo text-[11px] text-[#9CA3AF]">اختياري</span>
         </div>
         <div className="p-4 space-y-3">
           {/* Quick complaint chips — top 20 Egyptian GP complaints */}
@@ -1628,45 +1653,64 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
       </CollapsibleSection>
 
       {/* ===== DOCTOR NOTES ===== */}
-      <div className="bg-white rounded-[12px] border border-[#E5E7EB] overflow-hidden">
-        <div className="px-4 py-3 bg-[#F9FAFB] border-b border-[#E5E7EB]">
-          <h3 className="font-cairo font-bold text-[14px] text-[#030712]">ملاحظات الطبيب</h3>
+      <CollapsibleSection
+        title="ملاحظات الطبيب"
+        icon="notes"
+        badge={doctorNotes.trim() ? '✓' : undefined}
+        defaultOpen={false}
+      >
+        <textarea
+          value={doctorNotes}
+          onChange={(e) => setDoctorNotes(e.target.value)}
+          rows={3}
+          placeholder="أكتب ملاحظاتك هنا..."
+          className="w-full px-3 py-2.5 border border-[#E5E7EB] rounded-[10px] text-[13px] font-cairo focus:outline-none focus:ring-2 focus:ring-[#22C55E] resize-none bg-white mt-2"
+        />
+        <div className="flex items-center gap-2 mt-2">
+          <button
+            onClick={() => setShowNotesInPrint(!showNotesInPrint)}
+            className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+              showNotesInPrint ? 'bg-[#16A34A] border-[#16A34A]' : 'border-[#E5E7EB] bg-white'
+            }`}
+          >
+            {showNotesInPrint && (
+              <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+            )}
+          </button>
+          <span className="font-cairo text-[12px] text-[#4B5563]">تظهر في الطباعة</span>
         </div>
-        <div className="p-4">
-          <textarea
-            value={doctorNotes}
-            onChange={(e) => setDoctorNotes(e.target.value)}
-            rows={3}
-            placeholder="أكتب ملاحظاتك هنا..."
-            className="w-full px-3 py-2.5 border border-[#E5E7EB] rounded-[10px] text-[13px] font-cairo focus:outline-none focus:ring-2 focus:ring-[#22C55E] resize-none bg-white"
-          />
-          <div className="flex items-center gap-2 mt-2">
-            <button
-              onClick={() => setShowNotesInPrint(!showNotesInPrint)}
-              className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
-                showNotesInPrint ? 'bg-[#16A34A] border-[#16A34A]' : 'border-[#E5E7EB] bg-white'
-              }`}
-            >
-              {showNotesInPrint && (
-                <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
-              )}
-            </button>
-            <span className="font-cairo text-[12px] text-[#4B5563]">تظهر في الطباعة</span>
-          </div>
-        </div>
-      </div>
+      </CollapsibleSection>
 
       {/* ===== FOLLOW-UP ===== */}
-      <div className="bg-white rounded-[12px] border border-[#E5E7EB] overflow-hidden">
-        <div className="px-4 py-3 bg-[#F9FAFB] border-b border-[#E5E7EB]">
-          <h3 className="font-cairo font-bold text-[14px] text-[#030712]">المتابعة</h3>
-        </div>
-        <div className="p-4 space-y-3">
-          {/* Date */}
+      <CollapsibleSection
+        title="المتابعة"
+        icon="calendar"
+        badge={followUpDate ? followUpDate : undefined}
+        defaultOpen={false}
+      >
+        <div className="space-y-3 mt-2">
+          {/* Quick date chips first for speed */}
+          <div className="flex flex-wrap gap-2">
+            {followUpChips.map((chip) => (
+              <button
+                key={chip.label}
+                onClick={() => setFollowUpFromChip(chip.days)}
+                className={`px-3 py-1.5 font-cairo text-[12px] font-medium rounded-full border transition-colors bg-white ${
+                  followUpDate === (() => { const d = new Date(); d.setDate(d.getDate() + chip.days); return d.toISOString().split('T')[0] })()
+                    ? 'border-[#16A34A] text-[#16A34A] bg-[#F0FDF4]'
+                    : 'border-[#E5E7EB] text-[#4B5563] hover:border-[#16A34A] hover:text-[#16A34A]'
+                }`}
+              >
+                {chip.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Exact date picker */}
           <div>
-            <label className="block font-cairo text-[12px] font-semibold text-[#4B5563] mb-1.5">موعد المراجعة</label>
+            <label className="block font-cairo text-[12px] font-semibold text-[#4B5563] mb-1.5">أو اختر تاريخاً محدداً</label>
             <input
               type="date"
               value={followUpDate}
@@ -1674,19 +1718,6 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
               className="w-full px-3 py-2.5 border border-[#E5E7EB] rounded-[10px] text-[13px] font-cairo focus:outline-none focus:ring-2 focus:ring-[#22C55E] bg-white"
               dir="ltr"
             />
-          </div>
-
-          {/* Quick date chips */}
-          <div className="flex flex-wrap gap-2">
-            {followUpChips.map((chip) => (
-              <button
-                key={chip.label}
-                onClick={() => setFollowUpFromChip(chip.days)}
-                className="px-3 py-1.5 font-cairo text-[12px] font-medium rounded-full border border-[#E5E7EB] text-[#4B5563] hover:border-[#16A34A] hover:text-[#16A34A] transition-colors bg-white"
-              >
-                {chip.label}
-              </button>
-            ))}
           </div>
 
           {/* Follow-up notes */}
@@ -1701,7 +1732,7 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
             />
           </div>
         </div>
-      </div>
+      </CollapsibleSection>
 
       {/* ===== ACTION BAR ===== */}
       <div className="sticky bottom-16 bg-white border-t border-[#E5E7EB] p-4 -mx-4">
