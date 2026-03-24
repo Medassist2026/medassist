@@ -125,7 +125,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Transform data for frontend
-    const appointments = (data || []).map(apt => {
+    const appointments = (data || []).map((apt: any) => {
       const patient = Array.isArray(apt.patient) ? apt.patient[0] : apt.patient
 
       return {
