@@ -12,6 +12,14 @@ export interface ClinicalNoteData {
     notes?: string
   }>
   plan: string
+  // Extended fields stored in note_data JSONB
+  allergies?: string[]
+  chronic_diseases?: string[]
+  radiology?: string[]
+  labs?: string[]
+  follow_up_date?: string | null
+  follow_up_notes?: string | null
+  visit_type?: string
 }
 
 export interface CreateClinicalNoteParams {
@@ -71,7 +79,20 @@ export async function createClinicalNote(params: CreateClinicalNoteParams) {
       plan: params.noteData.plan,
       keystroke_count: params.keystrokeCount,
       duration_seconds: params.durationSeconds,
-      synced_to_patient: params.syncToPatient
+      synced_to_patient: params.syncToPatient,
+      // Store full note payload as JSONB so allergies, chronic diseases, radiology,
+      // labs, follow-up, and all session data survive for future reads.
+      note_data: {
+        ...params.noteData,
+        // Ensure denormalized structured fields are included
+        allergies: params.noteData.allergies || [],
+        chronic_diseases: params.noteData.chronic_diseases || [],
+        radiology: params.noteData.radiology || [],
+        labs: params.noteData.labs || [],
+        follow_up_date: params.noteData.follow_up_date || null,
+        follow_up_notes: params.noteData.follow_up_notes || null,
+        visit_type: params.noteData.visit_type || 'new',
+      },
     })
     .select()
     .single()

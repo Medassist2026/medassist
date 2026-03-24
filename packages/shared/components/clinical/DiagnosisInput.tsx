@@ -258,8 +258,8 @@ export default function DiagnosisInput({
       {/* Suggested diagnoses based on chief complaints */}
       {suggestedDiagnoses.length > 0 && (
         <div>
-          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase">
-            Suggested for your complaints
+          <p className="text-xs font-semibold text-gray-500 mb-2 font-cairo">
+            مقترحات بناءً على الشكوى
           </p>
           <div className="space-y-2">
             {suggestedDiagnoses.map((diagnosis, index) => (
@@ -284,7 +284,7 @@ export default function DiagnosisInput({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Search ICD-10 code or description..."
+            placeholder="بحث ICD-10 بالإنجليزية أو الكود..."
             className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none pr-10"
             autoComplete="off"
           />
@@ -320,52 +320,40 @@ export default function DiagnosisInput({
           </div>
         )}
 
-        {/* Custom diagnosis input */}
-        {showCustomInput && (
-          <div className="absolute z-20 w-full mt-2 bg-white border border-gray-200 rounded-lg shadow-xl p-4 space-y-3">
-            <p className="text-sm text-gray-600">No codes found. Create a custom diagnosis:</p>
-            <div className="flex gap-2">
-              <input
-                ref={customInputRef}
-                type="text"
-                value={customDiagnosis}
-                onChange={(e) => setCustomDiagnosis(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    handleCustomDiagnosis()
-                  }
-                }}
-                placeholder="Type diagnosis name..."
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none text-sm"
-                autoComplete="off"
-                autoFocus
-              />
-              <button
-                onClick={handleCustomDiagnosis}
-                className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white text-sm rounded-lg font-semibold transition-colors"
-              >
-                Use
-              </button>
-            </div>
+        {/* No ICD results hint — still shows below the search results if they exist */}
+        {showDropdown && query.length >= 2 && results.length === 0 && !loading && (
+          <div className="absolute z-20 w-full mt-2 bg-white border border-gray-200 rounded-lg shadow-xl p-3">
+            <p className="text-sm text-gray-500 font-cairo">لا توجد نتائج — استخدم حقل الإضافة اليدوية أدناه</p>
           </div>
         )}
-
-        {/* No Results */}
-        {showDropdown &&
-          query.length >= 2 &&
-          results.length === 0 &&
-          !loading &&
-          !showCustomInput && (
-            <div className="absolute z-20 w-full mt-2 bg-white border border-gray-200 rounded-lg shadow-xl p-4">
-              <p className="text-sm text-gray-600">
-                No ICD-10 codes found for "{query}"
-              </p>
-            </div>
-          )}
       </div>
 
-      <p className="text-xs text-gray-500">
-        Type at least 2 characters to search. Use ↑↓ to navigate, Enter to select. Click presets above for quick selection.
+      {/* ===== ALWAYS-VISIBLE MANUAL DIAGNOSIS ENTRY ===== */}
+      {/* Doctor can type any diagnosis text that isn't in ICD-10 */}
+      <div className="flex gap-2 mt-2">
+        <input
+          ref={customInputRef}
+          type="text"
+          value={customDiagnosis}
+          onChange={(e) => setCustomDiagnosis(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') handleCustomDiagnosis() }}
+          placeholder="أو اكتب تشخيصاً مخصصاً (Enter للإضافة)..."
+          className="flex-1 px-3 py-2.5 border border-gray-200 rounded-[10px] focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none text-[13px] font-cairo bg-white"
+          autoComplete="off"
+        />
+        {customDiagnosis.trim() && (
+          <button
+            type="button"
+            onClick={handleCustomDiagnosis}
+            className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-[12px] rounded-[10px] font-cairo font-semibold transition-colors whitespace-nowrap"
+          >
+            + إضافة
+          </button>
+        )}
+      </div>
+
+      <p className="text-xs text-gray-400 font-cairo mt-1">
+        اكتب حرفين للبحث في ICD-10، أو استخدم حقل التشخيص المخصص أعلاه.
       </p>
     </div>
   )

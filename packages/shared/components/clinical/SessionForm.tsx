@@ -136,6 +136,9 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
   // ===== MANUAL PATIENT NAME (B02: was uncontrolled) =====
   const [manualPatientName, setManualPatientName] = useState('')
 
+  // ===== CHIEF COMPLAINT CUSTOM INPUT (appends; separate from chip toggles) =====
+  const [complaintCustom, setComplaintCustom] = useState('')
+
   // ===== MANUAL AGE (separate state so age field is editable when no patient selected) =====
   const [manualAge, setManualAge] = useState<string>('')
 
@@ -1168,11 +1171,19 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
               <div className="flex items-center gap-2">
                 <input
                   type="number"
+                  inputMode="numeric"
                   min="0"
-                  max="130"
+                  max="120"
                   value={selectedPatient?.age ? String(selectedPatient.age) : manualAge}
                   readOnly={!!selectedPatient?.age}
-                  onChange={(e) => { if (!selectedPatient?.age) setManualAge(e.target.value) }}
+                  onChange={(e) => {
+                    if (selectedPatient?.age) return
+                    // Strip non-digits and cap at 120
+                    const raw = e.target.value.replace(/\D/g, '').slice(0, 3)
+                    const num = parseInt(raw, 10)
+                    if (!raw || isNaN(num)) { setManualAge(raw === '' ? '' : raw); return }
+                    setManualAge(String(Math.min(num, 120)))
+                  }}
                   placeholder="—"
                   className={`w-20 px-3 py-2.5 border border-[#E5E7EB] rounded-[10px] text-[14px] font-cairo text-center focus:outline-none focus:ring-2 focus:ring-[#22C55E] ${selectedPatient?.age ? 'bg-[#F9FAFB] text-[#6B7280]' : 'bg-white text-[#030712]'}`}
                 />
@@ -1531,14 +1542,41 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
               )
             })}
           </div>
-          {/* Free text fallback for anything not in chips */}
-          <input
-            type="text"
-            value={chiefComplaint}
-            onChange={(e) => setChiefComplaint(e.target.value)}
-            placeholder="أو اكتب الشكوى يدوياً..."
-            className="w-full px-3 py-2.5 border border-[#E5E7EB] rounded-[10px] text-[13px] font-cairo focus:outline-none focus:ring-2 focus:ring-[#22C55E] focus:border-transparent bg-white"
-          />
+          {/* Selected complaints preview */}
+          {chiefComplaint && (
+            <div className="px-1 py-0.5 text-[12px] font-cairo text-[#4B5563] bg-[#F9FAFB] rounded-[8px] px-3 py-2 leading-relaxed">
+              <span className="text-[#9CA3AF] text-[11px]">الشكوى: </span>{chiefComplaint}
+            </div>
+          )}
+          {/* Custom complaint input — appends to chips on Enter */}
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={complaintCustom}
+              onChange={(e) => setComplaintCustom(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && complaintCustom.trim()) {
+                  e.preventDefault()
+                  setChiefComplaint(prev => prev ? `${prev}، ${complaintCustom.trim()}` : complaintCustom.trim())
+                  setComplaintCustom('')
+                }
+              }}
+              placeholder="أضف شكوى مخصصة... (Enter للإضافة)"
+              className="flex-1 px-3 py-2.5 border border-[#E5E7EB] rounded-[10px] text-[13px] font-cairo focus:outline-none focus:ring-2 focus:ring-[#22C55E] focus:border-transparent bg-white"
+            />
+            {complaintCustom.trim() && (
+              <button
+                type="button"
+                onClick={() => {
+                  setChiefComplaint(prev => prev ? `${prev}، ${complaintCustom.trim()}` : complaintCustom.trim())
+                  setComplaintCustom('')
+                }}
+                className="px-3 py-2 bg-[#22C55E] text-white text-[12px] font-cairo font-semibold rounded-[10px] hover:bg-[#16A34A] transition-colors whitespace-nowrap"
+              >
+                + إضافة
+              </button>
+            )}
+          </div>
         </div>
       </div>
 

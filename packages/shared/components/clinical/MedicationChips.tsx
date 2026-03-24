@@ -78,18 +78,18 @@ function normalizeArabic(text: string): string {
 const DOSAGE_OPTIONS = ['½', '1', '2', '3']
 const FORM_OPTIONS = [
   { value: 'كبسولة', label: 'كبسولة' },
-  { value: 'كبسولات', label: 'كبسولات' },
-  { value: 'قرص', label: 'قرص' },
+  { value: 'قرص',   label: 'قرص'   },
   { value: 'أقراص', label: 'أقراص' },
-  { value: 'شراب', label: 'شراب' },
-  { value: 'حقن', label: 'حقن' },
-  { value: 'كريم', label: 'كريم' },
-  { value: 'نقط', label: 'نقط' },
-  { value: 'بخاخ', label: 'بخاخ' },
-  { value: 'لبوس', label: 'لبوس' },
-  { value: 'بخة', label: 'بخة' },
+  { value: 'شراب',  label: 'شراب'  },
+  { value: 'حقن',   label: 'حقن'   },
+  { value: 'كريم',  label: 'كريم'  },
+  { value: 'نقط',   label: 'نقط'   },
+  { value: 'بخاخ',  label: 'بخاخ'  },
+  { value: 'لبوس',  label: 'لبوس'  },
+  { value: 'بخة',   label: 'بخة'   },
 ]
-const FREQUENCY_OPTIONS = ['1×', '2×', '3×', '4×']
+// Frequency expressed as dosing interval (most practical for Egyptian GP)
+const FREQUENCY_OPTIONS = ['كل 6 ساعات', 'كل 8 ساعات', 'كل 12 ساعة', 'يومياً']
 const TIMING_OPTIONS = ['صباح', 'ظهر', 'مساء', 'قبل النوم']
 const INSTRUCTION_OPTIONS = ['قبل الأكل', 'بعد الأكل', 'عند اللزوم']
 const DURATION_OPTIONS = ['3 أيام', '5 أيام', '7 أيام', '10 أيام', '14 يوم', 'شهر', 'مستمر']
@@ -245,18 +245,20 @@ export function MedicationChips({
       const currentFreq = medications[index].frequency
       // Defaults for the current (old) frequency
       const oldDefaults: Record<string, string[]> = {
-        '1×': ['صباح'], '2×': ['صباح', 'مساء'], '3×': ['صباح', 'ظهر', 'مساء'],
-        '4×': ['صباح', 'ظهر', 'مساء', 'قبل النوم'], 'يومياً': ['صباح'],
+        'يومياً': ['صباح'],
+        'كل 12 ساعة': ['صباح', 'مساء'],
+        'كل 8 ساعات': ['صباح', 'ظهر', 'مساء'],
+        'كل 6 ساعات': ['صباح', 'ظهر', 'مساء', 'قبل النوم'],
       }
       const oldDefault = oldDefaults[currentFreq || ''] || []
       const isDefault = currentTimings.length === oldDefault.length && currentTimings.every(t => oldDefault.includes(t))
 
       if (isDefault) {
         // Timings match defaults — safe to auto-update
-        if (f === '1×') updated[index].timings = ['صباح']
-        else if (f === '2×') updated[index].timings = ['صباح', 'مساء']
-        else if (f === '3×') updated[index].timings = ['صباح', 'ظهر', 'مساء']
-        else if (f === '4×') updated[index].timings = ['صباح', 'ظهر', 'مساء', 'قبل النوم']
+        if (f === 'يومياً') updated[index].timings = ['صباح']
+        else if (f === 'كل 12 ساعة') updated[index].timings = ['صباح', 'مساء']
+        else if (f === 'كل 8 ساعات') updated[index].timings = ['صباح', 'ظهر', 'مساء']
+        else if (f === 'كل 6 ساعات') updated[index].timings = ['صباح', 'ظهر', 'مساء', 'قبل النوم']
       }
       // If user customized timings, leave them alone
     }
@@ -285,7 +287,7 @@ export function MedicationChips({
   const getMedSummary = (med: MedicationEntry): string => {
     const parts: string[] = []
     if (med.dosageCount) parts.push(`${med.dosageCount} ${med.form || 'قرص'}`)
-    if (med.frequency) parts.push(`${med.frequency} يومياً`)
+    if (med.frequency) parts.push(med.frequency)
     if (med.timings?.length) parts.push(med.timings.join(' + '))
     if (med.duration) parts.push(`لمدة ${med.duration}`)
     return parts.join(' · ')
@@ -486,16 +488,6 @@ export function MedicationChips({
                       {freq}
                     </button>
                   ))}
-                  <button
-                    onClick={() => updateMed(i, { frequency: 'يومياً' })}
-                    className={`px-3 py-2 rounded-[8px] font-cairo text-[12px] font-medium border transition-colors ${
-                      med.frequency === 'يومياً'
-                        ? 'bg-[#16A34A] border-[#16A34A] text-white'
-                        : 'bg-white border-[#E5E7EB] text-[#4B5563] hover:border-[#16A34A]'
-                    }`}
-                  >
-                    يومياً
-                  </button>
                 </div>
               </div>
 

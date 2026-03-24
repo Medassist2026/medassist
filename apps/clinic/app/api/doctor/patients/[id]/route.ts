@@ -32,36 +32,57 @@ export async function GET(
       .eq('doctor_id', user.id)
       .order('created_at', { ascending: false })
 
-    // Extract medications from clinical notes
+    // Extract medications, allergies, and chronic diseases from clinical notes
     const medications: any[] = []
     const visits: any[] = []
+    // Use the MOST RECENT note to populate allergies and chronic conditions.
+    // note_data.allergies / note_data.chronic_diseases were added in the P5 fix —
+    // older notes may not have them (graceful fallback to empty).
+    let latestAllergies: string[] = []
+    let latestChronicDiseases: string[] = []
 
     for (const note of (notes || [])) {
+      const nd = (note.note_data || {}) as any
+
       // Each note is a visit
       visits.push({
         id: note.id,
         date: note.created_at,
         status: 'completed',
-        reason: note.note_data?.chiefComplaint || 'Clinical visit',
-        notes: note.note_data?.plan || '',
-        diagnosis: note.note_data?.diagnosis || ''
+        reason: Array.isArray(note.chief_complaint)
+          ? note.chief_complaint.join('، ')
+          : (nd.chief_complaint?.[0] || 'Clinical visit'),
+        notes: nd.plan || note.plan || '',
+        diagnosis: Array.isArray(note.diagnosis)
+          ? note.diagnosis.map((d: any) => d?.text || d).filter(Boolean).join('، ')
+          : (nd.diagnosis || '')
       })
 
-      // Extract medications from note_data
-      if (note.note_data?.medications) {
-        for (const med of note.note_data.medications) {
-          medications.push({
-            id: `${note.id}-${med.name}`,
-            name: med.name,
-            dosage: med.strength || med.dosage || '',
-            frequency: med.frequency || '',
-            duration: med.duration || '',
-            instructions: med.instructions || '',
-            start_date: note.created_at,
-            status: 'active',
-            prescribed_by: 'You'
-          })
-        }
+      // Extract medications — from structured `medications` column (preferred) or note_data
+      const medSource = Array.isArray(note.medications) && note.medications.length > 0
+        ? note.medications
+        : (nd.medications || [])
+      for (const med of medSource) {
+        const name = med.drug || med.name || 'Unnamed'
+        medications.push({
+          id: `${note.id}-${name}`,
+          name,
+          dosage: med.strength || med.dosage || med.dosageCount || '',
+          frequency: med.frequency || '',
+          duration: med.duration || '',
+          instructions: med.instructions || med.notes || '',
+          start_date: note.created_at,
+          status: 'active',
+          prescribed_by: 'You'
+        })
+      }
+
+      // Collect allergies and chronic diseases from most recent note (first in desc order)
+      if (latestAllergies.length === 0 && Array.isArray(nd.allergies) && nd.allergies.length > 0) {
+        latestAllergies = nd.allergies
+      }
+      if (latestChronicDiseases.length === 0 && Array.isArray(nd.chronic_diseases) && nd.chronic_diseases.length > 0) {
+        latestChronicDiseases = nd.chronic_diseases
       }
     }
 
@@ -129,10 +150,13 @@ export async function GET(
         // P3 fields
         is_registered: patient.registered || false,
         access_level: relationship?.access_level || 'walk_in_limited',
+        // Populated from the most recent clinical note saved with this doctor
+        allergies: latestAllergies,
+        chronic_conditions: latestChronicDiseases,
       },
-      conditions: [], // Will be populated when conditions table is created
+      conditions: [],
       medications,
-      allergies: [], // Will be populated when allergies tracking is added
+      allergies: latestAllergies,
       labs: [],
       appointments: (appointments || []).map((apt: any) => ({
         id: apt.id,

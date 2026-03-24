@@ -2,7 +2,6 @@ export const dynamic = 'force-dynamic'
 
 import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
 import { createAdminClient } from '@shared/lib/supabase/admin'
-import { createClient } from '@shared/lib/supabase/server'
 import { NextResponse } from 'next/server'
 
 function diagnosisToText(diagnosis: any): string {
@@ -56,11 +55,10 @@ export async function GET(request: Request) {
       )
     }
 
-    const supabase = await createClient()
-    const admin = createAdminClient('patient-privacy-checks')
+    // Use admin client to bypass RLS — doctor ownership is enforced by .eq('doctor_id', user.id)
+    const admin = createAdminClient('prescription-fetch')
 
-    // Authorization check first: note must belong to current doctor.
-    const { data: note, error: noteError } = await supabase
+    const { data: note, error: noteError } = await admin
       .from('clinical_notes')
       .select(`
         id,
@@ -85,13 +83,14 @@ export async function GET(request: Request) {
       .single()
 
     if (noteError || !note) {
+      console.error('Prescription fetch error:', noteError?.message, { noteId, doctorId: user.id })
       return NextResponse.json(
         { error: 'Prescription not found' },
         { status: 404 }
       )
     }
 
-    // Use admin for patient read to avoid RLS null joins on non-appointment notes.
+    // Fetch patient info via admin client (same client, bypasses patient RLS)
     let patient: any = null
     if (note.patient_id) {
       const { data: patientData } = await admin
