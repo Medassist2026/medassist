@@ -41,36 +41,6 @@ export async function POST(request: Request) {
       )
     }
 
-    // Check if already a member via clinic_memberships
-    const { data: existingMembership } = await admin
-      .from('clinic_memberships')
-      .select('id, status, role')
-      .eq('clinic_id', clinic.id)
-      .eq('user_id', user.id)
-      .maybeSingle()
-
-    if (existingMembership) {
-      if (existingMembership.status === 'ACTIVE') {
-        return NextResponse.json(
-          { error: 'You are already a member of this clinic' },
-          { status: 409 }
-        )
-      }
-      // Re-activate if previously suspended/invited
-      await admin
-        .from('clinic_memberships')
-        .update({ status: 'ACTIVE', updated_at: new Date().toISOString() })
-        .eq('id', existingMembership.id)
-
-      return NextResponse.json({
-        success: true,
-        clinicId: clinic.id,
-        clinicName: clinic.name,
-        clinicUniqueId: clinic.unique_id,
-        role: existingMembership.role,
-      })
-    }
-
     // Determine role based on user's registered role
     let membershipRole: string
     if (user.role === 'doctor') {
@@ -84,31 +54,64 @@ export async function POST(request: Request) {
       )
     }
 
-    // Create membership in clinic_memberships
-    const { error: membershipError } = await admin
+    // Try clinic_memberships first (available if migration 018 has run)
+    const { error: cmProbeError } = await admin
       .from('clinic_memberships')
-      .insert({
-        clinic_id: clinic.id,
-        user_id: user.id,
-        role: membershipRole,
-        status: 'ACTIVE'
-      })
+      .select('id')
+      .limit(0)
 
-    if (membershipError) {
-      throw new Error(membershipError.message)
+    const hasMembershipsTable = !cmProbeError
+
+    if (hasMembershipsTable) {
+      const { data: existingMembership } = await admin
+        .from('clinic_memberships')
+        .select('id, status, role')
+        .eq('clinic_id', clinic.id)
+        .eq('user_id', user.id)
+        .maybeSingle()
+
+      if (existingMembership) {
+        if (existingMembership.status === 'ACTIVE') {
+          return NextResponse.json(
+            { error: 'You are already a member of this clinic' },
+            { status: 409 }
+          )
+        }
+        await admin
+          .from('clinic_memberships')
+          .update({ status: 'ACTIVE', updated_at: new Date().toISOString() })
+          .eq('id', existingMembership.id)
+        return NextResponse.json({ success: true, clinicId: clinic.id, clinicName: clinic.name, clinicUniqueId: clinic.unique_id, role: existingMembership.role })
+      }
+
+      const { error: membershipError } = await admin
+        .from('clinic_memberships')
+        .insert({ clinic_id: clinic.id, user_id: user.id, role: membershipRole, status: 'ACTIVE' })
+      if (membershipError) throw new Error(membershipError.message)
     }
 
-    // Legacy backward compatibility: also link in old tables
+    // Always write to the concrete role tables (clinic_doctors / front_desk_staff)
     if (user.role === 'doctor') {
-      try {
-        await admin
-          .from('clinic_doctors')
-          .insert({ clinic_id: clinic.id, doctor_id: user.id, role: 'doctor' })
-      } catch {
-        // Swallow legacy table error
+      // Check duplicate
+      const { data: existing } = await admin
+        .from('clinic_doctors')
+        .select('clinic_id')
+        .eq('clinic_id', clinic.id)
+        .eq('doctor_id', user.id)
+        .maybeSingle()
+
+      if (existing) {
+        return NextResponse.json(
+          { error: 'You are already a member of this clinic' },
+          { status: 409 }
+        )
       }
+
+      const { error: cdError } = await admin
+        .from('clinic_doctors')
+        .insert({ clinic_id: clinic.id, doctor_id: user.id, role: 'doctor' })
+      if (cdError) throw new Error(cdError.message)
     } else if (user.role === 'frontdesk') {
-      // Update front_desk_staff.clinic_id for backward compatibility
       await admin
         .from('front_desk_staff')
         .update({ clinic_id: clinic.id })
