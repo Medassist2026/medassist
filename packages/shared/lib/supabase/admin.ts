@@ -14,6 +14,7 @@ const ALLOWED_ADMIN_SCOPES = new Set([
   'patient-details',
   'patient-visits',
   'patient-appointments',
+  'doctor-appointments',
   'prescription-sync',
   'patient-dedup',
   'audit-log',

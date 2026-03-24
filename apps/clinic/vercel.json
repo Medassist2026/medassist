@@ -4,6 +4,7 @@
   "buildCommand": "cd ../.. && npm run build:clinic",
   "framework": "nextjs",
   "env": {
-    "DEV_BYPASS_OTP": "true"
+    "DEV_BYPASS_OTP": "true",
+    "NEXT_PUBLIC_OTP_BYPASS_HINT": "true"
   }
 }

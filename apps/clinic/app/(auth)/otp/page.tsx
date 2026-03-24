@@ -192,12 +192,19 @@ function OTPVerificationPageInner() {
             {phone}
           </span>
 
-          {/* Dev bypass hint — only visible when OTP_BYPASS_CODE env var is set */}
+          {/* Dev bypass hint — visible when DEV_BYPASS_OTP is active (any 4-digit code works) */}
           {process.env.NEXT_PUBLIC_OTP_BYPASS_HINT === 'true' && (
             <div className="mt-4 px-4 py-2 rounded-lg bg-amber-50 border border-amber-200 text-center">
               <p className="font-mono text-[13px] text-amber-700">
-                🔧 Dev mode — bypass code:{' '}
-                <span className="font-bold">{process.env.NEXT_PUBLIC_OTP_BYPASS_CODE || '0000'}</span>
+                🔧 وضع التطوير — أي رمز مكون من 4 أرقام يعمل (مثال:{' '}
+                <button
+                  type="button"
+                  className="font-bold underline cursor-pointer"
+                  onClick={() => setOtp(['1','2','3','4'])}
+                >
+                  1234
+                </button>
+                )
               </p>
             </div>
           )}

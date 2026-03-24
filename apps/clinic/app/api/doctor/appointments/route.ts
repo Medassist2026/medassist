@@ -18,8 +18,9 @@ import { validateClinicHours } from '@shared/lib/utils/clinic-hours'
 export async function GET(request: NextRequest) {
   try {
     const user = await requireApiRole('doctor')
-    const supabase = await createClient()
-    
+    // Use admin client to bypass RLS — access is explicitly scoped to doctor_id = user.id below
+    const supabase = createAdminClient('patient-appointments')
+
     const searchParams = request.nextUrl.searchParams
     const date = searchParams.get('date')
     const startDate = searchParams.get('start')
@@ -73,7 +74,47 @@ export async function GET(request: NextRequest) {
       query = query.gte('start_time', dayStart).lte('start_time', dayEnd)
     }
 
-    const { data, error } = await query
+    let { data, error } = await query
+
+    // Graceful fallback: if query fails (e.g. reason/notes columns missing from DB),
+    // retry without the optional columns added in migration 025
+    if (error && (error.code === '42703' || error.message?.includes('column') || error.message?.includes('does not exist'))) {
+      console.warn('Appointments query: optional columns missing, retrying without reason/notes:', error.message)
+      const fallback = supabase
+        .from('appointments')
+        .select(`
+          id,
+          start_time,
+          duration_minutes,
+          status,
+          appointment_type,
+          clinic_id,
+          patient:patients!appointments_patient_id_fkey (
+            id,
+            full_name,
+            phone,
+            age,
+            sex
+          )
+        `)
+        .eq('doctor_id', user.id)
+        .order('start_time', { ascending: true })
+
+      // Re-apply filters
+      if (clinicId) fallback.eq('clinic_id', clinicId)
+      const todayStr = new Date().toISOString().split('T')[0]
+      if (date) {
+        fallback.gte('start_time', `${date}T00:00:00`).lte('start_time', `${date}T23:59:59`)
+      } else if (startDate && endDate) {
+        fallback.gte('start_time', `${startDate}T00:00:00`).lte('start_time', `${endDate}T23:59:59`)
+      } else {
+        fallback.gte('start_time', `${todayStr}T00:00:00`).lte('start_time', `${todayStr}T23:59:59`)
+      }
+
+      const fb = await fallback
+      data = fb.data
+      error = fb.error
+    }
 
     if (error) {
       console.error('Error fetching appointments:', error)

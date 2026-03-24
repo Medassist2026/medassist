@@ -23,11 +23,18 @@ export async function POST(request: Request) {
     }
 
     // ── Server-side phone format validation ──
-    // Egyptian mobile: +2001[0125][0-9]{8}
+    // In dev bypass mode, accept any E.164-ish number to allow testing with fake numbers
+    const DEV_BYPASS_OTP = process.env.DEV_BYPASS_OTP === 'true'
     const EG_PHONE_RE = /^\+2001[0125][0-9]{8}$/
-    if (!EG_PHONE_RE.test(phone)) {
+    const E164_RE = /^\+[1-9]\d{6,14}$/
+    const phoneValid = DEV_BYPASS_OTP ? E164_RE.test(phone) : EG_PHONE_RE.test(phone)
+    if (!phoneValid) {
       return NextResponse.json(
-        { error: 'رقم الموبايل غير صحيح. يجب أن يبدأ بـ 010 أو 011 أو 012 أو 015' },
+        {
+          error: DEV_BYPASS_OTP
+            ? 'رقم الهاتف غير صحيح. يجب أن يبدأ بـ + ويحتوي على 7-15 رقم'
+            : 'رقم الموبايل غير صحيح. يجب أن يبدأ بـ 010 أو 011 أو 012 أو 015'
+        },
         { status: 400 }
       )
     }

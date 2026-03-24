@@ -24,11 +24,15 @@ export async function POST(request: Request) {
       )
     }
 
-    // ── Phone format validation (Egyptian mobile numbers only) ──
+    // ── Phone format validation ──
+    // In dev bypass mode, accept any E.164 number for testing with fake numbers
+    const DEV_BYPASS_OTP = process.env.DEV_BYPASS_OTP === 'true'
     const isEmail = identifier.includes('@')
     if (!isEmail) {
       const EG_PHONE_RE = /^\+2001[0125][0-9]{8}$/
-      if (!EG_PHONE_RE.test(identifier)) {
+      const E164_RE = /^\+[1-9]\d{6,14}$/
+      const phoneValid = DEV_BYPASS_OTP ? E164_RE.test(identifier) : EG_PHONE_RE.test(identifier)
+      if (!phoneValid) {
         return NextResponse.json(
           { error: 'رقم الموبايل غير صحيح' },
           { status: 400 }
