@@ -33,38 +33,53 @@ export interface CreateClinicParams {
  * Create a new doctor account
  */
 export async function createDoctorAccount(params: CreateDoctorParams) {
-  const supabase = await createClient()
+  const DEV_BYPASS_OTP = process.env.DEV_BYPASS_OTP === 'true'
 
-  // 1. Create auth user with BOTH phone and email
-  const authPayload: any = {
-    password: params.password,
-    options: {
-      data: {
-        role: 'doctor'
-      }
+  let userId: string
+
+  if (DEV_BYPASS_OTP) {
+    // Bypass Supabase phone confirmation (which tries to send SMS via its own Twilio integration).
+    // The app has its own OTP system — Supabase phone confirmation is redundant and breaks here.
+    const adminSupabase = createAdminClient('user-registration')
+    const { data: authData, error: authError } = await adminSupabase.auth.admin.createUser({
+      phone: params.phone,
+      ...(params.email ? { email: params.email, email_confirm: true } : {}),
+      password: params.password,
+      phone_confirm: true,
+      user_metadata: { role: 'doctor' }
+    })
+    if (authError || !authData.user) {
+      throw new Error(authError?.message || 'Failed to create auth user')
     }
-  }
-
-  // If email provided, use email as primary identifier
-  // Otherwise use phone
-  if (params.email) {
-    authPayload.email = params.email
-    authPayload.phone = params.phone
+    userId = authData.user.id
   } else {
-    authPayload.phone = params.phone
+    // Production path: supabase.auth.signUp (requires Supabase phone auth configured)
+    const supabase = await createClient()
+    const authPayload: any = {
+      password: params.password,
+      options: { data: { role: 'doctor' } }
+    }
+    if (params.email) {
+      authPayload.email = params.email
+      authPayload.phone = params.phone
+    } else {
+      authPayload.phone = params.phone
+    }
+    const { data: authData, error: authError } = await supabase.auth.signUp(authPayload)
+    if (authError || !authData.user) {
+      throw new Error(authError?.message || 'Failed to create auth user')
+    }
+    userId = authData.user.id
   }
 
-  const { data: authData, error: authError } = await supabase.auth.signUp(authPayload)
-
-  if (authError || !authData.user) {
-    throw new Error(authError?.message || 'Failed to create auth user')
-  }
+  // Use admin client for DB inserts — avoids RLS issues during registration
+  const adminSupabase = createAdminClient('user-registration')
 
   // 2. Create user record
-  const { error: userError } = await supabase
+  const { error: userError } = await adminSupabase
     .from('users')
     .insert({
-      id: authData.user.id,
+      id: userId,
       phone: params.phone,
       email: params.email || null,
       role: 'doctor'
@@ -76,11 +91,11 @@ export async function createDoctorAccount(params: CreateDoctorParams) {
 
   // 3. Create doctor profile
   const doctorUniqueId = nanoid(10).toUpperCase()
-  
-  const { error: doctorError } = await supabase
+
+  const { error: doctorError } = await adminSupabase
     .from('doctors')
     .insert({
-      id: authData.user.id,
+      id: userId,
       unique_id: doctorUniqueId,
       specialty: params.specialty,
       full_name: params.fullName
@@ -91,7 +106,7 @@ export async function createDoctorAccount(params: CreateDoctorParams) {
   }
 
   return {
-    userId: authData.user.id,
+    userId,
     doctorUniqueId
   }
 }
@@ -100,38 +115,49 @@ export async function createDoctorAccount(params: CreateDoctorParams) {
  * Create a new patient account
  */
 export async function createPatientAccount(params: CreatePatientParams) {
-  const supabase = await createClient()
+  const DEV_BYPASS_OTP = process.env.DEV_BYPASS_OTP === 'true'
 
-  // 1. Create auth user with BOTH phone and email
-  const authPayload: any = {
-    password: params.password,
-    options: {
-      data: {
-        role: 'patient'
-      }
+  let userId: string
+
+  if (DEV_BYPASS_OTP) {
+    const adminSupabase = createAdminClient('user-registration')
+    const { data: authData, error: authError } = await adminSupabase.auth.admin.createUser({
+      phone: params.phone,
+      ...(params.email ? { email: params.email, email_confirm: true } : {}),
+      password: params.password,
+      phone_confirm: true,
+      user_metadata: { role: 'patient' }
+    })
+    if (authError || !authData.user) {
+      throw new Error(authError?.message || 'Failed to create auth user')
     }
-  }
-
-  // If email provided, use email as primary identifier
-  // Otherwise use phone
-  if (params.email) {
-    authPayload.email = params.email
-    authPayload.phone = params.phone
+    userId = authData.user.id
   } else {
-    authPayload.phone = params.phone
+    const supabase = await createClient()
+    const authPayload: any = {
+      password: params.password,
+      options: { data: { role: 'patient' } }
+    }
+    if (params.email) {
+      authPayload.email = params.email
+      authPayload.phone = params.phone
+    } else {
+      authPayload.phone = params.phone
+    }
+    const { data: authData, error: authError } = await supabase.auth.signUp(authPayload)
+    if (authError || !authData.user) {
+      throw new Error(authError?.message || 'Failed to create auth user')
+    }
+    userId = authData.user.id
   }
 
-  const { data: authData, error: authError } = await supabase.auth.signUp(authPayload)
-
-  if (authError || !authData.user) {
-    throw new Error(authError?.message || 'Failed to create auth user')
-  }
+  const adminSupabase = createAdminClient('user-registration')
 
   // 2. Create user record
-  const { error: userError } = await supabase
+  const { error: userError } = await adminSupabase
     .from('users')
     .insert({
-      id: authData.user.id,
+      id: userId,
       phone: params.phone,
       email: params.email || null,
       role: 'patient'
@@ -143,11 +169,11 @@ export async function createPatientAccount(params: CreatePatientParams) {
 
   // 3. Create patient profile
   const patientUniqueId = nanoid(10).toUpperCase()
-  
-  const { error: patientError } = await supabase
+
+  const { error: patientError } = await adminSupabase
     .from('patients')
     .insert({
-      id: authData.user.id,
+      id: userId,
       unique_id: patientUniqueId,
       phone: params.phone,
       full_name: params.fullName,
@@ -159,7 +185,7 @@ export async function createPatientAccount(params: CreatePatientParams) {
   }
 
   return {
-    userId: authData.user.id,
+    userId,
     patientUniqueId
   }
 }
@@ -263,41 +289,52 @@ export async function getPatientProfile(userId: string) {
  * Create a new front desk staff account
  */
 export async function createFrontDeskAccount(params: CreateFrontDeskParams) {
-  const supabase = await createClient()
+  const DEV_BYPASS_OTP = process.env.DEV_BYPASS_OTP === 'true'
 
-  // 1. Create auth user
-  const authPayload: any = {
-    password: params.password,
-    options: {
-      data: {
-        role: 'frontdesk'
-      }
+  let userId: string
+
+  if (DEV_BYPASS_OTP) {
+    const adminSupabase = createAdminClient('user-registration')
+    const { data: authData, error: authError } = await adminSupabase.auth.admin.createUser({
+      phone: params.phone,
+      ...(params.email ? { email: params.email, email_confirm: true } : {}),
+      password: params.password,
+      phone_confirm: true,
+      user_metadata: { role: 'frontdesk' }
+    })
+    if (authError || !authData.user) {
+      throw new Error(authError?.message || 'Failed to create auth user')
     }
-  }
-
-  if (params.email) {
-    authPayload.email = params.email
-    authPayload.phone = params.phone
+    userId = authData.user.id
   } else {
-    authPayload.phone = params.phone
+    const supabase = await createClient()
+    const authPayload: any = {
+      password: params.password,
+      options: { data: { role: 'frontdesk' } }
+    }
+    if (params.email) {
+      authPayload.email = params.email
+      authPayload.phone = params.phone
+    } else {
+      authPayload.phone = params.phone
+    }
+    const { data: authData, error: authError } = await supabase.auth.signUp(authPayload)
+    if (authError) {
+      throw new Error(authError.message)
+    }
+    if (!authData.user?.id) {
+      throw new Error('Failed to create auth user')
+    }
+    userId = authData.user.id
   }
 
-  const { data: authData, error: authError } = await supabase.auth.signUp(authPayload)
-
-  if (authError) {
-    throw new Error(authError.message)
-  }
-
-  const userId = authData.user?.id
-  if (!userId) {
-    throw new Error('Failed to create auth user')
-  }
+  const adminSupabase = createAdminClient('user-registration')
 
   // 2. Generate unique ID
   const frontDeskUniqueId = `FD${nanoid(8).toUpperCase()}`
 
   // 3. Create user record
-  const { error: userError } = await supabase
+  const { error: userError } = await adminSupabase
     .from('users')
     .insert({
       id: userId,
@@ -310,7 +347,7 @@ export async function createFrontDeskAccount(params: CreateFrontDeskParams) {
   }
 
   // 4. Create front desk staff record
-  const { error: staffError } = await supabase
+  const { error: staffError } = await adminSupabase
     .from('front_desk_staff')
     .insert({
       id: userId,

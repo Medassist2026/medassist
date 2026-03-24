@@ -21,6 +21,7 @@ const ALLOWED_ADMIN_SCOPES = new Set([
   'input-validation',
   'sms-reminders',
   'lab-results',
+  'user-registration',
   'api-route'
 ])
 

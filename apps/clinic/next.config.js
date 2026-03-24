@@ -49,31 +49,16 @@ try {
           networkTimeoutSeconds: 10,
         },
       },
-      // API calls: network-first with fallback
+      // API calls: always go to network, never cache — prevents SW from serving stale
+      // auth/registration responses or intercepting in-flight requests
       {
         urlPattern: /\/api\/.*/i,
-        handler: 'NetworkFirst',
-        options: {
-          cacheName: 'api-cache',
-          expiration: {
-            maxEntries: 100,
-            maxAgeSeconds: 60 * 60, // 1 hour
-          },
-          networkTimeoutSeconds: 10,
-        },
+        handler: 'NetworkOnly',
       },
-      // Supabase API calls
+      // Supabase API calls: always network-only
       {
         urlPattern: /^https:\/\/.*\.supabase\.co\/.*/i,
-        handler: 'NetworkFirst',
-        options: {
-          cacheName: 'supabase-cache',
-          expiration: {
-            maxEntries: 50,
-            maxAgeSeconds: 5 * 60, // 5 minutes
-          },
-          networkTimeoutSeconds: 10,
-        },
+        handler: 'NetworkOnly',
       },
       // Navigation routes: network-first
       {
