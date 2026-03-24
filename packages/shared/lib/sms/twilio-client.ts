@@ -16,6 +16,17 @@ export async function sendSMS(to: string, body: string): Promise<SMSResult> {
     return { success: true, sid: `stub_${Date.now()}` }
   }
 
+  // Detect placeholder credentials — avoid real Twilio call
+  if (
+    authToken === 'your_twilio_auth_token' ||
+    fromNumber === 'your_twilio_phone_number' ||
+    authToken?.startsWith('your_') ||
+    fromNumber?.startsWith('your_')
+  ) {
+    console.warn('[Twilio] Placeholder credentials detected — SMS stubbed')
+    return { success: true, sid: `stub_${Date.now()}` }
+  }
+
   try {
     const response = await fetch(
       `${TWILIO_API_URL}/Accounts/${accountSid}/Messages.json`,
@@ -30,6 +41,7 @@ export async function sendSMS(to: string, body: string): Promise<SMSResult> {
           From: fromNumber,
           Body: body,
         }).toString(),
+        signal: AbortSignal.timeout(6000), // 6s max — don't hang the serverless function
       }
     )
 
