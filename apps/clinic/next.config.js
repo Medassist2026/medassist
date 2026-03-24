@@ -51,14 +51,17 @@ try {
       },
       // API calls: always go to network, never cache — prevents SW from serving stale
       // auth/registration responses or intercepting in-flight requests
+      // options:{} is required — next-pwa crashes reading precacheFallback on undefined
       {
         urlPattern: /\/api\/.*/i,
         handler: 'NetworkOnly',
+        options: {},
       },
       // Supabase API calls: always network-only
       {
         urlPattern: /^https:\/\/.*\.supabase\.co\/.*/i,
         handler: 'NetworkOnly',
+        options: {},
       },
       // Navigation routes: network-first
       {
