@@ -74,7 +74,7 @@ export async function GET(request: NextRequest) {
       query = query.gte('start_time', dayStart).lte('start_time', dayEnd)
     }
 
-    let { data, error } = await query
+    let { data, error }: { data: any; error: any } = await query
 
     // Graceful fallback: if query fails (e.g. reason/notes columns missing from DB),
     // retry without the optional columns added in migration 025
