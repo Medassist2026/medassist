@@ -1767,6 +1767,7 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
         <TemplateModal
           onApply={handleTemplateApply}
           onClose={() => setShowTemplateModal(false)}
+          currentMedications={medications.length > 0 ? medications : undefined}
         />
       )}
 
