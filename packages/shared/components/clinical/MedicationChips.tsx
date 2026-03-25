@@ -167,11 +167,21 @@ export function MedicationChips({
     // Check allergy conflict
     const conflict = checkAllergyConflict(drug.name, drug.genericName)
 
+    // FIX 2A: Map old format to new format
     const defaultFreq = drug.defaults?.frequency || ''
-    let freq = '2×'
-    if (defaultFreq.includes('once')) freq = '1×'
-    else if (defaultFreq.includes('twice') || defaultFreq.includes('2')) freq = '2×'
-    else if (defaultFreq.includes('three') || defaultFreq.includes('3')) freq = '3×'
+    let freq = 'كل 12 ساعة'  // Default = 2×
+    let timings: string[] = ['صباح', 'مساء']
+
+    if (defaultFreq.includes('once')) {
+      freq = 'يومياً'
+      timings = ['صباح']
+    } else if (defaultFreq.includes('three') || defaultFreq.includes('3')) {
+      freq = 'كل 8 ساعات'
+      timings = ['صباح', 'ظهر', 'مساء']
+    } else if (defaultFreq.includes('4')) {
+      freq = 'كل 6 ساعات'
+      timings = ['صباح', 'ظهر', 'مساء', 'قبل النوم']
+    }
 
     // B01: Smart duration defaults — antibiotics=7d, chronic=مستمر, painkillers=3d
     const defaultDuration = drug.defaults?.duration || ''
@@ -196,7 +206,7 @@ export function MedicationChips({
       form: drug.form === 'capsule' ? 'كبسولة' : drug.form === 'tablet' ? 'قرص' : drug.form === 'syrup' ? 'شراب' : drug.form === 'injection' ? 'حقن' : drug.form === 'cream' ? 'كريم' : 'قرص',
       dosageCount: '1',
       frequency: freq,
-      timings: freq === '2×' ? ['صباح', 'مساء'] : freq === '3×' ? ['صباح', 'ظهر', 'مساء'] : ['صباح'],
+      timings,
       instructions: drug.defaults?.instructions?.includes('after') ? 'بعد الأكل' : drug.defaults?.instructions?.includes('before') ? 'قبل الأكل' : undefined,
       duration,
       isExpanded: true, // Auto-expand newly added medication
@@ -217,11 +227,12 @@ export function MedicationChips({
   const [customStrength, setCustomStrength] = useState('')
   const addCustomMedication = () => {
     if (!search.trim()) return
+    // FIX 2B: Use new format for custom medication
     const newMed: MedicationEntry = {
       name: search.trim(),
       strength: customStrength.trim() || undefined,
       dosageCount: '1',
-      frequency: '2×',
+      frequency: 'كل 12 ساعة',
       timings: ['صباح', 'مساء'],
       form: 'قرص',
       isExpanded: true,
@@ -243,12 +254,17 @@ export function MedicationChips({
       const f = updates.frequency
       const currentTimings = medications[index].timings || []
       const currentFreq = medications[index].frequency
-      // Defaults for the current (old) frequency
+      // FIX 2C: Add legacy mapping for old format
+      // Defaults for the current (old) frequency (including legacy format)
       const oldDefaults: Record<string, string[]> = {
         'يومياً': ['صباح'],
+        '1×': ['صباح'],
         'كل 12 ساعة': ['صباح', 'مساء'],
+        '2×': ['صباح', 'مساء'],
         'كل 8 ساعات': ['صباح', 'ظهر', 'مساء'],
+        '3×': ['صباح', 'ظهر', 'مساء'],
         'كل 6 ساعات': ['صباح', 'ظهر', 'مساء', 'قبل النوم'],
+        '4×': ['صباح', 'ظهر', 'مساء', 'قبل النوم'],
       }
       const oldDefault = oldDefaults[currentFreq || ''] || []
       const isDefault = currentTimings.length === oldDefault.length && currentTimings.every(t => oldDefault.includes(t))

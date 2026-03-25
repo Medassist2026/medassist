@@ -38,6 +38,22 @@ export default function PrescriptionPage() {
   const [data, setData] = useState<PrescriptionData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [prescriptions, setPrescriptions] = useState<any[]>([]) // FIX 1: Prescriptions list
+
+  // FIX 1: Load prescriptions list when no noteId
+  const loadPrescriptionsList = useCallback(async () => {
+    try {
+      const response = await fetch('/api/doctor/prescriptions')
+      const result = await response.json()
+      if (result.success) {
+        setPrescriptions(result.prescriptions || [])
+      }
+    } catch (err: any) {
+      console.error('Failed to load prescriptions:', err)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
 
   // Load from API (saved note)
   const loadFromApi = useCallback(async () => {
@@ -117,10 +133,10 @@ export default function PrescriptionPage() {
     } else if (noteId) {
       loadFromApi()
     } else {
-      setError('لا يوجد معرف للجلسة')
-      setLoading(false)
+      // FIX 1: Load prescriptions list
+      loadPrescriptionsList()
     }
-  }, [mode, noteId, loadFromApi, loadFromSession])
+  }, [mode, noteId, loadFromApi, loadFromSession, loadPrescriptionsList])
 
   const handlePrint = async () => {
     if (noteId && mode !== 'print-only') {
@@ -164,11 +180,11 @@ export default function PrescriptionPage() {
               يتم إنشاء الوصفات أثناء جلسة الكشف. ابدأ جلسة مع مريض لإصدار وصفة طبية.
             </p>
             <button
-              onClick={() => router.push('/doctor/dashboard')}
+              onClick={() => router.push('/doctor/session')}
               className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#16A34A] text-white rounded-xl text-[14px] font-cairo font-medium hover:bg-[#15803D] transition-colors"
             >
               <ArrowRight className="w-4 h-4" />
-              الذهاب للوحة التحكم
+              ابدأ جلسة جديدة
             </button>
           </div>
         </div>
@@ -188,6 +204,52 @@ export default function PrescriptionPage() {
             {ar.goBack}
           </button>
         </div>
+      </div>
+    )
+  }
+
+  // FIX 1: Show prescriptions list when no noteId
+  if (!noteId && !data && prescriptions.length > 0) {
+    return (
+      <div className="max-w-md mx-auto px-4 py-4">
+        <div className="mb-4">
+          <h1 className="font-cairo text-[24px] font-bold text-[#030712] mb-1">الوصفات الطبية</h1>
+          <p className="font-cairo text-[14px] text-[#6B7280]">الوصفات الأخيرة</p>
+        </div>
+
+        <div className="space-y-2 mb-6">
+          {prescriptions.map((rx) => (
+            <button
+              key={rx.id}
+              onClick={() => router.push(`?noteId=${rx.id}`)}
+              className="w-full text-right px-4 py-3 bg-white border border-[#E5E7EB] rounded-xl hover:border-[#16A34A] hover:bg-[#F0FDF4] transition-colors"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-cairo text-[#9CA3AF]">
+                  {new Date(rx.created_at).toLocaleDateString('ar-EG')}
+                </span>
+              </div>
+              <div className="font-cairo font-bold text-[14px] text-[#030712] mt-1">
+                {rx.patient_name}
+              </div>
+              <div className="flex items-center gap-2 mt-1.5 text-[12px]">
+                <span className="text-[#4B5563]">{rx.diagnosis || 'بدون تشخيص'}</span>
+                {rx.medications_count > 0 && (
+                  <span className="px-2 py-0.5 bg-[#DCFCE7] text-[#16A34A] font-cairo font-semibold rounded-full text-[11px]">
+                    {rx.medications_count} أدوية
+                  </span>
+                )}
+              </div>
+            </button>
+          ))}
+        </div>
+
+        <button
+          onClick={() => router.push('/doctor/session')}
+          className="w-full py-3 bg-[#16A34A] text-white rounded-xl font-cairo font-bold text-[14px] hover:bg-[#15803d] transition-colors"
+        >
+          ابدأ جلسة جديدة
+        </button>
       </div>
     )
   }

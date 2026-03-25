@@ -135,10 +135,12 @@ function SetupPageInner() {
     setLoading(true)
     setError('')
     try {
+      // FIX 5C: Strip dashes from invite code
+      const cleanCode = inviteCode.replace(/[\s-]/g, '').toUpperCase()
       const res = await fetch('/api/clinic/join', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clinicUniqueId: inviteCode.trim() }),
+        body: JSON.stringify({ clinicUniqueId: cleanCode }),
       })
       if (!res.ok) {
         const data = await res.json()
@@ -326,18 +328,21 @@ function SetupPageInner() {
 
                 <div className="flex flex-col gap-2 mt-5">
                   <label className="font-cairo text-[14px] font-medium text-[#030712]">التخصص</label>
-                  <div className="bg-[#F3F4F6] border-[0.8px] border-[#E5E7EB] rounded-xl h-[52px] px-4 focus-within:border-[#16A34A] focus-within:ring-2 focus-within:ring-[#16A34A]/20 transition-all">
-                    <select
-                      value={specialty}
-                      onChange={(e) => setSpecialty(e.target.value)}
-                      className="w-full h-full bg-transparent font-cairo text-[15px] text-[#030712] outline-none appearance-none"
-                      style={{ direction: 'rtl' }}
-                    >
-                      <option value="">اختر التخصص</option>
-                      {specialties.map((s) => (
-                        <option key={s.value} value={s.value}>{s.label}</option>
-                      ))}
-                    </select>
+                  {/* FIX 4: Click-based specialty picker */}
+                  <div className="flex flex-wrap gap-2">
+                    {specialties.map((s) => (
+                      <button
+                        key={s.value}
+                        onClick={() => setSpecialty(s.value)}
+                        className={`px-3 py-2 rounded-[10px] font-cairo text-[13px] border transition-colors ${
+                          specialty === s.value
+                            ? 'border-[#16A34A] bg-[#F0FDF4] text-[#16A34A] font-semibold'
+                            : 'border-[#E5E7EB] bg-white text-[#4B5563] hover:border-[#16A34A]'
+                        }`}
+                      >
+                        {s.label}
+                      </button>
+                    ))}
                   </div>
                 </div>
 
@@ -481,8 +486,8 @@ function SetupPageInner() {
                     <input
                       type="text"
                       value={inviteCode}
-                      onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
-                      placeholder="XXXX-YY"
+                      onChange={(e) => setInviteCode(e.target.value.replace(/[\s-]/g, '').toUpperCase())}
+                      placeholder="أدخل كود الدعوة"
                       className="flex-1 bg-transparent font-inter text-[17px] font-semibold text-[#030712] placeholder:text-[#9CA3AF] outline-none text-center tracking-widest"
                       dir="ltr"
                     />

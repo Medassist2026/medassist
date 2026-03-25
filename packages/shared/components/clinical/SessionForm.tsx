@@ -126,6 +126,7 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
   const [chronicInput, setChronicInput] = useState('')
   const [diagnosis, setDiagnosis] = useState<string[]>([])
   const [doctorNotes, setDoctorNotes] = useState('')
+  const [pendingLabsFromLastVisit, setPendingLabsFromLastVisit] = useState<string[]>([]) // FIX 9
   const [showNotesInPrint, setShowNotesInPrint] = useState(true)
   const [medications, setMedications] = useState<MedicationEntry[]>([])
   const [radiology, setRadiology] = useState<RadiologyItem[]>([])
@@ -209,6 +210,7 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
   const [toastMessage, setToastMessage] = useState('')
   const [showToast, setShowToast] = useState(false)
   const [allergyWarning, setAllergyWarning] = useState<{ drugName: string; allergyName: string; familyName: string } | null>(null)
+  const [savedNoteId, setSavedNoteId] = useState<string | null>(null) // FIX 6: Print CTA after save
 
   const prescriptionRef = useRef<HTMLDivElement>(null)
 
@@ -302,6 +304,10 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
             setSelectedPatient(p)
             if (patient.allergies) setAllergies(patient.allergies)
             if (patient.chronic_conditions) setChronicDiseases(patient.chronic_conditions)
+            // FIX 9: Set pending labs from last visit
+            if (patient.pendingLabs?.length > 0) {
+              setPendingLabsFromLastVisit(patient.pendingLabs)
+            }
             // B09: Auto-detect follow-up from previous visits
             if (patient.last_visit_date || patient.visits?.length > 0) {
               setVisitType('followup')
@@ -446,6 +452,10 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
         const p = data.patient
         if (p?.allergies?.length > 0) setAllergies(p.allergies)
         if (p?.chronic_conditions?.length > 0) setChronicDiseases(p.chronic_conditions)
+        // FIX 9: Set pending labs from last visit
+        if (p?.pendingLabs?.length > 0) {
+          setPendingLabsFromLastVisit(p.pendingLabs)
+        }
         if (p?.age) setManualAge(String(p.age))
       }
     } catch { /* non-critical — patient can fill manually */ }
@@ -660,6 +670,12 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
 
         if (mode === 'save_and_print' && result.noteId) {
           router.push(`/doctor/prescription?noteId=${result.noteId}`)
+          return
+        }
+
+        // FIX 6: After save (not save_and_print), show success screen
+        if (mode === 'save' && result.noteId) {
+          setSavedNoteId(result.noteId)
           return
         }
       }
@@ -1393,11 +1409,45 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
   // STEP 2: PRESCRIPTION
   // ============================================================================
 
+  // FIX 6: Show success screen after save
+  if (savedNoteId) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 px-6" dir="rtl">
+        <div className="w-16 h-16 rounded-full bg-[#F0FDF4] flex items-center justify-center">
+          <svg className="w-8 h-8 text-[#16A34A]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+          </svg>
+        </div>
+        <h2 className="font-cairo text-[20px] font-bold text-[#030712]">تم حفظ الجلسة</h2>
+        <p className="font-cairo text-[14px] text-[#6B7280] text-center">الروشتة محفوظة بنجاح</p>
+        <button
+          onClick={() => router.push(`/doctor/prescription?noteId=${savedNoteId}`)}
+          className="w-full max-w-xs py-3 bg-[#16A34A] text-white rounded-xl font-cairo font-bold text-[15px] hover:bg-[#15803d] transition-colors"
+        >
+          عرض وطباعة الروشتة
+        </button>
+        <button
+          onClick={() => router.push('/doctor/dashboard')}
+          className="w-full max-w-xs py-3 border border-[#E5E7EB] text-[#4B5563] rounded-xl font-cairo text-[15px] hover:bg-[#F9FAFB] transition-colors"
+        >
+          العودة للوحة التحكم
+        </button>
+      </div>
+    )
+  }
+
   return (
     <div id="session-form-root" className="px-4 py-4 space-y-4" ref={prescriptionRef}>
+      {/* FIX 3: Prominent error banner with close button */}
       {error && (
-        <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-[13px] text-red-700 text-center font-cairo">
-          {error}
+        <div className="mx-4 mb-3 p-3 bg-red-50 border border-red-200 rounded-xl flex items-start gap-2">
+          <span className="text-red-500 text-[16px] flex-shrink-0">⚠️</span>
+          <div className="flex-1">
+            <p className="font-cairo text-[13px] text-red-700 font-medium">{error}</p>
+            <button onClick={() => setError('')} className="font-cairo text-[12px] text-red-500 mt-1 underline">
+              إغلاق
+            </button>
+          </div>
         </div>
       )}
 
@@ -1605,18 +1655,43 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
         </div>
       </div>
 
-      {/* ===== DIAGNOSIS — ICD-10 + Complaint-based suggestions ===== */}
-      <CollapsibleSection
-        title="التشخيص"
-        icon="stethoscope"
-        badge={diagnosis.length > 0 ? `${diagnosis.length}` : undefined}
-      >
-        <DiagnosisInput
-          value={diagnosis}
-          onChange={setDiagnosis}
-          chiefComplaints={chiefComplaint ? chiefComplaint.split(/[،,]/).map(s => s.trim()).filter(Boolean) : []}
-        />
-      </CollapsibleSection>
+      {/* FIX 9: Pending labs from last visit banner */}
+      {pendingLabsFromLastVisit.length > 0 && (
+        <div className="mx-4 mb-3 px-3 py-2.5 bg-[#FFFBEB] border border-[#F59E0B] rounded-xl">
+          <p className="font-cairo text-[12px] font-semibold text-[#92400E]">
+            🧪 تحاليل مطلوبة من آخر زيارة:
+          </p>
+          <p className="font-cairo text-[12px] text-[#B45309] mt-0.5">
+            {pendingLabsFromLastVisit.join('، ')}
+          </p>
+        </div>
+      )}
+
+      {/* ===== DIAGNOSIS — ICD-10 + Complaint-based suggestions (FIX 8: Always visible) ===== */}
+      <div className="bg-white rounded-[12px] border border-[#E5E7EB] overflow-hidden">
+        <div className="px-4 py-3 bg-[#F9FAFB] border-b border-[#E5E7EB] flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="w-6 h-6 rounded-[6px] bg-[#DBEAFE] flex items-center justify-center flex-shrink-0">
+              <svg className="w-3.5 h-3.5 text-[#2563EB]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </span>
+            <h3 className="font-cairo font-bold text-[14px] text-[#030712]">التشخيص</h3>
+            {diagnosis.length > 0 && (
+              <span className="ml-2 px-2 py-0.5 bg-[#DBEAFE] text-[#2563EB] rounded-full text-[11px] font-cairo font-semibold">
+                {diagnosis.length}
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="p-4">
+          <DiagnosisInput
+            value={diagnosis}
+            onChange={setDiagnosis}
+            chiefComplaints={chiefComplaint ? chiefComplaint.split(/[،,]/).map(s => s.trim()).filter(Boolean) : []}
+          />
+        </div>
+      </div>
 
       {/* ===== PRESCRIPTION — MEDICATIONS (Accordion) ===== */}
       <CollapsibleSection

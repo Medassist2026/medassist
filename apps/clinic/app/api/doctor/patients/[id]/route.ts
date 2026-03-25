@@ -86,6 +86,16 @@ export async function GET(
       }
     }
 
+    // FIX 9: Extract pending labs from most recent note
+    let pendingLabs: string[] = []
+    if (notes && notes.length > 0) {
+      const latestNote = notes[0]
+      const latestNoteData = (latestNote.note_data || {}) as any
+      if (Array.isArray(latestNoteData.labs) && latestNoteData.labs.length > 0) {
+        pendingLabs = latestNoteData.labs.map((lab: any) => lab.name || lab)
+      }
+    }
+
     // Fetch appointments
     const { data: appointments } = await admin
       .from('appointments')
@@ -153,6 +163,8 @@ export async function GET(
         // Populated from the most recent clinical note saved with this doctor
         allergies: latestAllergies,
         chronic_conditions: latestChronicDiseases,
+        // FIX 9: Pending labs from last visit
+        pendingLabs,
       },
       conditions: [],
       medications,

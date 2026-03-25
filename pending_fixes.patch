@@ -1,0 +1,434 @@
+From 3ec78ff78194297601f049854c943d879275b0ac Mon Sep 17 00:00:00 2001
+From: Mo Badwy <badwy.mt@gmail.com>
+Date: Mon, 23 Mar 2026 23:11:02 -0700
+Subject: [PATCH 1/2] fix(sms): detect placeholder Twilio creds + add 6s fetch
+ timeout
+
+Prevents serverless functions from hanging indefinitely when Twilio
+credentials are unset or contain placeholder values (your_twilio_*).
+SMS is now stubbed gracefully in both cases instead of making a real
+HTTP call that times out after Vercel's function limit.
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+---
+ packages/shared/lib/sms/twilio-client.ts | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/packages/shared/lib/sms/twilio-client.ts b/packages/shared/lib/sms/twilio-client.ts
+index c52b523..0ffab8b 100644
+--- a/packages/shared/lib/sms/twilio-client.ts
++++ b/packages/shared/lib/sms/twilio-client.ts
+@@ -16,6 +16,17 @@ export async function sendSMS(to: string, body: string): Promise<SMSResult> {
+     return { success: true, sid: `stub_${Date.now()}` }
+   }
+ 
++  // Detect placeholder credentials — avoid real Twilio call
++  if (
++    authToken === 'your_twilio_auth_token' ||
++    fromNumber === 'your_twilio_phone_number' ||
++    authToken?.startsWith('your_') ||
++    fromNumber?.startsWith('your_')
++  ) {
++    console.warn('[Twilio] Placeholder credentials detected — SMS stubbed')
++    return { success: true, sid: `stub_${Date.now()}` }
++  }
++
+   try {
+     const response = await fetch(
+       `${TWILIO_API_URL}/Accounts/${accountSid}/Messages.json`,
+@@ -30,6 +41,7 @@ export async function sendSMS(to: string, body: string): Promise<SMSResult> {
+           From: fromNumber,
+           Body: body,
+         }).toString(),
++        signal: AbortSignal.timeout(6000), // 6s max — don't hang the serverless function
+       }
+     )
+ 
+-- 
+2.34.1
+
+
+From f1081d7f204f6672569dbd781eb3cb0446f9e004 Mon Sep 17 00:00:00 2001
+From: Mo Badwy <badwy.mt@gmail.com>
+Date: Tue, 24 Mar 2026 07:30:17 -0700
+Subject: [PATCH 2/2] Fix registration hang + service worker API caching
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- users.ts: use admin.createUser() when DEV_BYPASS_OTP=true to bypass
+  Supabase phone confirmation SMS (which was hanging the /register route
+  indefinitely). Also use admin client for all DB inserts during
+  registration to avoid RLS issues on fresh accounts.
+- admin.ts: add 'user-registration' to allowed admin scopes
+- next.config.js: change /api/* and supabase SW handler to NetworkOnly
+  — prevents service worker from intercepting or caching API calls
+- vercel.json: set DEV_BYPASS_OTP=true so testing env is active on Vercel
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+---
+ apps/clinic/next.config.js            |  25 +---
+ apps/clinic/vercel.json               |   5 +-
+ packages/shared/lib/data/users.ts     | 197 +++++++++++++++-----------
+ packages/shared/lib/supabase/admin.ts |   1 +
+ 4 files changed, 127 insertions(+), 101 deletions(-)
+
+diff --git a/apps/clinic/next.config.js b/apps/clinic/next.config.js
+index f286a8b..fa23499 100644
+--- a/apps/clinic/next.config.js
++++ b/apps/clinic/next.config.js
+@@ -49,31 +49,16 @@ try {
+           networkTimeoutSeconds: 10,
+         },
+       },
+-      // API calls: network-first with fallback
++      // API calls: always go to network, never cache — prevents SW from serving stale
++      // auth/registration responses or intercepting in-flight requests
+       {
+         urlPattern: /\/api\/.*/i,
+-        handler: 'NetworkFirst',
+-        options: {
+-          cacheName: 'api-cache',
+-          expiration: {
+-            maxEntries: 100,
+-            maxAgeSeconds: 60 * 60, // 1 hour
+-          },
+-          networkTimeoutSeconds: 10,
+-        },
++        handler: 'NetworkOnly',
+       },
+-      // Supabase API calls
++      // Supabase API calls: always network-only
+       {
+         urlPattern: /^https:\/\/.*\.supabase\.co\/.*/i,
+-        handler: 'NetworkFirst',
+-        options: {
+-          cacheName: 'supabase-cache',
+-          expiration: {
+-            maxEntries: 50,
+-            maxAgeSeconds: 5 * 60, // 5 minutes
+-          },
+-          networkTimeoutSeconds: 10,
+-        },
++        handler: 'NetworkOnly',
+       },
+       // Navigation routes: network-first
+       {
+diff --git a/apps/clinic/vercel.json b/apps/clinic/vercel.json
+index 6aab46b..08707f4 100644
+--- a/apps/clinic/vercel.json
++++ b/apps/clinic/vercel.json
+@@ -2,5 +2,8 @@
+   "$schema": "https://openapi.vercel.sh/vercel.json",
+   "installCommand": "cd ../.. && npm install",
+   "buildCommand": "cd ../.. && npm run build:clinic",
+-  "framework": "nextjs"
++  "framework": "nextjs",
++  "env": {
++    "DEV_BYPASS_OTP": "true"
++  }
+ }
+diff --git a/packages/shared/lib/data/users.ts b/packages/shared/lib/data/users.ts
+index 35008f2..f65f183 100644
+--- a/packages/shared/lib/data/users.ts
++++ b/packages/shared/lib/data/users.ts
+@@ -33,38 +33,53 @@ export interface CreateClinicParams {
+  * Create a new doctor account
+  */
+ export async function createDoctorAccount(params: CreateDoctorParams) {
+-  const supabase = await createClient()
++  const DEV_BYPASS_OTP = process.env.DEV_BYPASS_OTP === 'true'
+ 
+-  // 1. Create auth user with BOTH phone and email
+-  const authPayload: any = {
+-    password: params.password,
+-    options: {
+-      data: {
+-        role: 'doctor'
+-      }
+-    }
+-  }
++  let userId: string
+ 
+-  // If email provided, use email as primary identifier
+-  // Otherwise use phone
+-  if (params.email) {
+-    authPayload.email = params.email
+-    authPayload.phone = params.phone
++  if (DEV_BYPASS_OTP) {
++    // Bypass Supabase phone confirmation (which tries to send SMS via its own Twilio integration).
++    // The app has its own OTP system — Supabase phone confirmation is redundant and breaks here.
++    const adminSupabase = createAdminClient('user-registration')
++    const { data: authData, error: authError } = await adminSupabase.auth.admin.createUser({
++      phone: params.phone,
++      ...(params.email ? { email: params.email, email_confirm: true } : {}),
++      password: params.password,
++      phone_confirm: true,
++      user_metadata: { role: 'doctor' }
++    })
++    if (authError || !authData.user) {
++      throw new Error(authError?.message || 'Failed to create auth user')
++    }
++    userId = authData.user.id
+   } else {
+-    authPayload.phone = params.phone
++    // Production path: supabase.auth.signUp (requires Supabase phone auth configured)
++    const supabase = await createClient()
++    const authPayload: any = {
++      password: params.password,
++      options: { data: { role: 'doctor' } }
++    }
++    if (params.email) {
++      authPayload.email = params.email
++      authPayload.phone = params.phone
++    } else {
++      authPayload.phone = params.phone
++    }
++    const { data: authData, error: authError } = await supabase.auth.signUp(authPayload)
++    if (authError || !authData.user) {
++      throw new Error(authError?.message || 'Failed to create auth user')
++    }
++    userId = authData.user.id
+   }
+ 
+-  const { data: authData, error: authError } = await supabase.auth.signUp(authPayload)
+-
+-  if (authError || !authData.user) {
+-    throw new Error(authError?.message || 'Failed to create auth user')
+-  }
++  // Use admin client for DB inserts — avoids RLS issues during registration
++  const adminSupabase = createAdminClient('user-registration')
+ 
+   // 2. Create user record
+-  const { error: userError } = await supabase
++  const { error: userError } = await adminSupabase
+     .from('users')
+     .insert({
+-      id: authData.user.id,
++      id: userId,
+       phone: params.phone,
+       email: params.email || null,
+       role: 'doctor'
+@@ -76,11 +91,11 @@ export async function createDoctorAccount(params: CreateDoctorParams) {
+ 
+   // 3. Create doctor profile
+   const doctorUniqueId = nanoid(10).toUpperCase()
+-  
+-  const { error: doctorError } = await supabase
++
++  const { error: doctorError } = await adminSupabase
+     .from('doctors')
+     .insert({
+-      id: authData.user.id,
++      id: userId,
+       unique_id: doctorUniqueId,
+       specialty: params.specialty,
+       full_name: params.fullName
+@@ -91,7 +106,7 @@ export async function createDoctorAccount(params: CreateDoctorParams) {
+   }
+ 
+   return {
+-    userId: authData.user.id,
++    userId,
+     doctorUniqueId
+   }
+ }
+@@ -100,38 +115,49 @@ export async function createDoctorAccount(params: CreateDoctorParams) {
+  * Create a new patient account
+  */
+ export async function createPatientAccount(params: CreatePatientParams) {
+-  const supabase = await createClient()
++  const DEV_BYPASS_OTP = process.env.DEV_BYPASS_OTP === 'true'
+ 
+-  // 1. Create auth user with BOTH phone and email
+-  const authPayload: any = {
+-    password: params.password,
+-    options: {
+-      data: {
+-        role: 'patient'
+-      }
+-    }
+-  }
++  let userId: string
+ 
+-  // If email provided, use email as primary identifier
+-  // Otherwise use phone
+-  if (params.email) {
+-    authPayload.email = params.email
+-    authPayload.phone = params.phone
++  if (DEV_BYPASS_OTP) {
++    const adminSupabase = createAdminClient('user-registration')
++    const { data: authData, error: authError } = await adminSupabase.auth.admin.createUser({
++      phone: params.phone,
++      ...(params.email ? { email: params.email, email_confirm: true } : {}),
++      password: params.password,
++      phone_confirm: true,
++      user_metadata: { role: 'patient' }
++    })
++    if (authError || !authData.user) {
++      throw new Error(authError?.message || 'Failed to create auth user')
++    }
++    userId = authData.user.id
+   } else {
+-    authPayload.phone = params.phone
++    const supabase = await createClient()
++    const authPayload: any = {
++      password: params.password,
++      options: { data: { role: 'patient' } }
++    }
++    if (params.email) {
++      authPayload.email = params.email
++      authPayload.phone = params.phone
++    } else {
++      authPayload.phone = params.phone
++    }
++    const { data: authData, error: authError } = await supabase.auth.signUp(authPayload)
++    if (authError || !authData.user) {
++      throw new Error(authError?.message || 'Failed to create auth user')
++    }
++    userId = authData.user.id
+   }
+ 
+-  const { data: authData, error: authError } = await supabase.auth.signUp(authPayload)
+-
+-  if (authError || !authData.user) {
+-    throw new Error(authError?.message || 'Failed to create auth user')
+-  }
++  const adminSupabase = createAdminClient('user-registration')
+ 
+   // 2. Create user record
+-  const { error: userError } = await supabase
++  const { error: userError } = await adminSupabase
+     .from('users')
+     .insert({
+-      id: authData.user.id,
++      id: userId,
+       phone: params.phone,
+       email: params.email || null,
+       role: 'patient'
+@@ -143,11 +169,11 @@ export async function createPatientAccount(params: CreatePatientParams) {
+ 
+   // 3. Create patient profile
+   const patientUniqueId = nanoid(10).toUpperCase()
+-  
+-  const { error: patientError } = await supabase
++
++  const { error: patientError } = await adminSupabase
+     .from('patients')
+     .insert({
+-      id: authData.user.id,
++      id: userId,
+       unique_id: patientUniqueId,
+       phone: params.phone,
+       full_name: params.fullName,
+@@ -159,7 +185,7 @@ export async function createPatientAccount(params: CreatePatientParams) {
+   }
+ 
+   return {
+-    userId: authData.user.id,
++    userId,
+     patientUniqueId
+   }
+ }
+@@ -263,41 +289,52 @@ export async function getPatientProfile(userId: string) {
+  * Create a new front desk staff account
+  */
+ export async function createFrontDeskAccount(params: CreateFrontDeskParams) {
+-  const supabase = await createClient()
++  const DEV_BYPASS_OTP = process.env.DEV_BYPASS_OTP === 'true'
+ 
+-  // 1. Create auth user
+-  const authPayload: any = {
+-    password: params.password,
+-    options: {
+-      data: {
+-        role: 'frontdesk'
+-      }
+-    }
+-  }
++  let userId: string
+ 
+-  if (params.email) {
+-    authPayload.email = params.email
+-    authPayload.phone = params.phone
++  if (DEV_BYPASS_OTP) {
++    const adminSupabase = createAdminClient('user-registration')
++    const { data: authData, error: authError } = await adminSupabase.auth.admin.createUser({
++      phone: params.phone,
++      ...(params.email ? { email: params.email, email_confirm: true } : {}),
++      password: params.password,
++      phone_confirm: true,
++      user_metadata: { role: 'frontdesk' }
++    })
++    if (authError || !authData.user) {
++      throw new Error(authError?.message || 'Failed to create auth user')
++    }
++    userId = authData.user.id
+   } else {
+-    authPayload.phone = params.phone
+-  }
+-
+-  const { data: authData, error: authError } = await supabase.auth.signUp(authPayload)
+-
+-  if (authError) {
+-    throw new Error(authError.message)
++    const supabase = await createClient()
++    const authPayload: any = {
++      password: params.password,
++      options: { data: { role: 'frontdesk' } }
++    }
++    if (params.email) {
++      authPayload.email = params.email
++      authPayload.phone = params.phone
++    } else {
++      authPayload.phone = params.phone
++    }
++    const { data: authData, error: authError } = await supabase.auth.signUp(authPayload)
++    if (authError) {
++      throw new Error(authError.message)
++    }
++    if (!authData.user?.id) {
++      throw new Error('Failed to create auth user')
++    }
++    userId = authData.user.id
+   }
+ 
+-  const userId = authData.user?.id
+-  if (!userId) {
+-    throw new Error('Failed to create auth user')
+-  }
++  const adminSupabase = createAdminClient('user-registration')
+ 
+   // 2. Generate unique ID
+   const frontDeskUniqueId = `FD${nanoid(8).toUpperCase()}`
+ 
+   // 3. Create user record
+-  const { error: userError } = await supabase
++  const { error: userError } = await adminSupabase
+     .from('users')
+     .insert({
+       id: userId,
+@@ -310,7 +347,7 @@ export async function createFrontDeskAccount(params: CreateFrontDeskParams) {
+   }
+ 
+   // 4. Create front desk staff record
+-  const { error: staffError } = await supabase
++  const { error: staffError } = await adminSupabase
+     .from('front_desk_staff')
+     .insert({
+       id: userId,
+diff --git a/packages/shared/lib/supabase/admin.ts b/packages/shared/lib/supabase/admin.ts
+index 1aceda4..d8e2f5f 100644
+--- a/packages/shared/lib/supabase/admin.ts
++++ b/packages/shared/lib/supabase/admin.ts
+@@ -21,6 +21,7 @@ const ALLOWED_ADMIN_SCOPES = new Set([
+   'input-validation',
+   'sms-reminders',
+   'lab-results',
++  'user-registration',
+   'api-route'
+ ])
+ 
+-- 
+2.34.1
+
