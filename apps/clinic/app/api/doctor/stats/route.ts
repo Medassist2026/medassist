@@ -17,9 +17,10 @@ export async function GET() {
     const admin = createAdminClient('doctor-stats')
 
     // ── 1. Doctor profile ─────────────────────────────────────
+    // Select only columns that exist in the live DB (fee columns added later via migration)
     const { data: doctor, error: doctorError } = await admin
       .from('doctors')
-      .select('id, full_name, specialty, unique_id, consultation_fee_egp, followup_fee_egp')
+      .select('id, full_name, specialty, unique_id')
       .eq('id', user.id)
       .single()
 
@@ -34,21 +35,41 @@ export async function GET() {
     const { data: authData } = await supabase.auth.getUser()
     const authUser = authData?.user
 
-    // ── 3. Clinic memberships ─────────────────────────────────
-    const { data: memberships } = await admin
+    // ── 3. Clinic memberships — try clinic_memberships, fall back to clinic_doctors ──
+    let allClinics: Array<{ id: string; name: string; uniqueId: string; role: string }> = []
+    const { data: memberships, error: memError } = await admin
       .from('clinic_memberships')
       .select('role, clinic:clinics(id, name, unique_id)')
       .eq('user_id', user.id)
-      .eq('user_role', 'doctor')
 
-    const allClinics = (memberships || [])
-      .filter((m: any) => m.clinic)
-      .map((m: any) => ({
-        id: m.clinic.id,
-        name: m.clinic.name,
-        uniqueId: m.clinic.unique_id,
-        role: m.role,
-      }))
+    const isMembershipsTableMissing =
+      memError &&
+      (memError.code === 'PGRST205' || (memError.message || '').includes('clinic_memberships'))
+
+    if (!isMembershipsTableMissing && memberships) {
+      allClinics = memberships
+        .filter((m: any) => m.clinic)
+        .map((m: any) => ({
+          id: m.clinic.id,
+          name: m.clinic.name,
+          uniqueId: m.clinic.unique_id,
+          role: m.role,
+        }))
+    } else {
+      // Fallback: read from clinic_doctors join clinics
+      const { data: cdRows } = await admin
+        .from('clinic_doctors')
+        .select('clinic_id, clinics(id, name, unique_id)')
+        .eq('doctor_id', user.id)
+      allClinics = (cdRows || [])
+        .filter((r: any) => r.clinics)
+        .map((r: any) => ({
+          id: r.clinics.id,
+          name: r.clinics.name,
+          uniqueId: r.clinics.unique_id,
+          role: 'doctor',
+        }))
+    }
 
     const activeClinic = allClinics[0] || null
 
@@ -95,8 +116,8 @@ export async function GET() {
         fullName: doctor.full_name || '',
         specialty: doctor.specialty || '',
         uniqueId: doctor.unique_id || '',
-        consultationFee: doctor.consultation_fee_egp || 0,
-        followupFee: doctor.followup_fee_egp || 0,
+        consultationFee: (doctor as any).consultation_fee_egp || 0,
+        followupFee: (doctor as any).followup_fee_egp || 0,
       },
       stats: {
         totalPatients: totalPatients || 0,

@@ -20,14 +20,35 @@ export async function GET() {
 
     const admin = createAdminClient('clinic-staff')
 
-    // Get all clinic members
-    const { data: members, error: membersError } = await admin
+    // Get all clinic members — try clinic_memberships first, fall back to clinic_doctors
+    let members: Array<{ user_id: string; role: string; status: string; created_at: string }> = []
+    const { data: memberRows, error: membersError } = await admin
       .from('clinic_memberships')
       .select('user_id, role, status, created_at')
       .eq('clinic_id', clinicId)
       .eq('status', 'ACTIVE')
 
-    if (membersError) throw membersError
+    const isMembershipsTableMissing =
+      membersError &&
+      (membersError.code === 'PGRST205' || (membersError.message || '').includes('clinic_memberships'))
+
+    if (!isMembershipsTableMissing && memberRows) {
+      members = memberRows
+    } else if (isMembershipsTableMissing) {
+      // Fallback: read doctors from clinic_doctors table
+      const { data: cdRows } = await admin
+        .from('clinic_doctors')
+        .select('doctor_id, created_at')
+        .eq('clinic_id', clinicId)
+      members = (cdRows || []).map((r: any) => ({
+        user_id: r.doctor_id,
+        role: 'DOCTOR',
+        status: 'ACTIVE',
+        created_at: r.created_at,
+      }))
+    } else if (membersError) {
+      throw membersError
+    }
 
     // Get user details
     const userIds = (members || []).map(m => m.user_id)

@@ -35,11 +35,20 @@ export async function GET(request: NextRequest) {
     const { data, error } = await query
 
     if (error) {
+      // Graceful fallback: notifications table may not exist yet in this environment
+      const isTableMissing =
+        error.code === 'PGRST205' ||
+        (error.message || '').toLowerCase().includes('notifications') ||
+        (error.message || '').toLowerCase().includes('does not exist') ||
+        (error.message || '').includes('42P01')
+      if (isTableMissing) {
+        return NextResponse.json({ notifications: [], unreadCount: 0 })
+      }
       console.error('Notifications fetch error:', error)
       return NextResponse.json({ error: 'Failed to fetch notifications' }, { status: 500 })
     }
 
-    // Also get unread count
+    // Also get unread count (best-effort)
     const { count } = await admin
       .from('notifications')
       .select('*', { count: 'exact', head: true })

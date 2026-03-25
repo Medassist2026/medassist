@@ -362,7 +362,11 @@ function DayView({ date, appointments, availability, onAppointmentClick }: DayVi
         {hours.map(hour => {
           const hourStr = `${hour.toString().padStart(2, '0')}:00`
           const hourAppointments = dayAppointments.filter(apt => {
-            const aptHour = new Date(apt.start_time).getHours()
+            // Use Cairo timezone for column bucketing
+            const aptHour = parseInt(
+              new Date(apt.start_time).toLocaleString('en-US', { hour: 'numeric', hour12: false, timeZone: 'Africa/Cairo' }),
+              10
+            )
             return aptHour === hour
           })
 
@@ -408,7 +412,8 @@ function DayView({ date, appointments, availability, onAppointmentClick }: DayVi
                       <div className="text-xs opacity-75">
                         {new Date(apt.start_time).toLocaleTimeString('ar-EG', {
                           hour: 'numeric',
-                          minute: '2-digit'
+                          minute: '2-digit',
+                          timeZone: 'Africa/Cairo'
                         })}
                         {' · '}
                         {apt.duration_minutes} د
@@ -504,7 +509,8 @@ function WeekView({ weekDates, appointments, availability, onAppointmentClick, o
                       <div className="opacity-75">
                         {new Date(apt.start_time).toLocaleTimeString('ar-EG', {
                           hour: 'numeric',
-                          minute: '2-digit'
+                          minute: '2-digit',
+                          timeZone: 'Africa/Cairo'
                         })}
                       </div>
                     </button>
