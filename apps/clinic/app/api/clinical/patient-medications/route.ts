@@ -52,16 +52,17 @@ export async function GET(request: Request) {
     try {
       const { data: notesData, error: notesError } = await supabase
         .from('clinical_notes')
-        .select('id, note_data, created_at, doctors(name)')
+        .select('id, medications, created_at, doctors(name)')
         .eq('patient_id', patientId)
         .order('created_at', { ascending: false })
         .limit(10)
 
       if (!notesError && notesData) {
         for (const note of notesData) {
-          const noteData = note.note_data as any
-          if (noteData?.medications && Array.isArray(noteData.medications)) {
-            for (const med of noteData.medications) {
+          // medications is stored directly in the medications column
+          const meds = Array.isArray((note as any).medications) ? (note as any).medications : []
+          if (meds.length > 0) {
+            for (const med of meds) {
               prescribedMedications.push({
                 name: med.name,
                 type: med.type,

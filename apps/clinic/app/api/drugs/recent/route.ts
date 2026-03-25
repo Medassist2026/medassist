@@ -12,10 +12,10 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Get recent clinical notes with medications
+    // Get recent clinical notes with medications (read from medications column, not note_data)
     const { data: notes, error } = await supabase
       .from('clinical_notes')
-      .select('note_data')
+      .select('medications')
       .eq('doctor_id', user.id)
       .order('created_at', { ascending: false })
       .limit(20)
@@ -29,8 +29,7 @@ export async function GET() {
     const drugMap = new Map<string, { id: string; name: string; strength?: string; type?: string }>()
 
     for (const note of notes || []) {
-      const noteData = note.note_data as any
-      const medications = noteData?.medications || []
+      const medications = Array.isArray(note.medications) ? note.medications : []
       for (const med of medications) {
         const key = (med.name || '').toLowerCase()
         if (key && !drugMap.has(key)) {

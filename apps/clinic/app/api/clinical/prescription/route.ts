@@ -69,7 +69,6 @@ export async function GET(request: Request) {
         diagnosis,
         medications,
         chief_complaint,
-        note_data,
         created_at,
         doctor:doctors (
           id,
