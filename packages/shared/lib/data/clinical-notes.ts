@@ -66,36 +66,49 @@ export async function createClinicalNote(params: CreateClinicalNoteParams) {
     notes: med.notes || null
   }))
 
-  const { data, error } = await supabase
+  const baseInsert = {
+    doctor_id: params.doctorId,
+    patient_id: params.patientId,
+    appointment_id: params.appointmentId || null,
+    clinic_id: params.clinicId || null,
+    chief_complaint: params.noteData.chief_complaint,
+    diagnosis: diagnosisJson,
+    medications: medicationsJson,
+    plan: params.noteData.plan,
+    keystroke_count: params.keystrokeCount,
+    duration_seconds: params.durationSeconds,
+    synced_to_patient: params.syncToPatient,
+  }
+
+  const noteDataPayload = {
+    ...params.noteData,
+    allergies: params.noteData.allergies || [],
+    chronic_diseases: params.noteData.chronic_diseases || [],
+    radiology: params.noteData.radiology || [],
+    labs: params.noteData.labs || [],
+    follow_up_date: params.noteData.follow_up_date || null,
+    follow_up_notes: params.noteData.follow_up_notes || null,
+    visit_type: params.noteData.visit_type || 'new',
+  }
+
+  // Try with note_data first (requires migration 029 to have run)
+  let { data, error } = await supabase
     .from('clinical_notes')
-    .insert({
-      doctor_id: params.doctorId,
-      patient_id: params.patientId,
-      appointment_id: params.appointmentId || null,
-      clinic_id: params.clinicId || null,
-      chief_complaint: params.noteData.chief_complaint,
-      diagnosis: diagnosisJson,
-      medications: medicationsJson,
-      plan: params.noteData.plan,
-      keystroke_count: params.keystrokeCount,
-      duration_seconds: params.durationSeconds,
-      synced_to_patient: params.syncToPatient,
-      // Store full note payload as JSONB so allergies, chronic diseases, radiology,
-      // labs, follow-up, and all session data survive for future reads.
-      note_data: {
-        ...params.noteData,
-        // Ensure denormalized structured fields are included
-        allergies: params.noteData.allergies || [],
-        chronic_diseases: params.noteData.chronic_diseases || [],
-        radiology: params.noteData.radiology || [],
-        labs: params.noteData.labs || [],
-        follow_up_date: params.noteData.follow_up_date || null,
-        follow_up_notes: params.noteData.follow_up_notes || null,
-        visit_type: params.noteData.visit_type || 'new',
-      },
-    })
+    .insert({ ...baseInsert, note_data: noteDataPayload })
     .select()
     .single()
+
+  // Graceful fallback: if note_data column is missing, retry without it
+  if (error && (error.code === 'PGRST204' || error.code === '42703' || error.message?.includes('note_data'))) {
+    console.warn('clinical_notes: note_data column missing, retrying without it:', error.message)
+    const fallback = await supabase
+      .from('clinical_notes')
+      .insert(baseInsert)
+      .select()
+      .single()
+    data = fallback.data
+    error = fallback.error
+  }
 
   if (error) {
     throw new Error(error.message)
