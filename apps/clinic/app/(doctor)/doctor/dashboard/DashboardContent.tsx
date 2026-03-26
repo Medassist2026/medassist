@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { DashboardHeader } from '@ui-clinic/components/doctor/DashboardHeader'
 import { DashboardEmptyState } from '@ui-clinic/components/doctor/DashboardEmptyState'
 import { PatientQueueCard, type VisitType } from '@ui-clinic/components/doctor/PatientQueueCard'
+import { Clock, RefreshCw } from 'lucide-react'
 
 interface Appointment {
   id: string
@@ -55,40 +56,48 @@ interface QueuePatient {
 
 // ============================================================================
 // QUEUE SECTION — polls /api/doctor/queue/today every 30 seconds
-// P4: Frontdesk checks in a patient → doctor sees them here → taps "فتح الجلسة"
 // ============================================================================
 
-function QueueSection() {
+interface QueueSectionProps {
+  onQueueUpdate?: (count: number) => void
+}
+
+function QueueSection({ onQueueUpdate }: QueueSectionProps) {
   const router = useRouter()
   const [queue, setQueue] = useState<QueuePatient[]>([])
   const [loading, setLoading] = useState(true)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
 
-  const fetchQueue = useCallback(async () => {
+  const fetchQueue = useCallback(async (isManual = false) => {
+    if (isManual) setRefreshing(true)
     try {
       const res = await fetch('/api/doctor/queue/today')
       if (res.ok) {
         const data = await res.json()
-        setQueue((data.queue || []) as QueuePatient[])
+        const q = (data.queue || []) as QueuePatient[]
+        setQueue(q)
         setLastUpdated(new Date())
+        onQueueUpdate?.(q.filter(p => p.status === 'waiting').length)
       }
     } catch { /* non-critical — silent fail */ }
-    finally { setLoading(false) }
-  }, [])
+    finally {
+      setLoading(false)
+      if (isManual) setRefreshing(false)
+    }
+  }, [onQueueUpdate])
 
-  // Initial fetch
   useEffect(() => { fetchQueue() }, [fetchQueue])
 
-  // Poll every 30 seconds — picks up new frontdesk check-ins automatically
   useEffect(() => {
-    const interval = setInterval(fetchQueue, 30_000)
+    const interval = setInterval(() => fetchQueue(), 30_000)
     return () => clearInterval(interval)
   }, [fetchQueue])
 
   if (loading) {
     return (
-      <div className="px-4 mb-2">
-        <div className="h-[60px] bg-[#F3F4F6] rounded-[12px] animate-pulse" />
+      <div className="px-4 mb-4">
+        <div className="h-[72px] bg-[#F9FAFB] rounded-[14px] animate-pulse border border-[#F3F4F6]" />
       </div>
     )
   }
@@ -96,26 +105,29 @@ function QueueSection() {
   if (queue.length === 0) return null
 
   return (
-    <div className="px-4 mb-4">
+    <div className="px-4 mb-5">
       {/* Section header */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <span className="font-cairo font-bold text-[14px] text-[#030712]">قائمة الانتظار</span>
-          <span className="px-2 py-0.5 bg-[#DCFCE7] text-[#16A34A] text-[11px] font-cairo font-bold rounded-full">
+          <span className="font-cairo font-bold text-[14px] text-[#111827]">قائمة الانتظار</span>
+          <span className="px-2 py-0.5 bg-[#DCFCE7] text-[#15803D] text-[11px] font-cairo font-bold rounded-full">
             {queue.length} مريض
           </span>
-          {/* Pulse dot — live indicator */}
+          {/* Live pulse dot */}
           <span className="w-2 h-2 rounded-full bg-[#22C55E] animate-pulse" />
         </div>
         <button
-          onClick={fetchQueue}
-          className="font-cairo text-[12px] text-[#4B5563] hover:text-[#030712] transition-colors"
-          title="تحديث القائمة"
+          onClick={() => fetchQueue(true)}
+          disabled={refreshing}
+          className="flex items-center gap-1 font-cairo text-[12px] text-[#6B7280] hover:text-[#111827] transition-colors disabled:opacity-50"
         >
-          تحديث
+          <RefreshCw className={`w-[12px] h-[12px] ${refreshing ? 'animate-spin' : ''}`} strokeWidth={2} />
           {lastUpdated && (
-            <span className="mr-1 text-[10px] text-[#9CA3AF]">
-              {lastUpdated.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}
+            <span className="text-[11px] text-[#9CA3AF]">
+              {lastUpdated.toLocaleTimeString('ar-EG', {
+                hour: '2-digit', minute: '2-digit',
+                timeZone: 'Africa/Cairo',
+              })}
             </span>
           )}
         </button>
@@ -128,57 +140,57 @@ function QueueSection() {
           const patientName = item.patient?.full_name || 'مريض'
           const patientPhone = item.patient?.phone || ''
           const patientAge = item.patient?.age
-          const queueType = item.queue_type === 'emergency' ? 'emergency' : 'new'
+          const queueType: VisitType = item.queue_type === 'emergency' ? 'emergency' : 'new'
 
           return (
             <div
               key={item.id}
-              className={`bg-white rounded-[12px] border-[0.8px] p-4 shadow-sm ${
+              className={`bg-white rounded-[14px] border-[0.8px] p-4 shadow-sm transition-all ${
                 isActive
-                  ? 'border-[#3B82F6] ring-1 ring-[#BFDBFE]'
-                  : 'border-[#D1D5DB]'
+                  ? 'border-[#93C5FD] ring-1 ring-[#DBEAFE]'
+                  : 'border-[#E5E7EB]'
               }`}
             >
-              <div className="flex items-start justify-between mb-3">
-                <div className="flex items-center gap-2">
+              <div className="flex items-start justify-between mb-3 gap-3">
+                <div className="flex items-center gap-3">
                   {/* Queue number badge */}
-                  <span className={`w-8 h-8 rounded-full flex items-center justify-center font-cairo font-bold text-[13px] flex-shrink-0 ${
-                    isActive ? 'bg-[#3B82F6] text-white' : 'bg-[#F3F4F6] text-[#030712]'
+                  <span className={`w-[34px] h-[34px] rounded-full flex items-center justify-center font-cairo font-bold text-[13px] flex-shrink-0 ${
+                    isActive ? 'bg-[#3B82F6] text-white' : 'bg-[#F3F4F6] text-[#374151]'
                   }`}>
                     {item.queue_number}
                   </span>
                   <div>
-                    <div className="font-cairo font-semibold text-[14px] text-[#030712]">{patientName}</div>
-                    <div className="font-cairo text-[11px] text-[#4B5563]" dir="ltr">
+                    <div className="font-cairo font-semibold text-[14px] text-[#111827]">{patientName}</div>
+                    <div className="font-cairo text-[11px] text-[#6B7280] mt-0.5" dir="ltr">
                       {patientPhone}
                       {patientAge && ` · ${patientAge} سنة`}
                     </div>
                   </div>
                 </div>
                 {/* Status badge */}
-                <span className={`px-2 py-0.5 text-[11px] font-cairo font-semibold rounded-full ${
+                <span className={`shrink-0 px-2.5 py-1 text-[11px] font-cairo font-semibold rounded-full ${
                   isActive
                     ? 'bg-[#EFF6FF] text-[#1D4ED8]'
-                    : 'bg-[#FEF3C7] text-[#92400E]'
+                    : 'bg-[#FEF9C3] text-[#854D0E]'
                 }`}>
                   {isActive ? 'مع الطبيب' : 'انتظار'}
                 </span>
               </div>
 
               {/* Action buttons */}
-              <div className="flex gap-2">
+              <div className="flex gap-2.5">
                 <button
                   onClick={() => router.push(`/doctor/patients/${item.patient_id}`)}
-                  className="flex-1 h-[40px] bg-white border-[0.8px] border-[#D1D5DB] rounded-[8px] font-cairo text-[13px] font-semibold text-[#1F2937] hover:bg-[#F9FAFB] transition-colors"
+                  className="flex-1 h-[40px] bg-[#F9FAFB] border-[0.8px] border-[#E5E7EB] rounded-[9px] font-cairo text-[13px] font-semibold text-[#374151] hover:bg-[#F3F4F6] transition-all active:scale-[0.98]"
                 >
                   عرض الملف
                 </button>
                 <button
                   onClick={() => router.push(`/doctor/session?patientId=${item.patient_id}`)}
-                  className={`flex-1 h-[40px] rounded-[8px] font-cairo text-[13px] font-semibold text-white transition-colors ${
+                  className={`flex-1 h-[40px] rounded-[9px] font-cairo text-[13px] font-semibold text-white transition-all active:scale-[0.98] shadow-sm ${
                     isActive
-                      ? 'bg-[#3B82F6] hover:bg-[#2563EB]'
-                      : 'bg-[#16A34A] hover:bg-[#15803D]'
+                      ? 'bg-[#3B82F6] hover:bg-[#2563EB] shadow-blue-100'
+                      : 'bg-[#16A34A] hover:bg-[#15803D] shadow-green-100'
                   }`}
                 >
                   فتح الجلسة
@@ -203,6 +215,21 @@ function deriveVisitType(apt: Appointment): VisitType {
   return 'new'
 }
 
+/** Section label pill */
+function SectionLabel({ icon, label, count }: { icon: React.ReactNode; label: string; count: number }) {
+  return (
+    <div className="flex items-center justify-between px-4 mb-3">
+      <div className="flex items-center gap-2">
+        {icon}
+        <span className="font-cairo font-bold text-[14px] text-[#111827]">{label}</span>
+        <span className="px-2 py-0.5 bg-[#F3F4F6] text-[#4B5563] text-[11px] font-cairo font-bold rounded-full">
+          {count}
+        </span>
+      </div>
+    </div>
+  )
+}
+
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
@@ -215,6 +242,8 @@ export function DashboardContent({
   appointments,
   unreadNotifications,
 }: DashboardContentProps) {
+  const [waitingCount, setWaitingCount] = useState<number | undefined>(undefined)
+
   const activeAppointments = appointments.filter(
     a => a.status !== 'cancelled' && a.status !== 'no_show'
   )
@@ -227,24 +256,27 @@ export function DashboardContent({
         clinicId={clinicId}
         allClinics={allClinics}
         expectedCount={activeAppointments.length}
+        waitingCount={waitingCount}
         unreadNotifications={unreadNotifications}
       />
 
       {/* ===== P4: LIVE QUEUE SECTION ===== */}
-      {/* Walk-in patients checked in by frontdesk appear here in real-time */}
-      <QueueSection />
+      <QueueSection onQueueUpdate={setWaitingCount} />
 
       {/* ===== SCHEDULED APPOINTMENTS ===== */}
       {activeAppointments.length === 0 ? (
         <DashboardEmptyState />
       ) : (
-        <div className="px-4">
-          {activeAppointments.length > 0 && (
-            <p className="font-cairo text-[12px] font-semibold text-[#6B7280] mb-3">المواعيد المجدولة</p>
-          )}
-          {activeAppointments.map((apt, index) => (
-            <div key={apt.id}>
+        <div>
+          <SectionLabel
+            icon={<Clock className="w-[14px] h-[14px] text-[#6B7280]" strokeWidth={1.67} />}
+            label="المواعيد المجدولة"
+            count={activeAppointments.length}
+          />
+          <div className="px-4 space-y-3">
+            {activeAppointments.map((apt) => (
               <PatientQueueCard
+                key={apt.id}
                 patientId={apt.patient_id}
                 patientName={apt.patient_name}
                 patientPhone={apt.patient_phone}
@@ -255,12 +287,10 @@ export function DashboardContent({
                 appointmentTime={apt.start_time}
                 description={apt.description}
               />
-              {/* Divider between cards — 1px #E5E7EB, matching Figma */}
-              {index < activeAppointments.length - 1 && (
-                <div className="h-[1px] bg-[#E5E7EB] my-3" />
-              )}
-            </div>
-          ))}
+            ))}
+          </div>
+          {/* Bottom breathing room */}
+          <div className="h-6" />
         </div>
       )}
     </div>
