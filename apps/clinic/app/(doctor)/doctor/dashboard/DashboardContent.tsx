@@ -61,7 +61,7 @@ interface QueuePatient {
 
 interface QueueSectionProps {
   onQueueUpdate?: (count: number) => void
-  onViewFile?: (patientId: string, patientName: string) => void
+  onViewFile?: (patientId: string, patientName: string, extra?: { visitType?: 'new' | 'followup' | 'emergency'; chiefComplaint?: string; appointmentTime?: string }) => void
   onStartSession?: (patientId: string, appointmentId?: string) => void
 }
 
@@ -178,7 +178,7 @@ function QueueSection({ onQueueUpdate, onViewFile, onStartSession }: QueueSectio
 
                 <div className="flex gap-2 mt-3">
                   <button
-                    onClick={() => onViewFile?.(item.patient_id, patientName)}
+                    onClick={() => onViewFile?.(item.patient_id, patientName, { visitType: queueType })}
                     className="flex-1 h-[38px] rounded-[8px] border border-[#E2E8F0] bg-white font-cairo text-[12px] font-semibold text-[#334155] hover:bg-[#F8FAFC] transition-colors active:scale-[0.98]"
                   >
                     عرض الملف
@@ -238,19 +238,24 @@ export function DashboardContent({
   const router = useRouter()
   const [waitingCount, setWaitingCount] = useState<number | undefined>(undefined)
 
-  // Drawer state — which patient's file is being previewed
-  const [drawerPatientId, setDrawerPatientId] = useState<string | null>(null)
-  const [drawerPatientName, setDrawerPatientName] = useState<string | undefined>(undefined)
+  // Drawer state — full context for the quick-view panel
+  const [drawer, setDrawer] = useState<{
+    patientId: string
+    patientName?: string
+    visitType?: 'new' | 'followup' | 'emergency'
+    chiefComplaint?: string
+    appointmentTime?: string
+  } | null>(null)
 
-  const openDrawer = useCallback((patientId: string, patientName: string) => {
-    setDrawerPatientId(patientId)
-    setDrawerPatientName(patientName)
+  const openDrawer = useCallback((
+    patientId: string,
+    patientName: string,
+    extra?: { visitType?: 'new' | 'followup' | 'emergency'; chiefComplaint?: string; appointmentTime?: string }
+  ) => {
+    setDrawer({ patientId, patientName, ...extra })
   }, [])
 
-  const closeDrawer = useCallback(() => {
-    setDrawerPatientId(null)
-    setDrawerPatientName(undefined)
-  }, [])
+  const closeDrawer = useCallback(() => setDrawer(null), [])
 
   const handleStartSession = useCallback((patientId: string, appointmentId?: string) => {
     router.push(`/doctor/session?patientId=${patientId}${appointmentId ? `&appointmentId=${appointmentId}` : ''}`)
@@ -264,8 +269,11 @@ export function DashboardContent({
     <>
       {/* ── Patient Quick Drawer ── */}
       <PatientQuickDrawer
-        patientId={drawerPatientId}
-        patientName={drawerPatientName}
+        patientId={drawer?.patientId ?? null}
+        patientName={drawer?.patientName}
+        visitType={drawer?.visitType}
+        chiefComplaint={drawer?.chiefComplaint}
+        appointmentTime={drawer?.appointmentTime}
         onClose={closeDrawer}
       />
 
@@ -310,7 +318,11 @@ export function DashboardContent({
                   appointmentId={apt.id}
                   appointmentTime={apt.start_time}
                   description={apt.description}
-                  onViewFile={openDrawer}
+                  onViewFile={(patientId, patientName) => openDrawer(patientId, patientName, {
+                    visitType: deriveVisitType(apt),
+                    chiefComplaint: apt.description,
+                    appointmentTime: apt.start_time,
+                  })}
                   onStartSession={handleStartSession}
                 />
               ))}

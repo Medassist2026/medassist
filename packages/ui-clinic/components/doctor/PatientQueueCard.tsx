@@ -15,7 +15,7 @@ interface PatientQueueCardProps {
   appointmentTime?: string
   description?: string
   /** Called when "عرض الملف" is tapped — opens quick drawer instead of navigating */
-  onViewFile?: (patientId: string, patientName: string) => void
+  onViewFile?: (patientId: string, patientName: string, extra?: { visitType?: 'new' | 'followup' | 'emergency'; chiefComplaint?: string; appointmentTime?: string }) => void
   /** Called when "بدء الجلسة" is tapped */
   onStartSession?: (patientId: string, appointmentId?: string) => void
 }
