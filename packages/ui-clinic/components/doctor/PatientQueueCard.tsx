@@ -1,8 +1,6 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
 import { ar } from '@shared/lib/i18n/ar'
-import { Clock } from 'lucide-react'
 
 export type VisitType = 'new' | 'followup' | 'emergency'
 
@@ -16,44 +14,44 @@ interface PatientQueueCardProps {
   appointmentId?: string
   appointmentTime?: string
   description?: string
+  /** Called when "عرض الملف" is tapped — opens quick drawer instead of navigating */
+  onViewFile?: (patientId: string, patientName: string) => void
+  /** Called when "بدء الجلسة" is tapped */
+  onStartSession?: (patientId: string, appointmentId?: string) => void
 }
 
-/**
- * Visit type badge colors — from Figma CSS:
- *   "كشف جديد" (new):     bg #E0F2FE, text #082F49 (blue)
- *   "إعادة كشف" (followup): bg #FEF3C7, text #78350F (amber)
- *   "طارئ" (emergency):    bg #FEE2E2, text #991B1B (red)
- */
-const visitTypeBadge: Record<VisitType, { label: string; bg: string; text: string; dot: string }> = {
-  new:       { label: ar.newVisit,   bg: 'bg-[#E0F2FE]', text: 'text-[#082F49]', dot: 'bg-[#3B82F6]' },
-  followup:  { label: ar.followUp,  bg: 'bg-[#FEF3C7]', text: 'text-[#78350F]', dot: 'bg-[#F59E0B]' },
-  emergency: { label: ar.emergency, bg: 'bg-[#FEE2E2]', text: 'text-[#991B1B]', dot: 'bg-[#EF4444]' },
+// ─── Visit type config ───────────────────────────────────────────────────────
+
+const visitConfig: Record<VisitType, {
+  label: string
+  badgeBg: string
+  badgeText: string
+  accentColor: string   // left border accent
+}> = {
+  new: {
+    label: ar.newVisit,
+    badgeBg: '#EFF6FF',
+    badgeText: '#1D4ED8',
+    accentColor: '#3B82F6',
+  },
+  followup: {
+    label: ar.followUp,
+    badgeBg: '#FFFBEB',
+    badgeText: '#B45309',
+    accentColor: '#F59E0B',
+  },
+  emergency: {
+    label: ar.emergency,
+    badgeBg: '#FEF2F2',
+    badgeText: '#B91C1C',
+    accentColor: '#EF4444',
+  },
 }
 
-/** Derive 1–2 letter Arabic initials from a full name */
-function getInitials(name: string): string {
-  const parts = name.trim().split(/\s+/)
-  if (parts.length === 1) return parts[0].charAt(0)
-  return parts[0].charAt(0) + parts[1].charAt(0)
-}
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
-/** Avatar background palette — cycles by first char code */
-const avatarColors = [
-  { bg: '#DBEAFE', text: '#1D4ED8' },
-  { bg: '#D1FAE5', text: '#065F46' },
-  { bg: '#EDE9FE', text: '#5B21B6' },
-  { bg: '#FEF3C7', text: '#92400E' },
-  { bg: '#FCE7F3', text: '#9D174D' },
-  { bg: '#E0F2FE', text: '#0369A1' },
-]
-
-function getAvatarColor(name: string) {
-  const code = name.charCodeAt(0) || 0
-  return avatarColors[code % avatarColors.length]
-}
-
-/** Format appointment time with Cairo timezone, return display string + isLate flag */
-function formatAppointmentTime(isoTime?: string): { display: string; isLate: boolean } | null {
+/** Format time in Cairo timezone */
+function formatTime(isoTime?: string): { display: string; isLate: boolean } | null {
   if (!isoTime) return null
   try {
     const date = new Date(isoTime)
@@ -70,6 +68,15 @@ function formatAppointmentTime(isoTime?: string): { display: string; isLate: boo
   }
 }
 
+function sexLabel(sex?: string) {
+  if (!sex) return null
+  if (sex === 'male' || sex === 'Male') return 'ذكر'
+  if (sex === 'female' || sex === 'Female') return 'أنثى'
+  return sex
+}
+
+// ─── Component ───────────────────────────────────────────────────────────────
+
 export function PatientQueueCard({
   patientId,
   patientName,
@@ -80,99 +87,90 @@ export function PatientQueueCard({
   appointmentId,
   appointmentTime,
   description,
+  onViewFile,
+  onStartSession,
 }: PatientQueueCardProps) {
-  const router = useRouter()
-  const badge = visitTypeBadge[visitType] || visitTypeBadge.new
-  const initials = getInitials(patientName)
-  const avatarColor = getAvatarColor(patientName)
-  const timeInfo = formatAppointmentTime(appointmentTime)
-  const isEmergency = visitType === 'emergency'
+  const cfg = visitConfig[visitType] ?? visitConfig.new
+  const timeInfo = formatTime(appointmentTime)
+  const sex = sexLabel(patientSex)
 
   return (
-    <div className={`bg-white border-[0.8px] rounded-[14px] p-4 shadow-[0px_1px_3px_rgba(0,0,0,0.06)] transition-all ${
-      isEmergency
-        ? 'border-[#FCA5A5] ring-1 ring-[#FEE2E2]'
-        : 'border-[#E5E7EB] hover:border-[#D1D5DB] hover:shadow-[0px_2px_6px_rgba(0,0,0,0.08)]'
-    }`}>
+    <div
+      className="bg-white rounded-[12px] border border-[#E2E8F0] overflow-hidden"
+      style={{ boxShadow: '0 1px 3px rgba(15,23,42,0.06), 0 1px 2px rgba(15,23,42,0.04)' }}
+    >
+      {/* ── Visit type accent bar (top) ── */}
+      <div
+        className="h-[3px] w-full"
+        style={{ backgroundColor: cfg.accentColor, opacity: 0.7 }}
+      />
 
-      {/* ── Top row: Avatar + Info + Badge ── */}
-      <div className="flex items-start gap-3 mb-4">
-
-        {/* Patient initials avatar */}
-        <div
-          className="w-[42px] h-[42px] rounded-full flex items-center justify-center font-cairo font-bold text-[15px] flex-shrink-0 select-none"
-          style={{ backgroundColor: avatarColor.bg, color: avatarColor.text }}
-        >
-          {initials}
+      <div className="px-4 pt-3 pb-4">
+        {/* ── Row 1: Name + badge ── */}
+        <div className="flex items-start justify-between gap-3 mb-2">
+          <h3 className="font-cairo font-bold text-[15px] text-[#0F172A] leading-snug">
+            {patientName}
+          </h3>
+          <span
+            className="shrink-0 font-cairo text-[11px] font-semibold px-2.5 py-0.5 rounded-[4px] leading-5"
+            style={{ backgroundColor: cfg.badgeBg, color: cfg.badgeText }}
+          >
+            {cfg.label}
+          </span>
         </div>
 
-        {/* Patient details */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-start justify-between gap-2">
-            <h3 className="font-cairo text-[15px] leading-[22px] font-semibold text-[#111827] truncate">
-              {patientName}
-            </h3>
-            {/* Visit type badge */}
-            <span className={`shrink-0 font-cairo text-[11px] leading-[16px] font-semibold px-2.5 py-1 rounded-full ${badge.bg} ${badge.text}`}>
-              {badge.label}
+        {/* ── Row 2: Demographics + time ── */}
+        <div className="flex items-center justify-between gap-2 mb-3">
+          {/* Left: age · sex */}
+          <div className="flex items-center gap-1.5 font-cairo text-[12px] text-[#64748B]">
+            {patientAge && <span>{patientAge} سنة</span>}
+            {patientAge && sex && <span className="text-[#CBD5E1]">·</span>}
+            {sex && <span>{sex}</span>}
+            {!patientAge && !sex && <span className="text-[#CBD5E1]">—</span>}
+          </div>
+
+          {/* Right: appointment time */}
+          {timeInfo && (
+            <span
+              className="font-cairo text-[12px] font-medium tabular-nums"
+              style={{ color: timeInfo.isLate ? '#EF4444' : '#94A3B8' }}
+            >
+              {timeInfo.display}
+              {timeInfo.isLate && <span className="mr-1 text-[11px]">متأخر</span>}
             </span>
-          </div>
-
-          {/* Sub-line: age · sex · time */}
-          <div className="flex items-center gap-2 mt-1 flex-wrap">
-            {patientAge && (
-              <span className="font-cairo text-[12px] text-[#6B7280]">{patientAge} سنة</span>
-            )}
-            {patientSex && patientAge && (
-              <span className="text-[#D1D5DB] text-[10px]">·</span>
-            )}
-            {patientSex && (
-              <span className="font-cairo text-[12px] text-[#6B7280]">
-                {patientSex === 'male' ? 'ذكر' : patientSex === 'female' ? 'أنثى' : patientSex}
-              </span>
-            )}
-            {timeInfo && (patientAge || patientSex) && (
-              <span className="text-[#D1D5DB] text-[10px]">·</span>
-            )}
-            {timeInfo && (
-              <span className={`flex items-center gap-1 font-cairo text-[12px] font-medium ${
-                timeInfo.isLate ? 'text-[#EF4444]' : 'text-[#6B7280]'
-              }`}>
-                <Clock className="w-[11px] h-[11px]" strokeWidth={2} />
-                {timeInfo.display}
-                {timeInfo.isLate && <span className="text-[10px]">(متأخر)</span>}
-              </span>
-            )}
-          </div>
+          )}
         </div>
-      </div>
 
-      {/* Description / complaint */}
-      {description && (
-        <p className="font-cairo text-[13px] leading-[20px] font-normal text-[#4B5563] text-right mb-4 pr-[54px] border-r-2 border-[#F3F4F6]">
-          {description}
-        </p>
-      )}
+        {/* ── Row 3: Complaint (if any) ── */}
+        {description && (
+          <div className="mb-3 px-3 py-2 bg-[#F8FAFC] rounded-[8px] border-r-2" style={{ borderColor: cfg.accentColor }}>
+            <p className="font-cairo text-[13px] text-[#475569] leading-relaxed">
+              {description}
+            </p>
+          </div>
+        )}
 
-      {/* ── Action buttons ── */}
-      <div className="flex gap-2.5">
-        <button
-          onClick={() => router.push(`/doctor/patients/${patientId}`)}
-          className="flex-1 h-[44px] bg-[#F9FAFB] border-[0.8px] border-[#E5E7EB] rounded-[10px] font-cairo text-[13px] font-semibold text-[#374151] text-center transition-all hover:bg-[#F3F4F6] hover:border-[#D1D5DB] active:scale-[0.98]"
-        >
-          {ar.viewFile}
-        </button>
+        {/* ── Row 4: Actions ── */}
+        <div className="flex gap-2">
+          {/* View file — ghost button */}
+          <button
+            onClick={() => onViewFile?.(patientId, patientName)}
+            className="flex-1 h-[40px] rounded-[8px] border border-[#E2E8F0] bg-white font-cairo text-[13px] font-semibold text-[#334155] transition-colors hover:bg-[#F8FAFC] active:scale-[0.98]"
+          >
+            {ar.viewFile}
+          </button>
 
-        <button
-          onClick={() => router.push(`/doctor/session?patientId=${patientId}${appointmentId ? `&appointmentId=${appointmentId}` : ''}`)}
-          className={`flex-1 h-[44px] rounded-[10px] font-cairo text-[13px] font-semibold text-white text-center transition-all active:scale-[0.98] shadow-sm ${
-            isEmergency
-              ? 'bg-[#EF4444] hover:bg-[#DC2626] shadow-red-100'
-              : 'bg-[#16A34A] hover:bg-[#15803D] shadow-green-100'
-          }`}
-        >
-          {ar.startSession}
-        </button>
+          {/* Start session — filled */}
+          <button
+            onClick={() => onStartSession?.(patientId, appointmentId)}
+            className="flex-1 h-[40px] rounded-[8px] font-cairo text-[13px] font-semibold text-white transition-all active:scale-[0.98]"
+            style={{
+              backgroundColor: visitType === 'emergency' ? '#EF4444' : '#16A34A',
+            }}
+          >
+            {ar.startSession}
+          </button>
+        </div>
       </div>
     </div>
   )
