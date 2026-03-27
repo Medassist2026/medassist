@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback, useEffect, useRef } from 'react'
+import { Users, Check } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { ar } from '@shared/lib/i18n/ar'
 import { CollapsibleSection } from './CollapsibleSection'
@@ -329,7 +330,20 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
     if (query.length < 2) { setSearchResults([]); return }
     setSearching(true)
     try {
-      const res = await fetch(`/api/doctor/patients/search?q=${encodeURIComponent(query)}`)
+      // Normalize Egyptian phone queries so they match DB format (+201XXXXXXXXX).
+      // The field displays "+20" as a static prefix, so user types "010XXXXXXXX".
+      // "010" → stored as "+201XXXXXXXXX" → we search "2010" (strips leading 0, prepends "20").
+      // This prevents 011 numbers matching a "010" query and vice-versa.
+      let searchQuery = query
+      const digitsOnly = query.replace(/\D/g, '')
+      if (digitsOnly.length >= 2 && digitsOnly === query.replace(/[^\d]/g, '') && query.trim() === digitsOnly) {
+        // Pure-digit input that looks like a phone fragment
+        if (digitsOnly.startsWith('0')) {
+          // "010..." → "2010..." so DB search matches "+2010..."
+          searchQuery = '20' + digitsOnly.substring(1)
+        }
+      }
+      const res = await fetch(`/api/doctor/patients/search?q=${encodeURIComponent(searchQuery)}`)
       if (res.ok) {
         const data = await res.json()
         setSearchResults((data.patients || []).map((p: any) => ({
@@ -770,21 +784,36 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
               <h3 className="font-cairo font-bold text-[14px] text-[#030712]">معلومات المريض</h3>
             </div>
             <div className="flex items-center gap-2">
-              {/* Dependent toggle — always shown when no patient selected */}
+              {/* Dependent toggle — patient is a child/elderly/special needs attended by a caregiver */}
               {!selectedPatient && (
-                <button
-                  type="button"
-                  onClick={() => { setIsDependent(p => !p); setDependentType(null) }}
-                  title="المريض طفل أو يُعالَج بواسطة مرافق"
-                  className={`flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-cairo font-semibold rounded-full border transition-all ${
-                    isDependent
-                      ? 'bg-[#F59E0B] border-[#F59E0B] text-white shadow-sm'
-                      : 'bg-[#FFFBEB] border-[#FDE68A] text-[#92400E] hover:bg-[#FEF3C7]'
-                  }`}
-                >
-                  <span className="text-[14px] leading-none">👶</span>
-                  <span>{isDependent ? 'تابع ✓' : 'تابع / مرافق'}</span>
-                </button>
+                <div className="relative group">
+                  <button
+                    type="button"
+                    onClick={() => { setIsDependent(p => !p); setDependentType(null) }}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-cairo font-semibold rounded-[8px] border transition-all ${
+                      isDependent
+                        ? 'bg-[#F59E0B] border-[#F59E0B] text-white shadow-sm'
+                        : 'bg-white border-[#E5E7EB] text-[#374151] hover:border-[#D1D5DB] hover:bg-[#F9FAFB]'
+                    }`}
+                  >
+                    {isDependent
+                      ? <Check className="w-[13px] h-[13px]" strokeWidth={2.5} />
+                      : <Users className="w-[13px] h-[13px]" strokeWidth={1.67} />
+                    }
+                    <span>{isDependent ? 'مريض تابع' : 'تابع / مرافق'}</span>
+                  </button>
+                  {/* Tooltip — shown on hover when not already active */}
+                  {!isDependent && (
+                    <div className="absolute bottom-full right-0 mb-2 z-50 hidden group-hover:block pointer-events-none" dir="rtl">
+                      <div className="bg-[#1E293B] text-white font-cairo text-[11px] rounded-[8px] px-3 py-2 w-[200px] leading-relaxed shadow-lg">
+                        <p className="font-bold mb-1">مريض تابع / مرافق</p>
+                        <p className="text-[#CBD5E1]">فعّل هذا الخيار إذا كان المريض طفلاً أو كبير سن ويحضر مع مرافق، وسيُسجَّل رقم المرافق بدلاً من رقم المريض.</p>
+                        {/* Arrow */}
+                        <div className="absolute top-full right-4 w-0 h-0 border-l-[5px] border-r-[5px] border-t-[5px] border-l-transparent border-r-transparent border-t-[#1E293B]" />
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
               {isCreatingNew && !isDependent && (
                 <span className="flex items-center gap-1 px-2 py-0.5 bg-[#22C55E] text-white text-[11px] font-cairo font-bold rounded-full">

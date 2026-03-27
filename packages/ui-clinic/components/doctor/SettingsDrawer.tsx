@@ -91,8 +91,10 @@ export function SettingsDrawer({ isOpen, onClose, userName, userSpecialty, clini
             </svg>
           </button>
           <div className="flex items-center gap-3 mt-2">
-            <div className="w-14 h-14 rounded-full bg-white/20 flex items-center justify-center font-cairo text-[20px] font-bold">
-              {userName?.charAt(0) || 'د'}
+            <div className="w-14 h-14 rounded-full bg-white/20 flex items-center justify-center">
+              <svg className="w-7 h-7 text-white/90" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+              </svg>
             </div>
             <div>
               <div className="font-cairo font-bold text-[16px]">د. {userName || 'طبيب'}</div>

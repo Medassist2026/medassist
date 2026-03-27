@@ -100,10 +100,10 @@ export function DesktopSidebar({ role, userName, clinicName }: DesktopSidebarPro
       <div className="border-t border-[#E5E7EB] px-4 py-4">
         {userName && (
           <div className="flex items-center gap-3 mb-3">
-            <div className="w-[36px] h-[36px] rounded-full bg-[#E0F2FE] flex items-center justify-center flex-shrink-0">
-              <span className="font-cairo text-[14px] font-bold text-[#2563EB]">
-                {userName.charAt(0)}
-              </span>
+            <div className="w-[36px] h-[36px] rounded-full bg-[#F1F5F9] flex items-center justify-center flex-shrink-0">
+              <svg className="w-[18px] h-[18px] text-[#64748B]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+              </svg>
             </div>
             <div className="flex flex-col min-w-0">
               <span className="font-cairo text-[13px] font-semibold text-[#030712] truncate">
