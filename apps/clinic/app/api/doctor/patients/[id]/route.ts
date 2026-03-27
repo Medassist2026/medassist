@@ -138,22 +138,31 @@ export async function GET(
     // Sort timeline by date descending
     timeline.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
 
-    // P3: Fetch relationship access_level so SessionForm can show upgrade prompt
+    // P3: Fetch relationship — access_level for upgrade prompt + doctor_entered_age fallback
     const { data: relationship } = await admin
       .from('doctor_patient_relationships')
-      .select('access_level')
+      .select('access_level, doctor_entered_age')
       .eq('doctor_id', user.id)
       .eq('patient_id', patientId)
       .maybeSingle()
+
+    // Age: prefer patients.age (set at registration/creation), fall back to
+    // doctor_entered_age stored on the relationship when a walk-in was created
+    const resolvedAge: number | null =
+      patient.age ?? (relationship as any)?.doctor_entered_age ?? null
 
     return NextResponse.json({
       patient: {
         id: patient.id,
         name: patient.full_name,
+        full_name: patient.full_name,
         phone: patient.phone || '',
         email: patient.email || '',
         date_of_birth: patient.date_of_birth || '',
-        gender: patient.sex || patient.gender || '',
+        // age: patients table value, with doctor_entered_age on relationship as fallback
+        age: resolvedAge,
+        sex: patient.sex ? (patient.sex as string).toLowerCase() : null,
+        gender: patient.sex || '',
         national_id: patient.national_id || '',
         blood_type: patient.blood_type || '',
         created_at: patient.created_at,

@@ -373,8 +373,9 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
           id: p.id,
           name: p.full_name || p.name,
           phone: p.phone,
-          age: p.age,
-          sex: p.sex,
+          age: p.age ?? null,
+          // API returns lowercase sex ('male'/'female'); fallback to gender field
+          sex: (p.sex || p.gender) ?? null,
           lastVisitReason: p.last_visit_reason,
           lastVisitDate: p.last_visit_date,
           isRegistered: p.is_registered ?? false,
@@ -480,7 +481,7 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
     if (patient.lastVisitDate) {
       setVisitType('followup')
     }
-    // Auto-load allergies & chronic conditions from patient record
+    // Auto-load full patient details: allergies, chronic conditions, age, sex
     // (patient safety: prevents prescribing allergens even for cross-clinic patients)
     try {
       const res = await fetch(`/api/doctor/patients/${patient.id}`)
@@ -493,6 +494,15 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
         if (p?.pendingLabs?.length > 0) {
           setPendingLabsFromLastVisit(p.pendingLabs)
         }
+        // Enrich selectedPatient with age/sex from detail API (may have more data than search result)
+        if (p?.age || p?.sex) {
+          setSelectedPatient(prev => prev ? {
+            ...prev,
+            age: p.age ?? prev.age,
+            sex: (p.sex || prev.sex) ?? undefined,
+          } : prev)
+        }
+        // Also set manualAge as editable fallback
         if (p?.age) setManualAge(String(p.age))
       }
     } catch { /* non-critical — patient can fill manually */ }

@@ -38,10 +38,13 @@ export async function GET(request: Request) {
 
     const mapped = patients.map((p) => ({
       id: p.id,
+      full_name: p.full_name || 'Unknown Patient',
       name: p.full_name || 'Unknown Patient',
       phone: p.phone,
-      date_of_birth: undefined,
-      gender: p.sex ? p.sex.toLowerCase() : undefined,
+      // age is stored directly on the patients table (set at creation time)
+      age: p.age ?? null,
+      // sex stored as 'Male'/'Female' — normalise to lowercase for UI
+      sex: p.sex ? p.sex.toLowerCase() : null,
       relationship_status: 'active',
       is_walkin: p.registered === false,
       // P3 fields — used to offer code-verification upgrade in SessionForm
