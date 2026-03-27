@@ -12,25 +12,31 @@ interface DiagnosisInputProps {
   value: string[]
   onChange: (value: string[]) => void
   chiefComplaints?: string[]
+  /** Diagnosis chips ordered by this doctor's usage frequency (from /api/doctor/personalized-chips) */
+  presetDiagnoses?: string[]
+  /** True once the doctor has enough history for personalised ordering */
+  personalised?: boolean
 }
 
 const DIAGNOSIS_PRESETS = [
-  { code: 'I10', description: 'Essential Hypertension' },
-  { code: 'E11.9', description: 'Type 2 DM' },
-  { code: 'J06.9', description: 'URI' },
-  { code: 'J00', description: 'Common Cold' },
-  { code: 'K29.70', description: 'Gastritis' },
-  { code: 'R50.9', description: 'Fever' },
-  { code: 'J02.9', description: 'Acute Pharyngitis' },
-  { code: 'J30.9', description: 'Allergic Rhinitis' },
-  { code: 'M54.5', description: 'Low Back Pain' },
-  { code: 'N39.0', description: 'UTI' },
+  { code: 'I10',    description: 'ارتفاع ضغط الدم الأساسي' },
+  { code: 'E11.9',  description: 'داء السكري من النوع الثاني' },
+  { code: 'J06.9',  description: 'التهاب الجهاز التنفسي العلوي' },
+  { code: 'J00',    description: 'نزلة برد' },
+  { code: 'K29.70', description: 'التهاب المعدة' },
+  { code: 'R50.9',  description: 'حمى' },
+  { code: 'J02.9',  description: 'التهاب البلعوم الحاد' },
+  { code: 'J30.9',  description: 'التهاب الأنف التحسسي' },
+  { code: 'M54.5',  description: 'ألم أسفل الظهر' },
+  { code: 'N39.0',  description: 'التهاب المسالك البولية' },
 ]
 
 export default function DiagnosisInput({
   value,
   onChange,
   chiefComplaints,
+  presetDiagnoses,
+  personalised = false,
 }: DiagnosisInputProps) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<ICD10Result[]>([])
@@ -184,38 +190,38 @@ export default function DiagnosisInput({
 
     return (
       <div className="space-y-4">
-        <div className="flex items-center justify-between p-4 bg-success-50 border border-success-200 rounded-lg">
+        <div className="flex items-center justify-between p-4 bg-[#F0FDF4] border border-[#BBF7D0] rounded-[10px]">
           <div>
-            <p className="font-semibold text-success-900">{primaryDiagnosis}</p>
-            <p className="text-sm text-success-700 mt-1">Primary diagnosis confirmed</p>
+            <p className="font-cairo font-semibold text-[#14532D] text-[13px]">{primaryDiagnosis}</p>
+            <p className="font-cairo text-[12px] text-[#16A34A] mt-1">تم تأكيد التشخيص الرئيسي</p>
             {additionalCount > 0 && (
-              <p className="text-xs text-success-600 mt-2">{additionalCount} additional diagnosis</p>
+              <p className="font-cairo text-[11px] text-[#15803D] mt-1.5">+{additionalCount} تشخيص إضافي</p>
             )}
           </div>
           <button
             onClick={handleEditPrimary}
-            className="text-sm text-success-600 hover:text-success-700 underline"
+            className="font-cairo text-[12px] text-[#16A34A] hover:text-[#14532D] underline"
           >
-            Change
+            تعديل
           </button>
         </div>
 
         {/* Additional diagnoses */}
         {additionalCount > 0 && (
-          <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-            <p className="text-xs font-semibold text-gray-700 mb-3 uppercase">Additional Diagnoses</p>
-            <div className="space-y-2">
+          <div className="bg-[#F9FAFB] border border-[#E5E7EB] rounded-[10px] p-3">
+            <p className="font-cairo text-[11px] font-semibold text-[#6B7280] mb-2">تشخيصات إضافية</p>
+            <div className="space-y-1.5">
               {value.slice(1).map((diagnosis, index) => (
                 <div
                   key={index}
-                  className="flex items-center justify-between p-3 bg-white border border-gray-200 rounded-lg"
+                  className="flex items-center justify-between px-3 py-2 bg-white border border-[#E5E7EB] rounded-[8px]"
                 >
-                  <p className="text-sm text-gray-900">{diagnosis}</p>
+                  <p className="font-cairo text-[12px] text-[#030712]">{diagnosis}</p>
                   <button
                     onClick={() => handleRemoveDiagnosis(index + 1)}
-                    className="text-xs text-gray-500 hover:text-red-600 font-semibold"
+                    className="font-cairo text-[11px] text-[#9CA3AF] hover:text-red-500 transition-colors"
                   >
-                    Remove
+                    حذف
                   </button>
                 </div>
               ))}
@@ -229,9 +235,9 @@ export default function DiagnosisInput({
             setQuery('')
             inputRef.current?.focus()
           }}
-          className="w-full text-sm text-primary-600 hover:text-primary-700 font-semibold underline py-2"
+          className="w-full font-cairo text-[12px] text-[#2563EB] hover:text-[#1D4ED8] font-semibold underline py-1"
         >
-          Add more diagnoses
+          + إضافة تشخيص آخر
         </button>
       </div>
     )
@@ -239,19 +245,34 @@ export default function DiagnosisInput({
 
   return (
     <div className="space-y-4">
-      {/* Preset diagnosis chips */}
+      {/* Preset diagnosis chips — personalised by doctor history or default Egyptian GP list */}
       <div>
-        <p className="text-xs font-semibold text-gray-700 mb-2 uppercase">Common Diagnoses</p>
-        <div className="flex flex-wrap gap-2">
-          {DIAGNOSIS_PRESETS.map((preset) => (
-            <button
-              key={preset.code}
-              onClick={() => handlePresetSelect(preset)}
-              className="px-4 py-2 bg-gray-100 hover:bg-primary-100 text-gray-900 text-sm rounded-full border border-gray-200 hover:border-primary-300 transition-colors"
-            >
-              {preset.description}
-            </button>
-          ))}
+        <p className="font-cairo text-[11px] font-semibold text-[#6B7280] mb-2">
+          {personalised ? 'تشخيصاتك الأكثر استخداماً' : 'تشخيصات شائعة'}
+        </p>
+        <div className="flex flex-wrap gap-1.5">
+          {(presetDiagnoses && presetDiagnoses.length > 0
+            // Personalised free-text diagnoses (already formatted strings)
+            ? presetDiagnoses.slice(0, 10).map((text) => (
+                <button
+                  key={text}
+                  onClick={() => handleSuggestedSelect(text)}
+                  className="px-3 py-1.5 bg-white border border-[#E5E7EB] text-[#4B5563] font-cairo text-[12px] rounded-full hover:border-[#2563EB] hover:text-[#2563EB] transition-colors"
+                >
+                  {text}
+                </button>
+              ))
+            // Default ICD-10 coded presets
+            : DIAGNOSIS_PRESETS.map((preset) => (
+                <button
+                  key={preset.code}
+                  onClick={() => handlePresetSelect(preset)}
+                  className="px-3 py-1.5 bg-white border border-[#E5E7EB] text-[#4B5563] font-cairo text-[12px] rounded-full hover:border-[#2563EB] hover:text-[#2563EB] transition-colors"
+                >
+                  {preset.description}
+                </button>
+              ))
+          )}
         </div>
       </div>
 

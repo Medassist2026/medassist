@@ -164,6 +164,17 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
   // ===== CHIEF COMPLAINT CUSTOM INPUT (appends; separate from chip toggles) =====
   const [complaintCustom, setComplaintCustom] = useState('')
 
+  // ===== PERSONALISED CHIPS (loaded once on mount from doctor's history) =====
+  const DEFAULT_COMPLAINT_CHIPS = [
+    'صداع', 'كحة', 'سخونية', 'ألم بطن', 'ألم ظهر',
+    'ألم حلق', 'رشح', 'إسهال', 'إمساك', 'غثيان',
+    'دوخة', 'ضيق تنفس', 'ألم صدر', 'ألم مفاصل', 'طفح جلدي',
+    'حرقان بول', 'ارتفاع ضغط', 'ارتفاع سكر', 'أرق', 'تعب عام',
+  ]
+  const [complaintChips, setComplaintChips] = useState<string[]>(DEFAULT_COMPLAINT_CHIPS)
+  const [diagnosisChips, setDiagnosisChips] = useState<string[]>([])
+  const [chipsPersonalised, setChipsPersonalised] = useState(false)
+
   // ===== MANUAL AGE (separate state so age field is editable when no patient selected) =====
   const [manualAge, setManualAge] = useState<string>('')
 
@@ -293,6 +304,19 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
       }
     } catch { /* no draft */ }
   }, [])
+
+  // ===== PERSONALISED CHIPS: fetch on mount =====
+  useEffect(() => {
+    fetch('/api/doctor/personalized-chips')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return
+        if (data.complaints?.length > 0) setComplaintChips(data.complaints)
+        if (data.diagnoses?.length > 0)  setDiagnosisChips(data.diagnoses)
+        setChipsPersonalised(data.personalised ?? false)
+      })
+      .catch(() => { /* use defaults silently */ })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ===== TOAST HELPER =====
   const showToastMessage = (msg: string) => {
@@ -649,6 +673,13 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
   const confirmAndSave = (mode: 'save' | 'print' | 'save_and_print') => {
     if (!selectedPatient) {
       setError('يرجى اختيار مريض أولاً')
+      return
+    }
+    // Chief complaint is mandatory
+    if (!chiefComplaint.trim()) {
+      setError('الشكوى الرئيسية مطلوبة — اختر شكوى أو اكتبها قبل الحفظ')
+      // Scroll up to the chief complaint section
+      window.scrollTo({ top: 0, behavior: 'smooth' })
       return
     }
     setShowConfirmDialog(mode)
@@ -1659,21 +1690,17 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
               </svg>
             </span>
             <h3 className="font-cairo font-bold text-[14px] text-[#030712]">الشكوى الرئيسية</h3>
+            <span className="text-red-500 text-[13px] font-bold" title="مطلوب">*</span>
             {chiefComplaint && (
               <span className="w-2 h-2 rounded-full bg-[#22C55E]" />
             )}
           </div>
-          <span className="font-cairo text-[11px] text-[#9CA3AF]">اختياري</span>
+          <span className="font-cairo text-[11px] font-medium text-red-400">مطلوب</span>
         </div>
         <div className="p-4 space-y-3">
-          {/* Quick complaint chips — top 20 Egyptian GP complaints */}
+          {/* Quick complaint chips — ordered by this doctor's usage frequency */}
           <div className="flex flex-wrap gap-1.5">
-            {[
-              'صداع', 'كحة', 'سخونية', 'ألم بطن', 'ألم ظهر',
-              'ألم حلق', 'رشح', 'إسهال', 'إمساك', 'غثيان',
-              'دوخة', 'ضيق تنفس', 'ألم صدر', 'ألم مفاصل', 'طفح جلدي',
-              'حرقان بول', 'ارتفاع ضغط', 'ارتفاع سكر', 'أرق', 'تعب عام',
-            ].map((chip) => {
+            {complaintChips.map((chip) => {
               const isSelected = chiefComplaint.includes(chip)
               return (
                 <button
@@ -1767,12 +1794,15 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
               </span>
             )}
           </div>
+          <span className="font-cairo text-[11px] text-[#9CA3AF]">اختياري</span>
         </div>
         <div className="p-4">
           <DiagnosisInput
             value={diagnosis}
             onChange={setDiagnosis}
             chiefComplaints={chiefComplaint ? chiefComplaint.split(/[،,]/).map(s => s.trim()).filter(Boolean) : []}
+            presetDiagnoses={diagnosisChips}
+            personalised={chipsPersonalised}
           />
         </div>
       </div>
