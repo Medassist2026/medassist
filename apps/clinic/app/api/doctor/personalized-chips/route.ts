@@ -3,12 +3,11 @@ export const dynamic = 'force-dynamic'
 /**
  * GET /api/doctor/personalized-chips
  *
- * Returns complaint and diagnosis chips ranked by how often THIS doctor has used them,
- * derived from their clinical_notes history.  No new table required — we aggregate
- * directly from clinical_notes.
+ * Returns complaint, diagnosis, and medication chips ranked by how often THIS doctor
+ * has used them, derived from their clinical_notes history.  No new table required.
  *
  * Response:
- *   { complaints: string[], diagnoses: string[] }
+ *   { complaints: string[], diagnoses: string[], medications: string[], personalised: boolean }
  *
  * Falls back to a general Egyptian-GP default list when the doctor has < 5 notes.
  */
@@ -39,6 +38,12 @@ const DEFAULT_DIAGNOSES = [
   'التهاب المسالك البولية',
 ]
 
+// Most commonly prescribed drugs in Egyptian primary care (GP defaults)
+const DEFAULT_MEDICATIONS = [
+  'باراسيتامول', 'أموكسيسيلين', 'أزيثروميسين', 'إيبوبروفين', 'أوميبرازول',
+  'ميتفورمين', 'أملوديبين', 'أتورفاستاتين', 'سالبوتامول', 'سيتيريزين',
+]
+
 // ── Minimum notes before we switch to personalised order ─────────────────────
 const MIN_NOTES_FOR_PERSONALISATION = 5
 
@@ -47,10 +52,10 @@ export async function GET() {
     const user = await requireApiRole('doctor')
     const admin = createAdminClient('personalized-chips')
 
-    // Fetch all clinical notes for this doctor (we only need chief_complaint, diagnosis, note_data)
+    // Fetch all clinical notes for this doctor
     const { data: notes, error } = await admin
       .from('clinical_notes')
-      .select('chief_complaint, diagnosis, note_data')
+      .select('chief_complaint, diagnosis, note_data, medications')
       .eq('doctor_id', user.id)
       .order('created_at', { ascending: false })
       .limit(500) // Cap to last 500 sessions — enough signal, avoids huge payloads
@@ -99,6 +104,24 @@ export async function GET() {
       }
     }
 
+    // ── Medications frequency map ─────────────────────────────────────────────
+    const medicationFreq: Record<string, number> = {}
+
+    for (const note of notes ?? []) {
+      // medications column is structured array; also check note_data.medications
+      const nd = (note.note_data || {}) as any
+      const medSource: any[] = Array.isArray(note.medications) && note.medications.length > 0
+        ? note.medications
+        : Array.isArray(nd.medications)
+          ? nd.medications
+          : []
+
+      for (const med of medSource) {
+        const name: string = ((med.drug || med.name || '') as string).trim()
+        if (name) medicationFreq[name] = (medicationFreq[name] ?? 0) + 1
+      }
+    }
+
     // ── Sort by frequency (desc) ──────────────────────────────────────────────
     const sortedComplaints = Object.entries(complaintFreq)
       .sort((a, b) => b[1] - a[1])
@@ -108,16 +131,26 @@ export async function GET() {
       .sort((a, b) => b[1] - a[1])
       .map(([text]) => text)
 
-    // ── Merge personalised + defaults (personalised first, then fill from defaults) ──
-    const complaints = noteCount >= MIN_NOTES_FOR_PERSONALISATION
+    const sortedMedications = Object.entries(medicationFreq)
+      .sort((a, b) => b[1] - a[1])
+      .map(([text]) => text)
+
+    // ── Merge personalised + defaults ─────────────────────────────────────────
+    const isPersonalised = noteCount >= MIN_NOTES_FOR_PERSONALISATION
+
+    const complaints = isPersonalised
       ? mergeUnique(sortedComplaints, DEFAULT_COMPLAINTS, 20)
       : DEFAULT_COMPLAINTS
 
-    const diagnoses = noteCount >= MIN_NOTES_FOR_PERSONALISATION
+    const diagnoses = isPersonalised
       ? mergeUnique(sortedDiagnoses, DEFAULT_DIAGNOSES, 10)
       : DEFAULT_DIAGNOSES
 
-    return NextResponse.json({ complaints, diagnoses, personalised: noteCount >= MIN_NOTES_FOR_PERSONALISATION })
+    const medications = isPersonalised
+      ? mergeUnique(sortedMedications, DEFAULT_MEDICATIONS, 10)
+      : DEFAULT_MEDICATIONS
+
+    return NextResponse.json({ complaints, diagnoses, medications, personalised: isPersonalised })
   } catch (error: any) {
     return toApiErrorResponse(error, 'Failed to load personalised chips')
   }

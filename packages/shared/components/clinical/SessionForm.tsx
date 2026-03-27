@@ -173,6 +173,7 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
   ]
   const [complaintChips, setComplaintChips] = useState<string[]>(DEFAULT_COMPLAINT_CHIPS)
   const [diagnosisChips, setDiagnosisChips] = useState<string[]>([])
+  const [medicationChips, setMedicationChips] = useState<string[]>([])
   const [chipsPersonalised, setChipsPersonalised] = useState(false)
 
   // ===== MANUAL AGE (separate state so age field is editable when no patient selected) =====
@@ -248,6 +249,23 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
   const [savedNoteId, setSavedNoteId] = useState<string | null>(null) // FIX 6: Print CTA after save
 
   const prescriptionRef = useRef<HTMLDivElement>(null)
+  const prescriptionSectionRef = useRef<HTMLDivElement>(null)
+
+  // ===== SECTION PROGRESSION: auto-collapse diagnosis when done =====
+  const [diagnosisCollapsed, setDiagnosisCollapsed] = useState(false)
+
+  useEffect(() => {
+    if (diagnosis.length > 0 && !diagnosisCollapsed) {
+      setDiagnosisCollapsed(true)
+      // Small delay so the user sees the confirmation state before scroll
+      setTimeout(() => {
+        prescriptionSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }, 350)
+    }
+    if (diagnosis.length === 0) {
+      setDiagnosisCollapsed(false)
+    }
+  }, [diagnosis.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ===== B03: BEFOREUNLOAD WARNING =====
   const hasUnsavedData = medications.length > 0 || labs.length > 0 || radiology.length > 0 || doctorNotes.length > 0 || chiefComplaint.length > 0
@@ -311,8 +329,9 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (!data) return
-        if (data.complaints?.length > 0) setComplaintChips(data.complaints)
-        if (data.diagnoses?.length > 0)  setDiagnosisChips(data.diagnoses)
+        if (data.complaints?.length > 0)  setComplaintChips(data.complaints)
+        if (data.diagnoses?.length > 0)   setDiagnosisChips(data.diagnoses)
+        if (data.medications?.length > 0) setMedicationChips(data.medications)
         setChipsPersonalised(data.personalised ?? false)
       })
       .catch(() => { /* use defaults silently */ })
@@ -875,16 +894,11 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
                     }
                     <span>{isDependent ? 'مريض تابع' : 'تابع / مرافق'}</span>
                   </button>
-                  {/* Tooltip — shown on hover when not already active */}
+                  {/* Persistent hint — shown below button when not yet active */}
                   {!isDependent && (
-                    <div className="absolute bottom-full right-0 mb-2 z-50 hidden group-hover:block pointer-events-none" dir="rtl">
-                      <div className="bg-[#1E293B] text-white font-cairo text-[11px] rounded-[8px] px-3 py-2 w-[200px] leading-relaxed shadow-lg">
-                        <p className="font-bold mb-1">مريض تابع / مرافق</p>
-                        <p className="text-[#CBD5E1]">فعّل هذا الخيار إذا كان المريض طفلاً أو كبير سن ويحضر مع مرافق، وسيُسجَّل رقم المرافق بدلاً من رقم المريض.</p>
-                        {/* Arrow */}
-                        <div className="absolute top-full right-4 w-0 h-0 border-l-[5px] border-r-[5px] border-t-[5px] border-l-transparent border-r-transparent border-t-[#1E293B]" />
-                      </div>
-                    </div>
+                    <p className="absolute top-full right-0 mt-1 font-cairo text-[10px] text-[#9CA3AF] whitespace-nowrap pointer-events-none" dir="rtl">
+                      للأطفال والمرضى مع مرافق
+                    </p>
                   )}
                 </div>
               )}
@@ -1778,36 +1792,66 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
         </div>
       )}
 
-      {/* ===== DIAGNOSIS — ICD-10 + Complaint-based suggestions (FIX 8: Always visible) ===== */}
-      <div className="bg-white rounded-[12px] border border-[#E5E7EB] overflow-hidden">
-        <div className="px-4 py-3 bg-[#F9FAFB] border-b border-[#E5E7EB] flex items-center justify-between">
+      {/* ===== DIAGNOSIS — ICD-10 + Complaint-based suggestions ===== */}
+      <div className={`bg-white rounded-[12px] border transition-all duration-300 overflow-hidden ${
+        diagnosisCollapsed ? 'border-[#BBF7D0]' : 'border-[#E5E7EB]'
+      }`}>
+        {/* Header — clickable to expand/collapse when complete */}
+        <button
+          type="button"
+          onClick={() => diagnosis.length > 0 && setDiagnosisCollapsed(p => !p)}
+          className={`w-full px-4 py-3 flex items-center justify-between transition-colors ${
+            diagnosisCollapsed
+              ? 'bg-[#F0FDF4] border-b border-[#BBF7D0] cursor-pointer hover:bg-[#DCFCE7]'
+              : 'bg-[#F9FAFB] border-b border-[#E5E7EB] cursor-default'
+          }`}
+        >
           <div className="flex items-center gap-2">
-            <span className="w-6 h-6 rounded-[6px] bg-[#DBEAFE] flex items-center justify-center flex-shrink-0">
-              <svg className="w-3.5 h-3.5 text-[#2563EB]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <span className={`w-6 h-6 rounded-[6px] flex items-center justify-center flex-shrink-0 ${
+              diagnosisCollapsed ? 'bg-[#DCFCE7]' : 'bg-[#DBEAFE]'
+            }`}>
+              <svg className={`w-3.5 h-3.5 ${diagnosisCollapsed ? 'text-[#16A34A]' : 'text-[#2563EB]'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </span>
             <h3 className="font-cairo font-bold text-[14px] text-[#030712]">التشخيص</h3>
             {diagnosis.length > 0 && (
-              <span className="ml-2 px-2 py-0.5 bg-[#DBEAFE] text-[#2563EB] rounded-full text-[11px] font-cairo font-semibold">
+              <span className="px-2 py-0.5 bg-[#DCFCE7] text-[#16A34A] rounded-full text-[11px] font-cairo font-semibold">
                 {diagnosis.length}
               </span>
             )}
+            {/* Compact summary shown in header when collapsed */}
+            {diagnosisCollapsed && diagnosis[0] && (
+              <span className="font-cairo text-[12px] text-[#16A34A] truncate max-w-[200px]">
+                {diagnosis[0]}
+              </span>
+            )}
           </div>
-          <span className="font-cairo text-[11px] text-[#9CA3AF]">اختياري</span>
-        </div>
-        <div className="p-4">
-          <DiagnosisInput
-            value={diagnosis}
-            onChange={setDiagnosis}
-            chiefComplaints={chiefComplaint ? chiefComplaint.split(/[،,]/).map(s => s.trim()).filter(Boolean) : []}
-            presetDiagnoses={diagnosisChips}
-            personalised={chipsPersonalised}
-          />
-        </div>
+          <div className="flex items-center gap-2">
+            {diagnosisCollapsed ? (
+              <span className="font-cairo text-[11px] text-[#16A34A] font-medium">✓ مكتمل · اضغط للتعديل</span>
+            ) : (
+              <span className="font-cairo text-[11px] text-[#9CA3AF]">اختياري</span>
+            )}
+          </div>
+        </button>
+
+        {/* Body — hidden when collapsed */}
+        {!diagnosisCollapsed && (
+          <div className="p-4">
+            <DiagnosisInput
+              value={diagnosis}
+              onChange={setDiagnosis}
+              chiefComplaints={chiefComplaint ? chiefComplaint.split(/[،,]/).map(s => s.trim()).filter(Boolean) : []}
+              presetDiagnoses={diagnosisChips}
+              personalised={chipsPersonalised}
+            />
+          </div>
+        )}
       </div>
 
       {/* ===== PRESCRIPTION — MEDICATIONS (Accordion) ===== */}
+      <div ref={prescriptionSectionRef}>
       <CollapsibleSection
         title="الروشتة"
         icon="pill"
@@ -1820,8 +1864,11 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
           allergies={allergies}
           onAllergyWarning={handleAllergyWarningCheck}
           onOpenTemplates={() => setShowTemplateModal(true)}
+          quickMeds={medicationChips}
+          personalised={chipsPersonalised}
         />
       </CollapsibleSection>
+      </div>
 
       {/* ===== LABS (Accordion) ===== */}
       <CollapsibleSection

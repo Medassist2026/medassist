@@ -43,6 +43,10 @@ interface MedicationChipsProps {
   allergies?: string[]
   onAllergyWarning?: (drugName: string, allergyName: string, familyName: string) => void
   onOpenTemplates?: () => void
+  /** Quick-add medication names ordered by this doctor's usage frequency */
+  quickMeds?: string[]
+  /** True once doctor has enough history for personalised ordering */
+  personalised?: boolean
 }
 
 // ============================================================================
@@ -104,6 +108,8 @@ export function MedicationChips({
   allergies = [],
   onAllergyWarning,
   onOpenTemplates,
+  quickMeds = [],
+  personalised = false,
 }: MedicationChipsProps) {
   const [search, setSearch] = useState('')
   const [searchResults, setSearchResults] = useState<DrugSearchResult[]>([])
@@ -309,8 +315,45 @@ export function MedicationChips({
     return parts.join(' · ')
   }
 
+  // Quick-add a medication by name (opens it pre-filled or adds a minimal entry)
+  const addQuickMed = (name: string) => {
+    // Don't add duplicates
+    if (medications.some(m => m.name.toLowerCase() === name.toLowerCase())) return
+    const entry: MedicationEntry = { name, isExpanded: true }
+    onChange([...medications, entry])
+  }
+
   return (
     <div className="mt-3 space-y-3">
+      {/* ===== QUICK-ADD MEDICATION CHIPS ===== */}
+      {quickMeds.length > 0 && (
+        <div>
+          <p className="font-cairo text-[11px] font-semibold text-[#6B7280] mb-2">
+            {personalised ? 'أدويتك الأكثر وصفاً' : 'أدوية شائعة'}
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {quickMeds.map((med) => {
+              const alreadyAdded = medications.some(m => m.name.toLowerCase() === med.toLowerCase())
+              return (
+                <button
+                  key={med}
+                  type="button"
+                  onClick={() => !alreadyAdded && addQuickMed(med)}
+                  disabled={alreadyAdded}
+                  className={`px-3 py-1.5 font-cairo text-[12px] font-medium rounded-full border transition-colors ${
+                    alreadyAdded
+                      ? 'bg-[#F0FDF4] border-[#BBF7D0] text-[#16A34A] cursor-default'
+                      : 'bg-white border-[#E5E7EB] text-[#4B5563] hover:border-[#22C55E] hover:text-[#16A34A]'
+                  }`}
+                >
+                  {alreadyAdded ? `✓ ${med}` : `+ ${med}`}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {/* ===== DRUG SEARCH with bottom-sheet style ===== */}
       <div ref={searchRef} className="relative">
         <div className="flex items-center gap-2">
