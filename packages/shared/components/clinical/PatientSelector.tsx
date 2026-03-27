@@ -11,6 +11,26 @@ import {
 } from '@shared/components/ui/HelpTooltips'
 
 // ============================================================================
+// EGYPTIAN PHONE VALIDATION
+// ============================================================================
+
+function isValidEgyptianPhone(rawInput: string): boolean {
+  const digits = rawInput.replace(/\D/g, '')
+  if (digits.length === 11 && /^0(10|11|12|15)/.test(digits)) return true
+  if (digits.length === 10 && /^(10|11|12|15)/.test(digits)) return true
+  return false
+}
+
+function egyptianPhoneError(rawInput: string): string | null {
+  const digits = rawInput.replace(/\D/g, '')
+  if (digits.length === 0) return null
+  if (digits.length < 10) return 'رقم الهاتف قصير — يجب أن يكون 11 رقماً'
+  if (digits.length > 11) return 'رقم الهاتف طويل — يجب أن يكون 11 رقماً'
+  if (!/^0?(10|11|12|15)/.test(digits)) return 'يجب أن يبدأ الرقم بـ 010 أو 011 أو 012 أو 015'
+  return null
+}
+
+// ============================================================================
 // TYPES
 // ============================================================================
 
@@ -140,10 +160,10 @@ export function PatientSelector({ onSelect, onCreateWalkIn, selectedPatient }: P
                 )}
               </div>
             </div>
-            <div className="w-10 h-10 bg-green-200 rounded-full flex items-center justify-center">
-              <span className="text-green-700 font-semibold">
-                {selectedPatient.full_name.charAt(0).toUpperCase()}
-              </span>
+            <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
+              <svg className="w-5 h-5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+              </svg>
             </div>
           </div>
         </div>
@@ -257,10 +277,10 @@ export function PatientSelector({ onSelect, onCreateWalkIn, selectedPatient }: P
                       {patient.full_name}
                     </div>
                   </div>
-                  <div className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center flex-shrink-0">
-                    <span className="text-gray-600 font-semibold text-sm">
-                      {patient.full_name.charAt(0).toUpperCase()}
-                    </span>
+                  <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center flex-shrink-0">
+                    <svg className="w-4 h-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+                    </svg>
                   </div>
                 </div>
                 {patient.last_visit_date && (
@@ -299,10 +319,10 @@ export function PatientSelector({ onSelect, onCreateWalkIn, selectedPatient }: P
                   {patient.guardian_name && ` · ولي الأمر: ${patient.guardian_name}`}
                 </div>
               </div>
-              <div className="w-10 h-10 bg-gray-200 rounded-full flex items-center justify-center flex-shrink-0">
-                <span className="text-gray-600 font-semibold">
-                  {patient.full_name.charAt(0).toUpperCase()}
-                </span>
+              <div className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center flex-shrink-0">
+                <svg className="w-5 h-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+                </svg>
               </div>
             </button>
           ))}
@@ -387,6 +407,7 @@ function WalkInPatientForm({ onCancel, onCreated, initialPhone = '' }: WalkInPat
   const [selectedGuardian, setSelectedGuardian] = useState<Patient | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [phoneErrMsg, setPhoneErrMsg] = useState<string | null>(null)
 
   // Arabic translations for error messages
   const arErrors: { [key: string]: string } = {
@@ -420,6 +441,13 @@ function WalkInPatientForm({ onCancel, onCreated, initialPhone = '' }: WalkInPat
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
+
+    // Validate phone before submitting
+    if (!isValidEgyptianPhone(formData.phone)) {
+      setPhoneErrMsg(egyptianPhoneError(formData.phone) || 'رقم الهاتف غير صحيح')
+      return
+    }
+
     setIsSubmitting(true)
 
     try {
@@ -503,10 +531,26 @@ function WalkInPatientForm({ onCancel, onCreated, initialPhone = '' }: WalkInPat
               type="tel"
               required
               value={formData.phone}
-              onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-right"
-              placeholder="+20 xxx xxx xxxx"
+              onChange={(e) => {
+                setFormData({ ...formData, phone: e.target.value })
+                setPhoneErrMsg(egyptianPhoneError(e.target.value))
+              }}
+              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:border-transparent text-right ${
+                phoneErrMsg
+                  ? 'border-red-400 focus:ring-red-300'
+                  : 'border-gray-300 focus:ring-primary-500 focus:border-primary-500'
+              }`}
+              placeholder="01012345678"
+              dir="ltr"
             />
+            {phoneErrMsg && (
+              <p className="mt-1 font-cairo text-[12px] text-red-500 text-right flex items-center justify-end gap-1">
+                {phoneErrMsg}
+                <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+                </svg>
+              </p>
+            )}
           </div>
         </div>
 
@@ -631,8 +675,8 @@ function WalkInPatientForm({ onCancel, onCreated, initialPhone = '' }: WalkInPat
         <div className="flex justify-start gap-3 pt-4 border-t border-gray-200" dir="rtl">
           <button
             type="submit"
-            disabled={isSubmitting}
-            className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50"
+            disabled={isSubmitting || !!phoneErrMsg}
+            className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isSubmitting ? 'جاري الإنشاء...' : 'إنشاء مريض'}
           </button>

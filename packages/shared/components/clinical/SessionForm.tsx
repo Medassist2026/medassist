@@ -107,6 +107,29 @@ function Toast({ message, visible, onDone }: { message: string; visible: boolean
 export function SessionForm({ preselectedPatientId }: SessionFormProps) {
   const router = useRouter()
 
+  // ===== EGYPTIAN PHONE VALIDATION =====
+  // Validates the raw digits typed into the "+20" prefix phone field.
+  // Valid: 11 digits starting with 010/011/012/015 (local format)
+  //     or 10 digits starting with 10/11/12/15 (missing leading zero)
+  function isValidEgyptianPhone(rawInput: string): boolean {
+    const digits = rawInput.replace(/\D/g, '')
+    if (digits.length === 11 && /^0(10|11|12|15)/.test(digits)) return true
+    if (digits.length === 10 && /^(10|11|12|15)/.test(digits)) return true
+    return false
+  }
+
+  function egyptianPhoneError(rawInput: string): string | null {
+    const digits = rawInput.replace(/\D/g, '')
+    if (digits.length === 0) return null
+    if (digits.length < 10) return null  // still typing, no error yet
+    if (isValidEgyptianPhone(rawInput)) return null
+    if (digits.length > 11) return 'رقم طويل جداً — يجب أن يكون 11 رقماً (مثال: 01012345678)'
+    if (!digits.startsWith('0') && !['10','11','12','15'].some(p => digits.startsWith(p))) {
+      return 'يجب أن يبدأ الرقم بـ 010 أو 011 أو 012 أو 015'
+    }
+    return 'رقم موبايل مصري غير صحيح (مثال: 01012345678)'
+  }
+
   // ===== STEP STATE =====
   // Step 1: Patient Info | Step 2: Prescription
   const [step, setStep] = useState<1 | 2>(1)
@@ -526,6 +549,11 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
       setError('يرجى إدخال رقم الموبايل')
       return
     }
+    // Validate Egyptian phone format before creating
+    if (!isValidEgyptianPhone(patientSearch)) {
+      setError(egyptianPhoneError(patientSearch) || 'رقم موبايل مصري غير صحيح (مثال: 01012345678)')
+      return
+    }
     if (!name || name.split(/\s+/).filter(Boolean).length < 2) {
       setError('يرجى إدخال الاسم الأول واسم العائلة')
       return
@@ -736,10 +764,14 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
   // Triggers the inline create-patient flow.
   // In dependent mode: always true once caregiver phone ≥ 8 digits
   // (search results are irrelevant — we're looking up caregiver, creating for patient)
+  const phoneDigits = patientSearch.replace(/\D/g, '')
+  const phoneIsValid = isValidEgyptianPhone(patientSearch)
+  const phoneErrMsg  = egyptianPhoneError(patientSearch)
+
   const isCreatingNew =
-    !selectedPatient && (
-      (isDependent && patientSearch.replace(/\D/g, '').length >= 8) ||
-      (patientSearch.replace(/\D/g, '').length >= 8 && searchResults.length === 0 && !searching)
+    !selectedPatient && phoneIsValid && (
+      (isDependent) ||
+      (searchResults.length === 0 && !searching)
     )
 
   // ===== VISIT TYPE CHIPS =====
@@ -888,7 +920,11 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
               ) : (
                 <div className="relative">
                   {/* dir="ltr" overrides RTL parent so +20 stays on LEFT edge */}
-                  <div className="flex items-center border border-[#E5E7EB] rounded-[10px] overflow-hidden bg-white focus-within:ring-2 focus-within:ring-[#22C55E] focus-within:border-transparent" dir="ltr">
+                  <div className={`flex items-center border rounded-[10px] overflow-hidden bg-white transition-all ${
+                    phoneErrMsg
+                      ? 'border-[#FCA5A5] focus-within:ring-2 focus-within:ring-[#FCA5A5]'
+                      : 'border-[#E5E7EB] focus-within:ring-2 focus-within:ring-[#22C55E] focus-within:border-transparent'
+                  }`} dir="ltr">
                     <span className="px-3 text-[14px] font-inter font-medium text-[#4B5563] bg-[#F3F4F6] py-2.5 border-r border-[#E5E7EB]">+20</span>
                     <input
                       type="tel"
@@ -919,6 +955,16 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
 
                   {searching && (
                     <div className="absolute left-3 top-3 text-[11px] text-[#4B5563] font-cairo">جاري البحث...</div>
+                  )}
+
+                  {/* Phone format validation error */}
+                  {phoneErrMsg && (
+                    <p className="mt-1.5 font-cairo text-[12px] text-[#DC2626] flex items-center gap-1" dir="rtl">
+                      <svg className="w-[12px] h-[12px] flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+                      </svg>
+                      {phoneErrMsg}
+                    </p>
                   )}
 
                   {/* Patient Search Results Dropdown — hidden in dependent mode (phone = caregiver) */}
@@ -1384,10 +1430,9 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
         {(() => {
           // Button is enabled when:
           // (a) a patient was found & selected from search, OR
-          // (b) new patient mode: phone ≥ 8 digits + name has ≥ 2 words
-          const hasPhone = patientSearch.replace(/\D/g, '').length >= 8
+          // (b) new patient mode: valid Egyptian phone + name has ≥ 2 words
           const hasName  = manualPatientName.trim().split(/\s+/).filter(Boolean).length >= 2
-          const canProceed = !!selectedPatient || (isCreatingNew && hasPhone && hasName)
+          const canProceed = !!selectedPatient || (isCreatingNew && phoneIsValid && hasName)
           const buttonLabel = creatingPatient
             ? 'جاري الإضافة...'
             : isCreatingNew && isDependent
@@ -1399,7 +1444,7 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
           return (
             <div className="sticky bottom-16 bg-white border-t border-[#E5E7EB] p-4 -mx-4">
               {/* Helper hint when in new-patient mode but name is missing */}
-              {isCreatingNew && !hasName && hasPhone && (
+              {isCreatingNew && !hasName && phoneIsValid && (
                 <p className="text-center font-cairo text-[12px] text-[#6B7280] mb-2">
                   أدخل الاسم الأول واسم العائلة للمتابعة
                 </p>
