@@ -5,7 +5,6 @@ import { requireRole } from '@shared/lib/auth/session'
 import { getDoctorProfile } from '@shared/lib/data/users'
 import { getClinicContext } from '@shared/lib/data/clinic-context'
 import { DoctorShell } from '@ui-clinic/components/doctor/DoctorShell'
-import { PushNotificationManager } from '@shared/components/pwa/PushNotificationManager'
 
 /** Map English specialty slugs → Arabic display labels */
 const SPECIALTY_AR: Record<string, string> = {
@@ -53,18 +52,15 @@ export default async function DoctorLayout({
   }
 
   return (
-    <>
-      <DoctorShell
-        userName={profile.full_name || `د. ${user.phone}`}
-        userSpecialty={toArabicSpecialty(profile.specialty)}
-        clinicName={clinicContext.clinic?.name}
-        activeClinic={clinicContext.clinic}
-        allClinics={clinicContext.allClinics}
-        canSwitchClinic={clinicContext.hasMultipleClinics}
-      >
-        {children}
-      </DoctorShell>
-      <PushNotificationManager userId={user.id} />
-    </>
+    <DoctorShell
+      userName={profile.full_name || `د. ${user.phone}`}
+      userSpecialty={toArabicSpecialty(profile.specialty)}
+      clinicName={clinicContext.clinic?.name}
+      activeClinic={clinicContext.clinic}
+      allClinics={clinicContext.allClinics}
+      canSwitchClinic={clinicContext.hasMultipleClinics}
+    >
+      {children}
+    </DoctorShell>
   )
 }

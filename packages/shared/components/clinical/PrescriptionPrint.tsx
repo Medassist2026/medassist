@@ -9,9 +9,10 @@ import { ar } from '@shared/lib/i18n/ar'
 
 interface Medication {
   name: string
-  type?: string
-  frequency: string
-  duration: string
+  type?: string           // form: أقراص / شراب / حقن / etc.
+  dosageCount?: string    // "1", "2", "5ml", etc.
+  frequency: string       // "مرة يومياً", "مرتين يومياً", etc.
+  duration: string        // "٧ أيام", "شهر", etc.
   endDate?: string
   notes?: string
   taperingInstructions?: string
@@ -19,12 +20,14 @@ interface Medication {
 
 interface RadiologyItem {
   name: string
-  timing: string[]
+  timing?: string[]
+  notes?: string
 }
 
 interface LabItem {
   name: string
-  timing: string[]
+  timing?: string[]
+  notes?: string
 }
 
 interface PrescriptionPrintProps {
@@ -36,6 +39,7 @@ interface PrescriptionPrintProps {
   doctorName: string
   doctorLicense?: string
   doctorSpecialty: string
+  doctorQualification?: string   // e.g. "بكالوريوس طب وجراحة"
   // Patient
   patientName: string
   patientAge?: number
@@ -46,7 +50,7 @@ interface PrescriptionPrintProps {
   prescriptionDate: string
   medications: Medication[]
   diagnosis?: string
-  // New Figma fields
+  // Optional sections
   radiology?: RadiologyItem[]
   labs?: LabItem[]
   doctorNotes?: string
@@ -57,19 +61,102 @@ interface PrescriptionPrintProps {
 }
 
 // ============================================================================
-// TIMING BADGE LABELS
+// SPECIALTY TRANSLATION MAP (English slugs → Arabic display)
 // ============================================================================
 
-const timingLabels: Record<string, string> = {
-  morning: 'صباحاً',
-  after_food: 'بعد الأكل',
-  fasting: 'صائم',
-  evening: 'مساءً',
-  before_food: 'قبل الأكل',
+const SPECIALTY_AR: Record<string, string> = {
+  'general': 'طب عام',
+  'general-practitioner': 'طب عام',
+  'general practitioner': 'طب عام',
+  'internal-medicine': 'باطنة',
+  'باطنة': 'باطنة',
+  'pediatrics': 'أطفال',
+  'cardiology': 'قلب وأوعية دموية',
+  'obstetrics-gynecology': 'نساء وتوليد',
+  'orthopedics': 'عظام',
+  'dermatology': 'جلدية',
+  'ophthalmology': 'عيون',
+  'ent': 'أنف وأذن وحنجرة',
+  'neurology': 'مخ وأعصاب',
+  'psychiatry': 'نفسية',
+  'urology': 'مسالك بولية',
+  'surgery': 'جراحة عامة',
+  'dentistry': 'أسنان',
+  'radiology': 'أشعة',
+  'laboratory': 'تحاليل',
+  'physiotherapy': 'علاج طبيعي',
+  'nutrition': 'تغذية',
+  'endocrinology': 'غدد صماء',
+}
+
+function toArabicSpecialty(slug?: string): string {
+  if (!slug) return ''
+  return SPECIALTY_AR[slug] ?? SPECIALTY_AR[slug.toLowerCase()] ?? slug
+}
+
+/** Ensure doctor name has the proper Arabic title prefix */
+function formatDoctorName(name: string): string {
+  if (!name) return name
+  if (name.startsWith('د.') || name.startsWith('دكتور') || name.startsWith('دكتورة')) return name
+  return `د. ${name}`
 }
 
 // ============================================================================
-// PRESCRIPTION PRINT COMPONENT - Figma Design Match
+// HELPERS
+// ============================================================================
+
+/** Build a single-line dosage string matching Egyptian Rx conventions */
+function buildDosageString(med: Medication): string {
+  const parts: string[] = []
+
+  // Form first: أقراص / شراب / حقن / etc.
+  if (med.type) parts.push(med.type)
+
+  // Dose amount
+  if (med.dosageCount) {
+    const isFluid = med.type === 'شراب' || (med.dosageCount && med.dosageCount.includes('ml'))
+    if (isFluid) {
+      parts.push(med.dosageCount)
+    } else {
+      const num = parseFloat(med.dosageCount)
+      if (!isNaN(num)) {
+        parts.push(toArabicNum(med.dosageCount))
+      } else {
+        parts.push(med.dosageCount)
+      }
+    }
+  }
+
+  // Frequency
+  if (med.frequency) parts.push(med.frequency)
+
+  // Duration
+  if (med.duration) parts.push(`لمدة ${med.duration}`)
+
+  return parts.join(' — ')
+}
+
+/** Convert Western numerals to Eastern Arabic numerals */
+function toArabicNum(s: string): string {
+  return s.replace(/[0-9]/g, (d) => '٠١٢٣٤٥٦٧٨٩'[parseInt(d)])
+}
+
+/** Format a date string as Arabic long date */
+function formatDate(dateString: string): string {
+  try {
+    const date = new Date(dateString)
+    return date.toLocaleDateString('ar-EG', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    })
+  } catch {
+    return dateString
+  }
+}
+
+// ============================================================================
+// PRESCRIPTION PRINT — Egyptian روشتة طبية format
 // ============================================================================
 
 export default function PrescriptionPrint({
@@ -79,6 +166,7 @@ export default function PrescriptionPrint({
   doctorName,
   doctorLicense,
   doctorSpecialty,
+  doctorQualification,
   patientName,
   patientAge,
   patientSex,
@@ -105,29 +193,26 @@ export default function PrescriptionPrint({
     }, 100)
   }
 
-  const formatDate = (dateString: string) => {
-    try {
-      const date = new Date(dateString)
-      return date.toLocaleDateString('ar-EG', {
-        day: '2-digit',
-        month: 'long',
-        year: 'numeric',
-      })
-    } catch {
-      return dateString
-    }
-  }
+  const sexLabel =
+    patientSex === 'Male' || patientSex === 'male'
+      ? 'ذكر'
+      : patientSex === 'Female' || patientSex === 'female'
+      ? 'أنثى'
+      : ''
 
-  const sexLabel = patientSex === 'male' ? 'ذكر' : patientSex === 'female' ? 'أنثى' : ''
+  const hasLabs = labs && labs.length > 0
+  const hasRadiology = radiology && radiology.length > 0
 
   return (
     <div className="bg-white" dir="rtl">
-      {/* Print / Close Buttons (hidden when printing) */}
+      {/* ---------------------------------------------------------------- */}
+      {/* Action Buttons — hidden when printing                            */}
+      {/* ---------------------------------------------------------------- */}
       <div className="mb-4 print:hidden flex gap-3 px-4">
         <button
           onClick={handlePrint}
           disabled={isPrinting}
-          className="flex-1 px-6 py-3 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold text-sm disabled:opacity-50 flex items-center justify-center gap-2"
+          className="flex-1 px-6 py-3 bg-[#16A34A] hover:bg-[#15803d] text-white rounded-xl font-bold text-sm font-cairo disabled:opacity-50 flex items-center justify-center gap-2"
         >
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
@@ -136,201 +221,255 @@ export default function PrescriptionPrint({
         </button>
         <button
           onClick={() => window.history.back()}
-          className="px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium text-sm"
+          className="px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium text-sm font-cairo"
         >
           {ar.close}
         </button>
       </div>
 
       {/* ================================================================ */}
-      {/* PRESCRIPTION DOCUMENT                                            */}
+      {/* PRESCRIPTION DOCUMENT — A5, Egyptian Rx layout                  */}
       {/* ================================================================ */}
       <div
-        className="prescription-document bg-white border border-gray-200 rounded-xl mx-4 p-6 print:border-0 print:rounded-none print:p-0 print:mx-0 print:bg-white relative overflow-hidden"
-        style={{ fontFamily: 'Cairo, Tajawal, sans-serif' }}
+        className="prescription-document bg-white border border-gray-300 mx-4 print:border-0 print:mx-0 print:bg-white"
+        style={{ fontFamily: 'Cairo, Tajawal, sans-serif', maxWidth: '148mm', minHeight: '210mm', position: 'relative', padding: '10mm 12mm 8mm 12mm' }}
       >
-        {/* MEDA Watermark (diagonal, semi-transparent) */}
-        <div
-          className="absolute inset-0 flex items-center justify-center pointer-events-none select-none"
-          style={{ zIndex: 0 }}
-        >
-          <div
-            className="text-[120px] font-black text-gray-100 opacity-30 tracking-widest"
-            style={{ transform: 'rotate(-35deg)' }}
-          >
-            MEDA
-          </div>
-        </div>
-
-        {/* Content (above watermark) */}
-        <div className="relative" style={{ zIndex: 1 }}>
-          {/* ===== CLINIC HEADER BAR ===== */}
-          <div className="bg-primary-600 text-white rounded-xl p-4 mb-4 print:rounded-none">
-            <h1 className="text-lg font-bold text-center">
-              {clinicName || 'عيادة'}
-            </h1>
-            <div className="flex items-center justify-center gap-4 mt-1 text-xs opacity-90">
-              {clinicPhone && <span>{clinicPhone}</span>}
-              {clinicAddress && <span>{clinicAddress}</span>}
+        {/* ============================================================ */}
+        {/* HEADER — Doctor & Clinic Identity                            */}
+        {/* ============================================================ */}
+        <div className="flex items-start justify-between pb-3 mb-3" style={{ borderBottom: '2px solid #16A34A' }}>
+          {/* Right: Doctor info */}
+          <div className="text-right">
+            <div className="font-bold text-[18px] text-[#0f172a] leading-tight">
+              {formatDoctorName(doctorName)}
             </div>
-          </div>
-
-          {/* ===== DOCTOR + REF NUMBER ===== */}
-          <div className="flex items-start justify-between mb-4">
-            <div>
-              <h2 className="text-base font-bold text-gray-900">{doctorName}</h2>
-              <p className="text-sm text-gray-600">{doctorSpecialty}</p>
-              {doctorLicense && (
-                <p className="text-xs text-gray-500 mt-0.5">ترخيص: {doctorLicense}</p>
-              )}
-            </div>
-            <div className="text-left">
-              <div className="text-xs text-gray-500">{ar.referenceNumber}</div>
-              <div className="text-sm font-bold text-primary-700 font-mono">{prescriptionNumber}</div>
-            </div>
-          </div>
-
-          {/* ===== PATIENT INFO BOX ===== */}
-          <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 mb-4">
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <div>
-                <span className="text-xs text-gray-500">{ar.patientName}</span>
-                <div className="font-bold text-gray-900">{patientName}</div>
-              </div>
-              <div>
-                <span className="text-xs text-gray-500">{ar.age}</span>
-                <div className="font-medium text-gray-900">
-                  {patientAge ? `${patientAge} سنة` : '—'} {sexLabel && `/ ${sexLabel}`}
-                </div>
-              </div>
-              {patientPhone && (
-                <div>
-                  <span className="text-xs text-gray-500">{ar.phone}</span>
-                  <div className="font-medium text-gray-900" dir="ltr">{patientPhone}</div>
-                </div>
-              )}
-              <div>
-                <span className="text-xs text-gray-500">{ar.date}</span>
-                <div className="font-medium text-gray-900">{formatDate(prescriptionDate)}</div>
-              </div>
-            </div>
-
-            {diagnosis && (
-              <div className="mt-2 pt-2 border-t border-gray-200">
-                <span className="text-xs text-gray-500">{ar.diagnosis}</span>
-                <div className="text-sm font-medium text-gray-900">{diagnosis}</div>
-              </div>
+            {doctorQualification ? (
+              <div className="text-[11px] text-[#475569] mt-0.5">{doctorQualification}</div>
+            ) : (
+              <div className="text-[11px] text-[#475569] mt-0.5">بكالوريوس طب وجراحة</div>
+            )}
+            <div className="text-[13px] font-semibold text-[#16A34A] mt-1">{toArabicSpecialty(doctorSpecialty)}</div>
+            {doctorLicense && (
+              <div className="text-[10px] text-[#94a3b8] mt-0.5">رقم النقابة: {doctorLicense}</div>
             )}
           </div>
 
-          {/* ===== MEDICATIONS LIST ===== */}
-          {medications.length > 0 && (
-            <div className="mb-4">
-              <h3 className="text-sm font-bold text-gray-900 mb-2 flex items-center gap-2">
-                <span className="text-xl" style={{ fontFamily: 'Georgia, serif' }}>℞</span>
-                {ar.medications}
-              </h3>
-              <div className="space-y-2">
-                {medications.map((med, i) => (
-                  <div key={i} className="bg-white border border-gray-200 rounded-xl p-3">
-                    <div className="flex items-start gap-3">
-                      <div className="w-6 h-6 bg-primary-100 text-primary-700 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5">
-                        {i + 1}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="font-bold text-sm text-gray-900">{med.name}</div>
-                        <div className="text-xs text-gray-600 mt-1 space-y-0.5">
-                          {med.frequency && <div>{ar.frequency}: {med.frequency}</div>}
-                          {med.duration && <div>{ar.duration}: {med.duration}</div>}
-                          {med.notes && <div className="text-gray-500 italic">{med.notes}</div>}
-                        </div>
-                      </div>
+          {/* Left: Clinic name + contact */}
+          <div className="text-left">
+            {clinicName && (
+              <div className="font-bold text-[15px] text-[#0f172a] leading-tight text-left">{clinicName}</div>
+            )}
+            {clinicAddress && (
+              <div className="text-[11px] text-[#64748b] mt-0.5 text-left">{clinicAddress}</div>
+            )}
+            {clinicPhone && (
+              <div className="text-[11px] text-[#64748b] mt-0.5 text-left" dir="ltr">{clinicPhone}</div>
+            )}
+          </div>
+        </div>
+
+        {/* ============================================================ */}
+        {/* PATIENT + DATE ROW                                           */}
+        {/* ============================================================ */}
+        <div className="flex items-center gap-4 mb-3 text-[12px]" style={{ borderBottom: '1px dashed #cbd5e1', paddingBottom: '8px' }}>
+          <div className="flex items-center gap-1 flex-1">
+            <span className="text-[#64748b] font-medium">اسم المريض:</span>
+            <span className="font-bold text-[#0f172a]">{patientName}</span>
+          </div>
+          {(patientAge || sexLabel) && (
+            <div className="flex items-center gap-1">
+              <span className="text-[#64748b] font-medium">السن:</span>
+              <span className="font-medium text-[#0f172a]">
+                {patientAge ? `${patientAge} سنة` : '—'}
+                {sexLabel ? ` (${sexLabel})` : ''}
+              </span>
+            </div>
+          )}
+          <div className="flex items-center gap-1">
+            <span className="text-[#64748b] font-medium">التاريخ:</span>
+            <span className="font-medium text-[#0f172a]">{formatDate(prescriptionDate)}</span>
+          </div>
+        </div>
+
+        {/* Diagnosis */}
+        {diagnosis && (
+          <div className="mb-3 text-[12px] flex items-start gap-1">
+            <span className="text-[#64748b] font-medium flex-shrink-0">التشخيص:</span>
+            <span className="font-semibold text-[#0f172a]">{diagnosis}</span>
+          </div>
+        )}
+
+        {/* ============================================================ */}
+        {/* ℞ MEDICATIONS                                                */}
+        {/* ============================================================ */}
+        {medications.length > 0 && (
+          <div className="mb-4">
+            {/* ℞ symbol header */}
+            <div className="flex items-center gap-2 mb-2">
+              <span style={{ fontFamily: 'Georgia, "Times New Roman", serif', fontSize: '22px', fontWeight: 'bold', color: '#0f172a', lineHeight: 1 }}>℞</span>
+              <div style={{ flex: 1, height: '1px', background: '#e2e8f0' }} />
+            </div>
+
+            <div className="space-y-2">
+              {medications.map((med, i) => (
+                <div key={i} className="flex items-start gap-2">
+                  {/* Number */}
+                  <span
+                    className="flex-shrink-0 font-bold text-[#16A34A]"
+                    style={{ fontSize: '13px', width: '18px', paddingTop: '1px' }}
+                  >
+                    {toArabicNum(String(i + 1))}.
+                  </span>
+
+                  <div className="flex-1">
+                    {/* Drug name — bold underlined, Egyptian style */}
+                    <span
+                      className="font-bold text-[#0f172a]"
+                      style={{ fontSize: '13px', textDecoration: 'underline', textDecorationColor: '#94a3b8' }}
+                    >
+                      {med.name}
+                    </span>
+
+                    {/* Dosage / frequency line */}
+                    <div className="text-[12px] text-[#334155] mt-0.5">
+                      {buildDosageString(med)}
                     </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
 
-          {/* ===== LABS SECTION ===== */}
-          {labs && labs.length > 0 && (
-            <div className="mb-4">
-              <h3 className="text-sm font-bold text-gray-900 mb-2">{ar.labsSection}</h3>
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2">
-                {labs.map((lab, i) => (
-                  <div key={i} className="flex items-center justify-between">
-                    <span className="text-sm text-gray-900">{lab.name}</span>
-                    {lab.timing && lab.timing.length > 0 && (
-                      <div className="flex gap-1">
-                        {lab.timing.map((t) => (
-                          <span key={t} className="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
-                            {timingLabels[t] || t}
-                          </span>
-                        ))}
+                    {/* Notes */}
+                    {med.notes && (
+                      <div className="text-[11px] text-[#64748b] mt-0.5 italic">
+                        {med.notes}
                       </div>
                     )}
                   </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* ===== RADIOLOGY SECTION ===== */}
-          {radiology && radiology.length > 0 && (
-            <div className="mb-4">
-              <h3 className="text-sm font-bold text-gray-900 mb-2">{ar.radiologySection}</h3>
-              <div className="bg-purple-50 border border-purple-200 rounded-xl p-3 space-y-2">
-                {radiology.map((item, i) => (
-                  <div key={i} className="flex items-center justify-between">
-                    <span className="text-sm text-gray-900">{item.name}</span>
-                    {item.timing && item.timing.length > 0 && (
-                      <div className="flex gap-1">
-                        {item.timing.map((t) => (
-                          <span key={t} className="text-[10px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">
-                            {timingLabels[t] || t}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* ===== DOCTOR NOTES (only if showNotesInPrint) ===== */}
-          {showNotesInPrint && doctorNotes && (
-            <div className="mb-4">
-              <h3 className="text-sm font-bold text-gray-900 mb-2">{ar.doctorNotes}</h3>
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-gray-800 whitespace-pre-wrap">
-                {doctorNotes}
-              </div>
-            </div>
-          )}
-
-          {/* ===== FOLLOW-UP DATE ===== */}
-          {followUpDate && (
-            <div className="mb-4 text-sm">
-              <span className="font-bold text-gray-900">{ar.followUpDate}: </span>
-              <span className="text-gray-700">{formatDate(followUpDate)}</span>
-            </div>
-          )}
-
-          {/* ===== SIGNATURE LINE ===== */}
-          <div className="mt-8 pt-4 border-t border-gray-300">
-            <div className="flex items-end justify-between">
-              <div className="text-xs text-gray-500">
-                <p>هذه الروشتة صالحة لمدة ٣٠ يوماً من تاريخ الإصدار</p>
-              </div>
-              <div className="text-center">
-                <div className="h-12 mb-1" />
-                <div className="border-t-2 border-gray-800 pt-1 min-w-[140px]">
-                  <p className="text-xs font-bold text-gray-900">{doctorName}</p>
-                  <p className="text-[10px] text-gray-600">توقيع الطبيب</p>
                 </div>
-              </div>
+              ))}
             </div>
           </div>
+        )}
+
+        {/* ============================================================ */}
+        {/* LABS                                                         */}
+        {/* ============================================================ */}
+        {hasLabs && (
+          <div className="mb-3">
+            <div className="text-[12px] font-bold text-[#0f172a] mb-1 flex items-center gap-2">
+              <span>تحاليل مطلوبة</span>
+              <div style={{ flex: 1, height: '1px', background: '#e2e8f0' }} />
+            </div>
+            <div className="space-y-1">
+              {labs!.map((lab, i) => (
+                <div key={i} className="flex items-start gap-2 text-[12px]">
+                  <span className="text-[#16A34A] font-bold flex-shrink-0" style={{ width: '18px' }}>
+                    {toArabicNum(String(i + 1))}.
+                  </span>
+                  <span className="text-[#334155]">
+                    {lab.name}
+                    {lab.notes && <span className="text-[#64748b] italic"> — {lab.notes}</span>}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ============================================================ */}
+        {/* RADIOLOGY                                                    */}
+        {/* ============================================================ */}
+        {hasRadiology && (
+          <div className="mb-3">
+            <div className="text-[12px] font-bold text-[#0f172a] mb-1 flex items-center gap-2">
+              <span>أشعة مطلوبة</span>
+              <div style={{ flex: 1, height: '1px', background: '#e2e8f0' }} />
+            </div>
+            <div className="space-y-1">
+              {radiology!.map((item, i) => (
+                <div key={i} className="flex items-start gap-2 text-[12px]">
+                  <span className="text-[#16A34A] font-bold flex-shrink-0" style={{ width: '18px' }}>
+                    {toArabicNum(String(i + 1))}.
+                  </span>
+                  <span className="text-[#334155]">
+                    {item.name}
+                    {item.notes && <span className="text-[#64748b] italic"> — {item.notes}</span>}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Doctor notes (only if opted-in) */}
+        {showNotesInPrint && doctorNotes && (
+          <div className="mb-3">
+            <div className="text-[12px] font-bold text-[#0f172a] mb-1 flex items-center gap-2">
+              <span>تعليمات</span>
+              <div style={{ flex: 1, height: '1px', background: '#e2e8f0' }} />
+            </div>
+            <div className="text-[12px] text-[#334155] whitespace-pre-wrap">{doctorNotes}</div>
+          </div>
+        )}
+
+        {/* Follow-up */}
+        {followUpDate && (
+          <div className="mb-3 text-[12px]">
+            <span className="font-bold text-[#0f172a]">موعد المتابعة: </span>
+            <span className="text-[#334155]">{formatDate(followUpDate)}</span>
+          </div>
+        )}
+
+        {/* ============================================================ */}
+        {/* FOOTER — Signature + Stamp                                   */}
+        {/* ============================================================ */}
+        <div
+          className="flex items-end justify-between"
+          style={{
+            position: 'absolute',
+            bottom: '10mm',
+            right: '12mm',
+            left: '12mm',
+            borderTop: '1px solid #e2e8f0',
+            paddingTop: '8px',
+          }}
+        >
+          {/* Left: validity note */}
+          <div className="text-[10px] text-[#94a3b8]" style={{ maxWidth: '45%' }}>
+            <div>الروشتة صالحة لمدة شهر</div>
+            <div>من تاريخ الإصدار</div>
+          </div>
+
+          {/* Right: Stamp box */}
+          <div style={{ textAlign: 'center' }}>
+            <div
+              style={{
+                width: '90px',
+                height: '70px',
+                border: '1px dashed #94a3b8',
+                borderRadius: '4px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <span style={{ fontSize: '10px', color: '#94a3b8' }}>خاتم الطبيب</span>
+            </div>
+            <div style={{ fontSize: '10px', color: '#64748b', marginTop: '4px', fontWeight: '600' }}>
+              {formatDoctorName(doctorName)}
+            </div>
+          </div>
+        </div>
+
+        {/* Ref number — small, top-left corner */}
+        <div
+          style={{
+            position: 'absolute',
+            top: '10mm',
+            left: '12mm',
+            fontSize: '9px',
+            color: '#94a3b8',
+            fontFamily: 'monospace',
+          }}
+        >
+          #{prescriptionNumber}
         </div>
       </div>
 
@@ -347,26 +486,24 @@ export default function PrescriptionPrint({
           }
 
           .prescription-document {
-            margin: 0;
-            padding: 12mm;
-            box-shadow: none;
-            border: none;
-            border-radius: 0;
+            margin: 0 !important;
+            border: none !important;
+            box-shadow: none !important;
           }
 
           @page {
-            size: A5;
-            margin: 8mm;
+            size: A5 portrait;
+            margin: 0;
           }
 
-          button, [class*="print:hidden"] {
+          [class*="print:hidden"],
+          button {
             display: none !important;
           }
 
-          /* Ensure watermark prints */
-          .pointer-events-none {
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
+          * {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
         }
       `}</style>
