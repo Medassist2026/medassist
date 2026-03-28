@@ -178,6 +178,8 @@ const DEFAULT_TEMPLATES: PrescriptionTemplate[] = [
 // TEMPLATE MODAL COMPONENT
 // ============================================================================
 
+const ONBOARDING_KEY = 'medassist_templates_hint_dismissed'
+
 export function TemplateModal({ onApply, onClose, currentMedications }: TemplateModalProps) {
   const [search, setSearch]                 = useState('')
   const [doctorTemplates, setDoctorTemplates] = useState<PrescriptionTemplate[]>([])
@@ -190,6 +192,18 @@ export function TemplateModal({ onApply, onClose, currentMedications }: Template
 
   // Delete state
   const [deletingId, setDeletingId] = useState<string | null>(null)
+
+  // One-time onboarding hint — dismissed permanently via localStorage
+  const [showHint, setShowHint] = useState(false)
+  useEffect(() => {
+    try {
+      if (!localStorage.getItem(ONBOARDING_KEY)) setShowHint(true)
+    } catch { /* SSR / private browsing — skip */ }
+  }, [])
+  const dismissHint = () => {
+    setShowHint(false)
+    try { localStorage.setItem(ONBOARDING_KEY, '1') } catch { /* ignore */ }
+  }
 
   // Load doctor's custom templates
   useEffect(() => {
@@ -263,6 +277,27 @@ export function TemplateModal({ onApply, onClose, currentMedications }: Template
             </svg>
           </button>
         </div>
+
+        {/* One-time onboarding hint */}
+        {showHint && (
+          <div className="mx-5 mt-3 mb-1 flex items-start gap-2 bg-[#EFF6FF] border border-[#BFDBFE] rounded-[10px] px-3 py-2.5">
+            <svg className="w-4 h-4 text-[#3B82F6] flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <div className="flex-1 min-w-0">
+              <p className="font-cairo text-[12px] font-semibold text-[#1E40AF]">كيف تستخدم القوالب؟</p>
+              <p className="font-cairo text-[11px] text-[#3B82F6] mt-0.5 leading-relaxed">
+                أضف أدوية للروشتة ثم افتح هذه النافذة لحفظها كقالب باسم مخصص.
+                لحذف قالب خاص بك، مرر عليه وستظهر علامة الحذف.
+              </p>
+            </div>
+            <button onClick={dismissHint} className="text-[#93C5FD] hover:text-[#3B82F6] flex-shrink-0">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        )}
 
         {/* Save current prescription as template */}
         {currentMedications && currentMedications.length > 0 && (

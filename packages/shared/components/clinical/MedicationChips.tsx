@@ -91,9 +91,11 @@ const FORM_OPTIONS = [
   { value: 'لبوس',  label: 'لبوس'  },
 ]
 
-// Dose options adapt based on the selected form
+// Dose options adapt based on the selected form.
+// Syrup shows both spoon measures AND ml so the prescription is unambiguous
+// (Egyptian pharmacists equate 5ml = 1 ملعقة صغيرة; pediatric dosing needs ml).
 function getDosageOptions(form?: string): string[] {
-  if (form === 'شراب')  return ['½ ملعقة', '1 ملعقة', '2 ملعقة', '1 ملعقة كبيرة']
+  if (form === 'شراب')  return ['2.5ml', '5ml (1 ملعقة)', '10ml (2 ملعقة)', '15ml (1 ملعقة كبيرة)']
   if (form === 'حقن')   return ['1', '2', '3']
   if (form === 'كريم' || form === 'بخاخ' || form === 'نقط' || form === 'لبوس') return ['كمية مناسبة']
   return ['½', '1', '2', '3']   // أقراص / كبسولة / default
@@ -274,7 +276,8 @@ export function MedicationChips({
       const newOptions = getDosageOptions(updates.form)
       const currentDose = medications[index].dosageCount || '1'
       if (!newOptions.includes(currentDose)) {
-        updated[index].dosageCount = newOptions[1] || newOptions[0] // prefer index 1 ('1' or '1 ملعقة')
+        // For syrup default to 5ml (index 1); for others default to index 1 ('1')
+        updated[index].dosageCount = newOptions[1] || newOptions[0]
       }
     }
 

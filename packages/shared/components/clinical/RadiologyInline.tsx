@@ -129,7 +129,7 @@ export function RadiologyInline({ items, onChange }: RadiologyInlineProps) {
               type="text"
               value={item.notes || ''}
               onChange={(e) => updateNotes(i, e.target.value)}
-              placeholder="ملاحظات اختيارية..."
+              placeholder="مثال: صائم · مادة تباين · ناحية يمين..."
               autoFocus
               className="mt-2 w-full px-3 py-1.5 text-[12px] font-cairo border border-[#E5E7EB] rounded-[8px] focus:outline-none focus:ring-1 focus:ring-[#22C55E] bg-white"
             />
