@@ -29,6 +29,10 @@ interface PatientData {
   // P3: relationship metadata — used to offer code-upgrade to verified_consented
   isRegistered?: boolean   // patient has a MedAssist app account
   accessLevel?: string     // 'walk_in_limited' | 'verified_consented' | 'ghost'
+  // Family fields — dependents surfaced via parent_phone search
+  isDependent?: boolean
+  parentPhone?: string
+  guardianId?: string
 }
 
 export interface SessionFormData {
@@ -227,6 +231,15 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
   // guardianConfirmed: doctor has explicitly confirmed this is the guardian
   const [guardianCandidate, setGuardianCandidate] = useState<PatientData | null>(null)
   const [guardianConfirmed, setGuardianConfirmed] = useState(false)
+
+  // ===== P2: ADD-CHILD SHORTCUT =====
+  // When doctor clicks "+ إضافة تابع جديد" in the family dropdown, this context
+  // pre-fills the guardian phone + auto-confirms, so only name/age/sex is needed.
+  const [addChildContext, setAddChildContext] = useState<{
+    phone: string
+    guardianName?: string
+    guardianId?: string
+  } | null>(null)
 
   // ===== P3: RELATIONSHIP UPGRADE (walk_in_limited → verified_consented) =====
   // Shown when an existing patient who has a MedAssist account shares their code in-session,
@@ -448,6 +461,10 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
           lastVisitDate: p.last_visit_date,
           isRegistered: p.is_registered ?? false,
           accessLevel: p.access_level || 'walk_in_limited',
+          // Family fields
+          isDependent: p.is_dependent ?? false,
+          parentPhone: p.parent_phone ?? null,
+          guardianId: p.guardian_id ?? null,
         })))
       }
     } catch { /* ignore */ }
@@ -562,6 +579,7 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
     setSelectedPatient(patient)
     setPatientSearch('')
     setSearchResults([])
+    setAddChildContext(null)   // clear add-child shortcut if a patient is directly chosen
     // Reset P3 state for new selection
     setP3Code('')
     setP3ShowInput(false)
@@ -932,7 +950,7 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
                 <div className="relative group">
                   <button
                     type="button"
-                    onClick={() => { setIsDependent(p => !p); setDependentType(null); setGuardianCandidate(null); setGuardianConfirmed(false) }}
+                    onClick={() => { setIsDependent(p => !p); setDependentType(null); setGuardianCandidate(null); setGuardianConfirmed(false); setAddChildContext(null) }}
                     className={`flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-cairo font-semibold rounded-[8px] border transition-all ${
                       isDependent
                         ? 'bg-[#F59E0B] border-[#F59E0B] text-white shadow-sm'
@@ -1075,30 +1093,122 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
                     </p>
                   )}
 
-                  {/* Patient Search Results Dropdown — hidden in dependent mode (phone = caregiver) */}
-                  {searchResults.length > 0 && !isDependent && (
-                    <div className="absolute z-30 w-full mt-1 bg-white border border-[#E5E7EB] rounded-[12px] shadow-lg max-h-[200px] overflow-y-auto">
-                      {searchResults.map((p) => (
-                        <button
-                          key={p.id}
-                          onClick={() => selectPatient(p)}
-                          className="w-full text-right px-4 py-3 hover:bg-[#F9FAFB] transition-colors border-b border-[#F3F4F6] last:border-0"
-                        >
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <div className="font-cairo font-semibold text-[14px] text-[#030712]">{p.name}</div>
-                              <div className="font-cairo text-[11px] text-[#4B5563]">
-                                {p.lastVisitReason && (
-                                  <span className="text-[#16A34A]">آخر زيارة: {p.lastVisitReason}</span>
-                                )}
+                  {/* ===== SEARCH RESULTS DROPDOWN (family-grouped) ===== */}
+                  {searchResults.length > 0 && !isDependent && (() => {
+                    // Split into regular patients (matched by own phone/name) and dependents
+                    // (matched because parent_phone == typed number)
+                    const regularPts = searchResults.filter(p => !p.isDependent)
+                    const dependentPts = searchResults.filter(p => p.isDependent)
+
+                    // Group dependents by parent_phone so siblings appear together
+                    const byParent: Record<string, PatientData[]> = {}
+                    for (const d of dependentPts) {
+                      const key = d.parentPhone || 'unknown'
+                      if (!byParent[key]) byParent[key] = []
+                      byParent[key].push(d)
+                    }
+                    const parentGroups = Object.entries(byParent)
+
+                    // Handler for "Add new child for this guardian" shortcut
+                    const handleAddChild = (guardianPhone: string, guardianName?: string, guardianId?: string) => {
+                      setSearchResults([])
+                      setIsDependent(true)
+                      setAddChildContext({ phone: guardianPhone, guardianName, guardianId })
+                      if (guardianId && guardianName) {
+                        setGuardianCandidate({ id: guardianId, name: guardianName, phone: guardianPhone })
+                        setGuardianConfirmed(true)
+                      }
+                    }
+
+                    return (
+                      <div className="absolute z-30 w-full mt-1 bg-white border border-[#E5E7EB] rounded-[12px] shadow-lg max-h-[280px] overflow-y-auto" dir="rtl">
+
+                        {/* Regular patients (own phone matches) */}
+                        {regularPts.map((p) => (
+                          <button
+                            key={p.id}
+                            onClick={() => selectPatient(p)}
+                            className="w-full text-right px-4 py-3 hover:bg-[#F9FAFB] transition-colors border-b border-[#F3F4F6] last:border-0 flex items-center justify-between gap-3"
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="w-7 h-7 rounded-full bg-[#F3F4F6] flex items-center justify-center flex-shrink-0 text-[13px]">👤</span>
+                              <div className="min-w-0 text-right">
+                                <div className="font-cairo font-semibold text-[13px] text-[#030712] truncate">{p.name}</div>
+                                {p.age && <div className="font-cairo text-[11px] text-[#6B7280]">{p.age} سنة{p.sex === 'male' ? ' · ذكر' : p.sex === 'female' ? ' · أنثى' : ''}</div>}
                               </div>
                             </div>
-                            <div className="font-inter text-[12px] text-[#4B5563]" dir="ltr">{p.phone}</div>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                            <div className="font-inter text-[11px] text-[#9CA3AF] flex-shrink-0" dir="ltr">{p.phone?.startsWith('DEP_') ? '' : p.phone}</div>
+                          </button>
+                        ))}
+
+                        {/* Dependent groups — one section per parent phone */}
+                        {parentGroups.map(([parentPhone, children]) => {
+                          // Find the guardian record if it's also in regularPts (same phone)
+                          const guardianRecord = regularPts.find(r => r.phone === parentPhone || r.phone === (parentPhone.startsWith('0') ? '+2' + parentPhone.slice(1) : parentPhone))
+                          const displayPhone = parentPhone.startsWith('0') ? parentPhone : parentPhone
+
+                          return (
+                            <div key={parentPhone}>
+                              {/* Family header */}
+                              <div className="px-4 py-1.5 bg-[#F9FAFB] border-b border-[#F3F4F6] flex items-center justify-between">
+                                <span className="font-cairo text-[11px] font-semibold text-[#6B7280]">
+                                  {guardianRecord ? `أطفال ${guardianRecord.name}` : `أطفال رقم ${displayPhone}`}
+                                </span>
+                                <span className="font-cairo text-[10px] text-[#9CA3AF]">{children.length} {children.length === 1 ? 'طفل' : 'أطفال'}</span>
+                              </div>
+
+                              {/* Each child */}
+                              {children.map((child) => (
+                                <button
+                                  key={child.id}
+                                  onClick={() => selectPatient(child)}
+                                  className="w-full text-right px-4 py-2.5 hover:bg-[#F0FDF4] transition-colors border-b border-[#F3F4F6] last:border-0 flex items-center justify-between gap-3"
+                                >
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <span className="w-7 h-7 rounded-full bg-[#DCFCE7] flex items-center justify-center flex-shrink-0 text-[13px]">
+                                      {(child.age ?? 99) < 12 ? '👦' : '🧒'}
+                                    </span>
+                                    <div className="min-w-0 text-right">
+                                      <div className="font-cairo font-semibold text-[13px] text-[#030712] truncate">{child.name}</div>
+                                      <div className="font-cairo text-[11px] text-[#16A34A]">
+                                        {child.age ? `${child.age} سنة` : ''}
+                                        {child.sex === 'male' ? ' · ذكر' : child.sex === 'female' ? ' · أنثى' : ''}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <span className="font-cairo text-[10px] text-white bg-[#16A34A] px-1.5 py-0.5 rounded-full flex-shrink-0">تابع</span>
+                                </button>
+                              ))}
+
+                              {/* Add new child shortcut */}
+                              <button
+                                onClick={() => handleAddChild(
+                                  displayPhone,
+                                  guardianRecord?.name,
+                                  guardianRecord?.id
+                                )}
+                                className="w-full text-right px-4 py-2.5 hover:bg-[#FFFBEB] transition-colors border-b border-[#F3F4F6] last:border-0 flex items-center gap-2"
+                              >
+                                <span className="w-7 h-7 rounded-full bg-[#FEF3C7] flex items-center justify-center flex-shrink-0">
+                                  <svg className="w-3.5 h-3.5 text-[#D97706]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                                  </svg>
+                                </span>
+                                <span className="font-cairo text-[12px] font-semibold text-[#D97706]">
+                                  إضافة تابع جديد{guardianRecord ? ` لـ ${guardianRecord.name}` : ''}
+                                </span>
+                              </button>
+                            </div>
+                          )
+                        })}
+
+                        {/* If there are dependents but no regular patient matched — offer to add child */}
+                        {parentGroups.length === 0 && dependentPts.length === 0 && regularPts.length === 0 && (
+                          <div className="px-4 py-3 text-center font-cairo text-[12px] text-[#9CA3AF]">لا توجد نتائج</div>
+                        )}
+                      </div>
+                    )
+                  })()}
 
                   {/* ===== P2: CAREGIVER INFO BOX ===== */}
                   {isDependent && patientSearch.replace(/\D/g, '').length >= 8 && (
@@ -1312,6 +1422,34 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
                   <p className="font-cairo font-semibold text-[13px] text-[#16A34A]">تم الربط الموثّق ✓</p>
                   <p className="font-cairo text-[11px] text-[#4B5563]">يمكنك الآن الوصول للتاريخ الطبي الكامل للمريض</p>
                 </div>
+              </div>
+            )}
+
+            {/* ===== ADD-CHILD CONTEXT BANNER ===== */}
+            {/* Shown when doctor clicked "إضافة تابع جديد" from family dropdown */}
+            {addChildContext && !selectedPatient && (
+              <div className="rounded-[10px] border border-[#FDE68A] bg-[#FFFBEB] p-3 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-[16px]">👶</span>
+                  <div className="min-w-0">
+                    <p className="font-cairo font-semibold text-[12px] text-[#92400E]">
+                      إضافة تابع جديد{addChildContext.guardianName ? ` لـ ${addChildContext.guardianName}` : ''}
+                    </p>
+                    <p className="font-cairo text-[11px] text-[#B45309] mt-0.5">أدخل اسم المريض التابع وعمره أدناه</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAddChildContext(null)
+                    setIsDependent(false)
+                    setGuardianCandidate(null)
+                    setGuardianConfirmed(false)
+                  }}
+                  className="font-cairo text-[11px] text-[#D97706] hover:text-[#92400E] flex-shrink-0"
+                >
+                  إلغاء
+                </button>
               </div>
             )}
 

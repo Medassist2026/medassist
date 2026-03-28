@@ -19,6 +19,7 @@ export interface Patient {
   age: number | null
   sex: 'Male' | 'Female' | 'Other' | null
   parent_phone: string | null
+  guardian_id: string | null   // FK to patients.id — set when guardian exists in patients table
   is_dependent: boolean
   registered: boolean
   created_at: string
@@ -453,6 +454,92 @@ export async function createWalkInPatient(
   const adminSupabase = createAdminClient('patient-onboarding')
 
   // ============================================
+  // STEP 0a: Deduplicate dependents across doctors
+  // Without this, every new doctor creates a fresh DEP_xxx record for the
+  // same child. We match by parent_phone + full_name (case-insensitive).
+  // If a match is found we skip record creation and just add a new
+  // doctor-patient relationship — exactly like regular walk-in patients.
+  // ============================================
+  if (data.isDependent && data.parentPhone) {
+    const parentPhone = data.parentPhone
+    // Build phone variants (local 01X... and international +21X...)
+    const intlParentPhone = parentPhone.startsWith('0')
+      ? '+2' + parentPhone.slice(1)
+      : parentPhone.startsWith('+2')
+      ? '0' + parentPhone.slice(2)
+      : null
+
+    const phoneFilter = intlParentPhone
+      ? `parent_phone.eq.${parentPhone},parent_phone.eq.${intlParentPhone}`
+      : `parent_phone.eq.${parentPhone}`
+
+    const { data: existingDependent } = await adminSupabase
+      .from('patients')
+      .select('*')
+      .eq('is_dependent', true)
+      .or(phoneFilter)
+      .ilike('full_name', data.fullName.trim())
+      .limit(1)
+      .maybeSingle()
+
+    if (existingDependent) {
+      const now = new Date().toISOString()
+
+      // Check if this doctor already has a relationship
+      const { data: existingRel } = await adminSupabase
+        .from('doctor_patient_relationships')
+        .select('id')
+        .eq('doctor_id', doctorId)
+        .eq('patient_id', existingDependent.id)
+        .maybeSingle()
+
+      if (existingRel) {
+        // Returning visit — update last_visit_at only
+        await adminSupabase
+          .from('doctor_patient_relationships')
+          .update({ last_visit_at: now })
+          .eq('id', existingRel.id)
+      } else {
+        // New doctor for this dependent — create walk_in_limited relationship
+        const { error: relError } = await adminSupabase
+          .from('doctor_patient_relationships')
+          .insert({
+            doctor_id: doctorId,
+            patient_id: existingDependent.id,
+            clinic_id: data.clinicId || null,
+            status: 'pending',
+            relationship_type: 'walk_in',
+            access_level: 'walk_in_limited',
+            consent_state: 'pending',
+            access_type: 'walk_in',
+            notes: 'walk-in',
+            last_visit_at: now,
+            doctor_entered_name: data.fullName,
+            doctor_entered_age: data.age,
+            doctor_entered_sex: data.sex,
+          })
+        if (relError) throw new Error(relError.message)
+      }
+
+      await adminSupabase
+        .from('patients')
+        .update({ last_activity_at: now })
+        .eq('id', existingDependent.id)
+
+      return {
+        success: true,
+        patient: existingDependent as Patient,
+        relationship: null as any,
+        accessLevel: 'walk_in_limited',
+        consentState: 'pending',
+        isExisting: true,
+        isGhostMode: false,
+        message: 'Dependent linked to doctor',
+      }
+    }
+  }
+
+  // ============================================
   // STEP 0: Resolve guardian_id
   // If the caller already found the guardian's UUID, use it directly.
   // Otherwise, attempt to look up by parent_phone so we always store
@@ -810,12 +897,14 @@ export async function searchMyPatients(
 
   const patientIds = [...new Set(relationships.map(r => r.patient_id))]
 
-  // Search within those patients
+  // Search within those patients.
+  // parent_phone is included so typing the caregiver's number surfaces all
+  // dependents (children, elderly) registered under that number.
   const { data, error } = await adminSupabase
     .from('patients')
     .select('*')
     .in('id', patientIds)
-    .or(`phone.ilike.%${query}%,unique_id.ilike.%${query}%,full_name.ilike.%${query}%`)
+    .or(`phone.ilike.%${query}%,parent_phone.ilike.%${query}%,unique_id.ilike.%${query}%,full_name.ilike.%${query}%`)
     .limit(limit)
 
   if (error) {

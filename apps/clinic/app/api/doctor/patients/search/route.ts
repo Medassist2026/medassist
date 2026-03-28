@@ -50,6 +50,10 @@ export async function GET(request: Request) {
       // P3 fields — used to offer code-verification upgrade in SessionForm
       is_registered: p.registered === true,
       access_level: accessMap[p.id] || 'walk_in_limited',
+      // Family fields — used to group dependents under their caregiver in the dropdown
+      is_dependent: p.is_dependent || false,
+      parent_phone: p.parent_phone || null,
+      guardian_id: p.guardian_id || null,
     }))
 
     return NextResponse.json({ success: true, patients: mapped })
