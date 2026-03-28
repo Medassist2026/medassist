@@ -108,18 +108,24 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
   const router = useRouter()
 
   // ===== EGYPTIAN PHONE VALIDATION =====
+  // Normalizes Arabic-Indic digits (٠١٢٣٤٥٦٧٨٩) to Western digits before validation.
+  // Egyptian keyboards (and autocomplete) often produce Eastern Arabic numerals.
+  function normalizePhone(input: string): string {
+    return input.replace(/[٠١٢٣٤٥٦٧٨٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString())
+  }
+
   // Validates the raw digits typed into the "+20" prefix phone field.
   // Valid: 11 digits starting with 010/011/012/015 (local format)
   //     or 10 digits starting with 10/11/12/15 (missing leading zero)
   function isValidEgyptianPhone(rawInput: string): boolean {
-    const digits = rawInput.replace(/\D/g, '')
+    const digits = normalizePhone(rawInput).replace(/\D/g, '')
     if (digits.length === 11 && /^0(10|11|12|15)/.test(digits)) return true
     if (digits.length === 10 && /^(10|11|12|15)/.test(digits)) return true
     return false
   }
 
   function egyptianPhoneError(rawInput: string): string | null {
-    const digits = rawInput.replace(/\D/g, '')
+    const digits = normalizePhone(rawInput).replace(/\D/g, '')
     if (digits.length === 0) return null
     if (digits.length < 10) return null  // still typing, no error yet
     if (isValidEgyptianPhone(rawInput)) return null
@@ -1031,7 +1037,7 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
                     <input
                       type="tel"
                       value={patientSearch}
-                      onChange={(e) => { setPatientSearch(e.target.value); searchPatients(e.target.value) }}
+                      onChange={(e) => { const v = normalizePhone(e.target.value); setPatientSearch(v); searchPatients(v) }}
                       placeholder="01XXXXXXXXX"
                       className="flex-1 px-3 py-2.5 text-[14px] font-cairo focus:outline-none bg-transparent"
                       dir="ltr"
