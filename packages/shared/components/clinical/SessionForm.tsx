@@ -171,9 +171,13 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
     'دوخة', 'ضيق تنفس', 'ألم صدر', 'ألم مفاصل', 'طفح جلدي',
     'حرقان بول', 'ارتفاع ضغط', 'ارتفاع سكر', 'أرق', 'تعب عام',
   ]
+  const DEFAULT_MEDICATION_CHIPS = [
+    'باراسيتامول', 'أموكسيسيلين', 'أزيثروميسين', 'إيبوبروفين', 'أوميبرازول',
+    'ميتفورمين', 'أملوديبين', 'أتورفاستاتين', 'سالبوتامول', 'سيتيريزين',
+  ]
   const [complaintChips, setComplaintChips] = useState<string[]>(DEFAULT_COMPLAINT_CHIPS)
   const [diagnosisChips, setDiagnosisChips] = useState<string[]>([])
-  const [medicationChips, setMedicationChips] = useState<string[]>([])
+  const [medicationChips, setMedicationChips] = useState<string[]>(DEFAULT_MEDICATION_CHIPS)
   const [chipsPersonalised, setChipsPersonalised] = useState(false)
 
   // ===== MANUAL AGE (separate state so age field is editable when no patient selected) =====
@@ -209,6 +213,14 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
   // dependentType: optional sub-type for documentation (no clinical impact)
   const [isDependent, setIsDependent]       = useState(false)
   const [dependentType, setDependentType]   = useState<'child' | 'elderly' | 'special' | null>(null)
+
+  // ===== P2: GUARDIAN RECOGNITION =====
+  // When isDependent=true and the typed phone matches a known patient of this doctor,
+  // we surface their record so the doctor can confirm the guardian link.
+  // guardianCandidate: the matched patient record (first search result in dependent mode)
+  // guardianConfirmed: doctor has explicitly confirmed this is the guardian
+  const [guardianCandidate, setGuardianCandidate] = useState<PatientData | null>(null)
+  const [guardianConfirmed, setGuardianConfirmed] = useState(false)
 
   // ===== P3: RELATIONSHIP UPGRADE (walk_in_limited → verified_consented) =====
   // Shown when an existing patient who has a MedAssist account shares their code in-session,
@@ -251,7 +263,9 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
   const prescriptionRef = useRef<HTMLDivElement>(null)
   const prescriptionSectionRef = useRef<HTMLDivElement>(null)
 
-  // ===== SECTION PROGRESSION: auto-collapse diagnosis when done =====
+  // ===== SECTION PROGRESSION: auto-collapse complaint → diagnosis → prescription =====
+  const [complaintCollapsed, setComplaintCollapsed] = useState(false)
+  const diagnosisSectionRef = useRef<HTMLDivElement>(null)
   const [diagnosisCollapsed, setDiagnosisCollapsed] = useState(false)
 
   useEffect(() => {
@@ -266,6 +280,11 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
       setDiagnosisCollapsed(false)
     }
   }, [diagnosis.length]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ===== SECTION PROGRESSION: auto-collapse complaint when cleared =====
+  useEffect(() => {
+    if (!chiefComplaint.trim()) setComplaintCollapsed(false)
+  }, [chiefComplaint])
 
   // ===== B03: BEFOREUNLOAD WARNING =====
   const hasUnsavedData = medications.length > 0 || labs.length > 0 || radiology.length > 0 || doctorNotes.length > 0 || chiefComplaint.length > 0
@@ -456,6 +475,29 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
     return () => { clearTimeout(timer); setPhoneCheckLoading(false) }
   }, [patientSearch, selectedPatient])
 
+  // ===== P2: GUARDIAN CANDIDATE DETECTION =====
+  // When isDependent=true and search returns results, surface the first hit as
+  // guardianCandidate. The doctor can confirm or dismiss. Resets when phone changes.
+  useEffect(() => {
+    // phoneIsValid is a derived const declared lower in the render; compute inline here
+    const validPhone = isValidEgyptianPhone(patientSearch)
+    if (!isDependent || !validPhone) {
+      setGuardianCandidate(null)
+      setGuardianConfirmed(false)
+      return
+    }
+    if (searchResults.length > 0) {
+      setGuardianCandidate(searchResults[0])
+    } else {
+      // Phone typed but no match in this doctor's list — clear candidate
+      if (!searching) {
+        setGuardianCandidate(null)
+        // Do NOT reset guardianConfirmed here: user may have already confirmed via a previous
+        // search that returned results, then the results were cleared on re-render.
+      }
+    }
+  }, [isDependent, patientSearch, searchResults, searching])
+
   // ===== P1: CODE VERIFICATION HANDLER =====
   const verifyCode = async () => {
     const digits = patientSearch.replace(/\D/g, '')
@@ -631,6 +673,7 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
             patientCode: patientCode.trim().toUpperCase(),
             isDependent,
             parentPhone: isDependent ? phone : undefined,
+            guardianId: isDependent && guardianConfirmed && guardianCandidate ? guardianCandidate.id : undefined,
           }),
         })
       } else {
@@ -645,6 +688,8 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
             sex: manualSex || undefined,
             isDependent,
             parentPhone: isDependent ? phone : undefined,
+            // When a guardian was confirmed from search results, send their UUID for FK linking
+            guardianId: isDependent && guardianConfirmed && guardianCandidate ? guardianCandidate.id : undefined,
           }),
         })
       }
@@ -881,7 +926,7 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
                 <div className="relative group">
                   <button
                     type="button"
-                    onClick={() => { setIsDependent(p => !p); setDependentType(null) }}
+                    onClick={() => { setIsDependent(p => !p); setDependentType(null); setGuardianCandidate(null); setGuardianConfirmed(false) }}
                     className={`flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-cairo font-semibold rounded-[8px] border transition-all ${
                       isDependent
                         ? 'bg-[#F59E0B] border-[#F59E0B] text-white shadow-sm'
@@ -962,6 +1007,8 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
                       setManualPatientName('')
                       setIsDependent(false)
                       setDependentType(null)
+                      setGuardianCandidate(null)
+                      setGuardianConfirmed(false)
                       setP3Code('')
                       setP3ShowInput(false)
                       setP3Upgraded(false)
@@ -1057,6 +1104,53 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
                         <p className="font-cairo font-semibold text-[12px] text-[#92400E]">رقم المرافق — ليس رقم المريض</p>
                         <p className="font-cairo text-[11px] text-[#B45309] mt-0.5">سيُحفظ كرقم التواصل لولي الأمر. اسم المريض (التابع) أدناه</p>
                       </div>
+                    </div>
+                  )}
+
+                  {/* ===== P2: GUARDIAN RECOGNITION CARD ===== */}
+                  {/* When isDependent=true and phone matches a patient already in this doctor's list */}
+                  {isDependent && guardianCandidate && !guardianConfirmed && (
+                    <div className="mt-2 rounded-[10px] border border-[#BBF7D0] bg-[#F0FDF4] p-3">
+                      <div className="flex items-start gap-2">
+                        <div className="mt-0.5 w-5 h-5 rounded-full bg-[#16A34A] flex-shrink-0 flex items-center justify-center">
+                          <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-cairo font-semibold text-[12px] text-[#14532D]">ولي أمر موجود في سجلاتك</p>
+                          <p className="font-cairo text-[11px] text-[#16A34A] mt-0.5">
+                            {guardianCandidate.name}
+                            {guardianCandidate.age && ` · ${guardianCandidate.age} سنة`}
+                            {guardianCandidate.sex && ` · ${guardianCandidate.sex === 'male' ? 'ذكر' : 'أنثى'}`}
+                          </p>
+                          <p className="font-cairo text-[10px] text-[#4ADE80] mt-1">سيتم ربط التابع بهذا الولي تلقائياً عند الحفظ</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setGuardianConfirmed(true)}
+                          className="flex-shrink-0 px-2.5 py-1 bg-[#16A34A] text-white text-[11px] font-cairo font-semibold rounded-[8px] hover:bg-[#15803D] transition-colors whitespace-nowrap"
+                        >
+                          تأكيد
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {isDependent && guardianConfirmed && guardianCandidate && (
+                    <div className="mt-2 rounded-[10px] border border-[#BBF7D0] bg-[#F0FDF4] p-2.5 flex items-center gap-2">
+                      <svg className="w-4 h-4 text-[#16A34A] flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                      <p className="font-cairo text-[12px] font-semibold text-[#14532D] flex-1 min-w-0 truncate">
+                        مرتبط بـ: {guardianCandidate.name}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setGuardianConfirmed(false)}
+                        className="font-cairo text-[11px] text-[#16A34A] hover:text-[#14532D] flex-shrink-0"
+                      >
+                        تغيير
+                      </button>
                     </div>
                   )}
 
@@ -1694,23 +1788,42 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
         </div>
       )}
 
-      {/* ===== CHIEF COMPLAINT — Tap chips + free text ===== */}
-      <div className="bg-white rounded-[12px] border border-[#E5E7EB] overflow-hidden">
-        <div className="px-4 py-3 bg-[#F9FAFB] border-b border-[#E5E7EB] flex items-center justify-between">
+      {/* ===== CHIEF COMPLAINT — collapsible when done ===== */}
+      <div className={`bg-white rounded-[12px] border transition-all duration-300 overflow-hidden ${
+        complaintCollapsed ? 'border-[#BBF7D0]' : 'border-[#E5E7EB]'
+      }`}>
+        <button
+          type="button"
+          onClick={() => chiefComplaint && setComplaintCollapsed(p => !p)}
+          className={`w-full px-4 py-3 flex items-center justify-between transition-colors ${
+            complaintCollapsed
+              ? 'bg-[#F0FDF4] border-b border-[#BBF7D0] cursor-pointer hover:bg-[#DCFCE7]'
+              : 'bg-[#F9FAFB] border-b border-[#E5E7EB] cursor-default'
+          }`}
+        >
           <div className="flex items-center gap-2">
-            <span className="w-6 h-6 rounded-[6px] bg-[#FEF3C7] flex items-center justify-center flex-shrink-0">
-              <svg className="w-3.5 h-3.5 text-[#D97706]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <span className={`w-6 h-6 rounded-[6px] flex items-center justify-center flex-shrink-0 ${
+              complaintCollapsed ? 'bg-[#DCFCE7]' : 'bg-[#FEF3C7]'
+            }`}>
+              <svg className={`w-3.5 h-3.5 ${complaintCollapsed ? 'text-[#16A34A]' : 'text-[#D97706]'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
               </svg>
             </span>
             <h3 className="font-cairo font-bold text-[14px] text-[#030712]">الشكوى الرئيسية</h3>
             <span className="text-red-500 text-[13px] font-bold" title="مطلوب">*</span>
-            {chiefComplaint && (
-              <span className="w-2 h-2 rounded-full bg-[#22C55E]" />
+            {complaintCollapsed && chiefComplaint && (
+              <span className="font-cairo text-[12px] text-[#16A34A] truncate max-w-[200px]">{chiefComplaint}</span>
             )}
           </div>
-          <span className="font-cairo text-[11px] font-medium text-red-400">مطلوب</span>
-        </div>
+          <div className="flex items-center gap-2">
+            {complaintCollapsed ? (
+              <span className="font-cairo text-[11px] text-[#16A34A] font-medium">✓ مكتمل · اضغط للتعديل</span>
+            ) : (
+              <span className="font-cairo text-[11px] font-medium text-red-400">مطلوب</span>
+            )}
+          </div>
+        </button>
+        {!complaintCollapsed && (
         <div className="p-4 space-y-3">
           {/* Quick complaint chips — ordered by this doctor's usage frequency */}
           <div className="flex flex-wrap gap-1.5">
@@ -1778,6 +1891,7 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
             )}
           </div>
         </div>
+        )}
       </div>
 
       {/* FIX 9: Pending labs from last visit banner */}
@@ -1793,7 +1907,18 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
       )}
 
       {/* ===== DIAGNOSIS — ICD-10 + Complaint-based suggestions ===== */}
-      <div className={`bg-white rounded-[12px] border transition-all duration-300 overflow-hidden ${
+      {/* onFocusCapture: when doctor starts interacting with diagnosis, auto-collapse filled complaint */}
+      <div
+        ref={diagnosisSectionRef}
+        onFocusCapture={() => {
+          if (chiefComplaint.trim() && !complaintCollapsed) {
+            setComplaintCollapsed(true)
+            setTimeout(() => {
+              diagnosisSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+            }, 200)
+          }
+        }}
+        className={`bg-white rounded-[12px] border transition-all duration-300 overflow-hidden ${
         diagnosisCollapsed ? 'border-[#BBF7D0]' : 'border-[#E5E7EB]'
       }`}>
         {/* Header — clickable to expand/collapse when complete */}

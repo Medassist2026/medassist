@@ -79,20 +79,35 @@ function normalizeArabic(text: string): string {
 // CONSTANTS — Figma-matching chips
 // ============================================================================
 
-const DOSAGE_OPTIONS = ['½', '1', '2', '3']
+// الشكل FIRST — user picks form, then dose options adapt
 const FORM_OPTIONS = [
-  { value: 'كبسولة', label: 'كبسولة' },
-  { value: 'قرص',   label: 'قرص'   },
   { value: 'أقراص', label: 'أقراص' },
+  { value: 'كبسولة', label: 'كبسولة' },
   { value: 'شراب',  label: 'شراب'  },
   { value: 'حقن',   label: 'حقن'   },
   { value: 'كريم',  label: 'كريم'  },
   { value: 'نقط',   label: 'نقط'   },
   { value: 'بخاخ',  label: 'بخاخ'  },
   { value: 'لبوس',  label: 'لبوس'  },
-  { value: 'بخة',   label: 'بخة'   },
 ]
-// Frequency expressed as dosing interval (most practical for Egyptian GP)
+
+// Dose options adapt based on the selected form
+function getDosageOptions(form?: string): string[] {
+  if (form === 'شراب')  return ['½ ملعقة', '1 ملعقة', '2 ملعقة', '1 ملعقة كبيرة']
+  if (form === 'حقن')   return ['1', '2', '3']
+  if (form === 'كريم' || form === 'بخاخ' || form === 'نقط' || form === 'لبوس') return ['كمية مناسبة']
+  return ['½', '1', '2', '3']   // أقراص / كبسولة / default
+}
+
+// Dosage unit label shown in summary
+function getDosageUnit(form?: string): string {
+  if (form === 'شراب')  return ''
+  if (form === 'حقن')   return ' حقنة'
+  if (form === 'كبسولة') return ' كبسولة'
+  if (form === 'كريم' || form === 'بخاخ' || form === 'نقط' || form === 'لبوس') return ''
+  return ' قرص'
+}
+
 const FREQUENCY_OPTIONS = ['كل 6 ساعات', 'كل 8 ساعات', 'كل 12 ساعة', 'يومياً']
 const TIMING_OPTIONS = ['صباح', 'ظهر', 'مساء', 'قبل النوم']
 const INSTRUCTION_OPTIONS = ['قبل الأكل', 'بعد الأكل', 'عند اللزوم']
@@ -209,7 +224,7 @@ export function MedicationChips({
       name: drug.nameAr || drug.name,
       genericName: drug.genericName,
       strength: drug.strength,
-      form: drug.form === 'capsule' ? 'كبسولة' : drug.form === 'tablet' ? 'قرص' : drug.form === 'syrup' ? 'شراب' : drug.form === 'injection' ? 'حقن' : drug.form === 'cream' ? 'كريم' : 'قرص',
+      form: drug.form === 'capsule' ? 'كبسولة' : drug.form === 'tablet' ? 'أقراص' : drug.form === 'syrup' ? 'شراب' : drug.form === 'injection' ? 'حقن' : drug.form === 'cream' ? 'كريم' : 'أقراص',
       dosageCount: '1',
       frequency: freq,
       timings,
@@ -240,7 +255,7 @@ export function MedicationChips({
       dosageCount: '1',
       frequency: 'كل 12 ساعة',
       timings: ['صباح', 'مساء'],
-      form: 'قرص',
+      form: 'أقراص',
       isExpanded: true,
     }
     onChange([...medications, newMed])
@@ -253,6 +268,15 @@ export function MedicationChips({
   const updateMed = (index: number, updates: Partial<MedicationEntry>) => {
     const updated = [...medications]
     updated[index] = { ...updated[index], ...updates }
+
+    // When form changes, auto-reset dosageCount to a sensible default for the new form
+    if (updates.form) {
+      const newOptions = getDosageOptions(updates.form)
+      const currentDose = medications[index].dosageCount || '1'
+      if (!newOptions.includes(currentDose)) {
+        updated[index].dosageCount = newOptions[1] || newOptions[0] // prefer index 1 ('1' or '1 ملعقة')
+      }
+    }
 
     // B07: Only auto-adjust timings if they match the PREVIOUS frequency's defaults
     // (preserves manual customization)
@@ -308,7 +332,10 @@ export function MedicationChips({
   // ===== BUILD MEDICATION SUMMARY =====
   const getMedSummary = (med: MedicationEntry): string => {
     const parts: string[] = []
-    if (med.dosageCount) parts.push(`${med.dosageCount} ${med.form || 'قرص'}`)
+    if (med.dosageCount) {
+      const unit = getDosageUnit(med.form)
+      parts.push(`${med.dosageCount}${unit}`)
+    }
     if (med.frequency) parts.push(med.frequency)
     if (med.timings?.length) parts.push(med.timings.join(' + '))
     if (med.duration) parts.push(`لمدة ${med.duration}`)
@@ -464,9 +491,15 @@ export function MedicationChips({
                 )}
               </div>
             </div>
-            <div className="flex items-center gap-2 flex-shrink-0">
+            {/* Collapsed: show edit + delete buttons */}
+            <div className="flex items-center gap-3 flex-shrink-0">
               {!med.isExpanded && (
-                <span className="font-cairo text-[11px] text-[#16A34A] font-medium">✏️</span>
+                <button
+                  onClick={(e) => { e.stopPropagation(); removeMedication(i) }}
+                  className="font-cairo text-[11px] font-medium text-[#DC2626] hover:text-red-800"
+                >
+                  حذف
+                </button>
               )}
               <svg
                 className={`w-4 h-4 text-[#4B5563] transition-transform ${med.isExpanded ? 'rotate-180' : ''}`}
@@ -477,48 +510,28 @@ export function MedicationChips({
             </div>
           </button>
 
-          {/* Expanded Edit View — Figma P3 state */}
+          {/* Expanded Edit View — shape-first, condensed */}
           {med.isExpanded && (
-            <div className="px-4 pb-4 border-t border-[#F3F4F6] space-y-4">
-              {/* Smart default note */}
+            <div className="px-3 pb-3 border-t border-[#F3F4F6] space-y-3">
+              {/* Smart default banner */}
               {med.frequency && (
-                <div className="flex items-center gap-1.5 mt-3 px-2 py-1.5 bg-[#DCFCE7] rounded-[8px]">
-                  <span className="text-[13px]">⚡</span>
-                  <span className="font-cairo text-[11px] text-[#16A34A] font-medium">
+                <div className="flex items-center gap-1.5 mt-2 px-2 py-1 bg-[#DCFCE7] rounded-[8px]">
+                  <span className="text-[12px]">⚡</span>
+                  <span className="font-cairo text-[10px] text-[#16A34A] font-medium">
                     أُضيف تلقائياً بناءً على {med.frequency} يومياً
                   </span>
                 </div>
               )}
 
-              {/* Group 1: الجرعة (Dosage Count) */}
+              {/* Row 1: الشكل FIRST */}
               <div>
-                <label className="font-cairo text-[12px] font-semibold text-[#4B5563] mb-1.5 block">الجرعة</label>
-                <div className="flex flex-wrap gap-2">
-                  {DOSAGE_OPTIONS.map((dose) => (
-                    <button
-                      key={dose}
-                      onClick={() => updateMed(i, { dosageCount: dose })}
-                      className={`px-4 py-2 rounded-[8px] font-cairo text-[13px] font-medium border transition-colors ${
-                        med.dosageCount === dose
-                          ? 'bg-[#16A34A] border-[#16A34A] text-white'
-                          : 'bg-white border-[#E5E7EB] text-[#4B5563] hover:border-[#16A34A]'
-                      }`}
-                    >
-                      {dose}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Group 2: الشكل (Form) */}
-              <div>
-                <label className="font-cairo text-[12px] font-semibold text-[#4B5563] mb-1.5 block">الشكل</label>
-                <div className="flex flex-wrap gap-2">
-                  {FORM_OPTIONS.slice(0, 6).map((form) => (
+                <label className="font-cairo text-[11px] font-semibold text-[#4B5563] mb-1 block">الشكل</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {FORM_OPTIONS.map((form) => (
                     <button
                       key={form.value}
                       onClick={() => updateMed(i, { form: form.value })}
-                      className={`px-3 py-1.5 rounded-[8px] font-cairo text-[12px] font-medium border transition-colors ${
+                      className={`px-2.5 py-1.5 rounded-[8px] font-cairo text-[12px] font-medium border transition-colors ${
                         med.form === form.value
                           ? 'bg-[#16A34A] border-[#16A34A] text-white'
                           : 'bg-white border-[#E5E7EB] text-[#4B5563] hover:border-[#16A34A]'
@@ -530,15 +543,35 @@ export function MedicationChips({
                 </div>
               </div>
 
-              {/* Group 3: التكرار (Frequency) */}
+              {/* Row 2: الجرعة — adapts based on shape */}
               <div>
-                <label className="font-cairo text-[12px] font-semibold text-[#4B5563] mb-1.5 block">التكرار</label>
-                <div className="flex gap-2">
+                <label className="font-cairo text-[11px] font-semibold text-[#4B5563] mb-1 block">الجرعة</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {getDosageOptions(med.form).map((dose) => (
+                    <button
+                      key={dose}
+                      onClick={() => updateMed(i, { dosageCount: dose })}
+                      className={`px-3 py-1.5 rounded-[8px] font-cairo text-[12px] font-medium border transition-colors ${
+                        med.dosageCount === dose
+                          ? 'bg-[#16A34A] border-[#16A34A] text-white'
+                          : 'bg-white border-[#E5E7EB] text-[#4B5563] hover:border-[#16A34A]'
+                      }`}
+                    >
+                      {dose}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Row 3: التكرار */}
+              <div>
+                <label className="font-cairo text-[11px] font-semibold text-[#4B5563] mb-1 block">التكرار</label>
+                <div className="flex gap-1.5">
                   {FREQUENCY_OPTIONS.map((freq) => (
                     <button
                       key={freq}
                       onClick={() => updateMed(i, { frequency: freq })}
-                      className={`flex-1 py-2 rounded-[8px] font-cairo text-[13px] font-medium border transition-colors ${
+                      className={`flex-1 py-1.5 rounded-[8px] font-cairo text-[11px] font-medium border transition-colors ${
                         med.frequency === freq
                           ? 'bg-[#16A34A] border-[#16A34A] text-white'
                           : 'bg-white border-[#E5E7EB] text-[#4B5563] hover:border-[#16A34A]'
@@ -550,10 +583,10 @@ export function MedicationChips({
                 </div>
               </div>
 
-              {/* Group 4: وقت الجرعة (Timing) */}
+              {/* Row 4: وقت الجرعة */}
               <div>
-                <label className="font-cairo text-[12px] font-semibold text-[#4B5563] mb-1.5 block">وقت الجرعة</label>
-                <div className="flex flex-wrap gap-2">
+                <label className="font-cairo text-[11px] font-semibold text-[#4B5563] mb-1 block">وقت الجرعة</label>
+                <div className="flex flex-wrap gap-1.5">
                   {TIMING_OPTIONS.map((timing) => (
                     <button
                       key={timing}
@@ -570,61 +603,61 @@ export function MedicationChips({
                 </div>
               </div>
 
-              {/* Group 5: تعليمات (Instructions) — optional */}
-              <div>
-                <label className="font-cairo text-[12px] font-semibold text-[#4B5563] mb-1.5 block">
-                  تعليمات <span className="text-[#9CA3AF] font-normal">(اختياري)</span>
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  {INSTRUCTION_OPTIONS.map((inst) => (
-                    <button
-                      key={inst}
-                      onClick={() => updateMed(i, { instructions: med.instructions === inst ? undefined : inst })}
-                      className={`px-3 py-1.5 rounded-[8px] font-cairo text-[12px] font-medium border transition-colors ${
-                        med.instructions === inst
-                          ? 'bg-[#DCFCE7] border-[#16A34A] text-[#16A34A]'
-                          : 'bg-white border-[#E5E7EB] text-[#4B5563] hover:border-[#16A34A]'
-                      }`}
-                    >
-                      {inst}
-                    </button>
-                  ))}
+              {/* Row 5: تعليمات + مدة side-by-side */}
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <label className="font-cairo text-[11px] font-semibold text-[#4B5563] mb-1 block">
+                    تعليمات <span className="text-[#9CA3AF] font-normal">(اختياري)</span>
+                  </label>
+                  <div className="flex flex-wrap gap-1">
+                    {INSTRUCTION_OPTIONS.map((inst) => (
+                      <button
+                        key={inst}
+                        onClick={() => updateMed(i, { instructions: med.instructions === inst ? undefined : inst })}
+                        className={`px-2 py-1 rounded-[6px] font-cairo text-[11px] font-medium border transition-colors ${
+                          med.instructions === inst
+                            ? 'bg-[#DCFCE7] border-[#16A34A] text-[#16A34A]'
+                            : 'bg-white border-[#E5E7EB] text-[#4B5563] hover:border-[#16A34A]'
+                        }`}
+                      >
+                        {inst}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex-1">
+                  <label className="font-cairo text-[11px] font-semibold text-[#4B5563] mb-1 block">
+                    المدة <span className="text-[#9CA3AF] font-normal">(اختياري)</span>
+                  </label>
+                  <div className="flex flex-wrap gap-1">
+                    {DURATION_OPTIONS.map((dur) => (
+                      <button
+                        key={dur}
+                        onClick={() => updateMed(i, { duration: med.duration === dur ? undefined : dur })}
+                        className={`px-2 py-1 rounded-[6px] font-cairo text-[11px] font-medium border transition-colors ${
+                          med.duration === dur
+                            ? 'bg-[#DCFCE7] border-[#16A34A] text-[#16A34A]'
+                            : 'bg-white border-[#E5E7EB] text-[#4B5563] hover:border-[#16A34A]'
+                        }`}
+                      >
+                        {dur}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
 
-              {/* Group 6: المدة (Duration) — B01 */}
-              <div>
-                <label className="font-cairo text-[12px] font-semibold text-[#4B5563] mb-1.5 block">
-                  المدة <span className="text-[#9CA3AF] font-normal">(اختياري)</span>
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  {DURATION_OPTIONS.map((dur) => (
-                    <button
-                      key={dur}
-                      onClick={() => updateMed(i, { duration: med.duration === dur ? undefined : dur })}
-                      className={`px-3 py-1.5 rounded-[8px] font-cairo text-[12px] font-medium border transition-colors ${
-                        med.duration === dur
-                          ? 'bg-[#DCFCE7] border-[#16A34A] text-[#16A34A]'
-                          : 'bg-white border-[#E5E7EB] text-[#4B5563] hover:border-[#16A34A]'
-                      }`}
-                    >
-                      {dur}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Action buttons */}
-              <div className="flex items-center justify-between pt-2">
+              {/* Action: delete + done */}
+              <div className="flex items-center justify-between pt-1">
                 <button
                   onClick={() => removeMedication(i)}
-                  className="font-cairo text-[13px] font-medium text-[#DC2626] hover:text-red-800"
+                  className="font-cairo text-[12px] font-medium text-[#DC2626] hover:text-red-800"
                 >
                   حذف
                 </button>
                 <button
                   onClick={() => toggleExpand(i)}
-                  className="px-6 py-2 bg-[#16A34A] text-white rounded-[8px] font-cairo text-[13px] font-bold hover:bg-[#15803d] transition-colors"
+                  className="px-5 py-1.5 bg-[#16A34A] text-white rounded-[8px] font-cairo text-[12px] font-bold hover:bg-[#15803d] transition-colors"
                 >
                   تم
                 </button>

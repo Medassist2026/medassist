@@ -31,6 +31,8 @@ export async function POST(request: Request) {
     const dateOfBirth = body.date_of_birth || body.dateOfBirth
     const isDependent = body.isDependent ?? body.is_dependent ?? false
     const parentPhone = body.parentPhone || body.parent_phone || body.guardian_phone
+    // guardianId: UUID of guardian's patient record (supplied when doctor confirmed via search results)
+    const guardianId  = body.guardianId  || body.guardian_id  || null
 
     if (!name || typeof name !== 'string' || name.trim().length < 2) {
       return NextResponse.json(
@@ -99,6 +101,7 @@ export async function POST(request: Request) {
       sex: (normalizedSex || undefined) as 'Male' | 'Female' | 'Other' | undefined,
       isDependent: body.isDependent ?? body.is_dependent ?? false,
       parentPhone: body.parentPhone || body.parent_phone || body.guardian_phone,
+      guardianId: guardianId || undefined,
       clinicId: clinicId || undefined
     })
 

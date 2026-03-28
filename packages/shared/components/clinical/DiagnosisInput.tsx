@@ -46,7 +46,10 @@ export default function DiagnosisInput({
   const [suggestedDiagnoses, setSuggestedDiagnoses] = useState<string[]>([])
   const [showCustomInput, setShowCustomInput] = useState(false)
   const [customDiagnosis, setCustomDiagnosis] = useState('')
+  // Controls inline search input shown when doctor taps "+ إضافة تشخيص آخر"
+  const [showAddMore, setShowAddMore] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const addMoreRef = useRef<HTMLInputElement>(null)
   const customInputRef = useRef<HTMLInputElement>(null)
 
   // Extract suggested diagnoses from chief complaints
@@ -122,6 +125,7 @@ export default function DiagnosisInput({
     setQuery('')
     setShowDropdown(false)
     setResults([])
+    setShowAddMore(false)
     inputRef.current?.focus()
   }
 
@@ -132,6 +136,7 @@ export default function DiagnosisInput({
     setQuery('')
     setShowDropdown(false)
     setResults([])
+    setShowAddMore(false)
     inputRef.current?.focus()
   }
 
@@ -189,7 +194,7 @@ export default function DiagnosisInput({
     const additionalCount = value.length - 1
 
     return (
-      <div className="space-y-4">
+      <div className="space-y-3">
         <div className="flex items-center justify-between p-4 bg-[#F0FDF4] border border-[#BBF7D0] rounded-[10px]">
           <div>
             <p className="font-cairo font-semibold text-[#14532D] text-[13px]">{primaryDiagnosis}</p>
@@ -206,7 +211,7 @@ export default function DiagnosisInput({
           </button>
         </div>
 
-        {/* Additional diagnoses */}
+        {/* Additional diagnoses list */}
         {additionalCount > 0 && (
           <div className="bg-[#F9FAFB] border border-[#E5E7EB] rounded-[10px] p-3">
             <p className="font-cairo text-[11px] font-semibold text-[#6B7280] mb-2">تشخيصات إضافية</p>
@@ -229,16 +234,79 @@ export default function DiagnosisInput({
           </div>
         )}
 
-        {/* Add more diagnoses button */}
-        <button
-          onClick={() => {
-            setQuery('')
-            inputRef.current?.focus()
-          }}
-          className="w-full font-cairo text-[12px] text-[#2563EB] hover:text-[#1D4ED8] font-semibold underline py-1"
-        >
-          + إضافة تشخيص آخر
-        </button>
+        {/* Inline search for adding more — shown when showAddMore=true */}
+        {showAddMore && (
+          <div className="space-y-2">
+            <div className="relative">
+              <input
+                ref={addMoreRef}
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="ابحث عن تشخيص آخر..."
+                autoFocus
+                className="w-full px-4 py-2.5 border border-[#2563EB] rounded-[10px] text-[14px] font-cairo focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white"
+              />
+              <button
+                onClick={() => { setShowAddMore(false); setQuery('') }}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9CA3AF] hover:text-[#6B7280]"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+              {/* ICD-10 results dropdown */}
+              {showDropdown && results.length > 0 && (
+                <div className="absolute z-30 w-full mt-1 bg-white border border-[#E5E7EB] rounded-[12px] shadow-lg max-h-48 overflow-y-auto">
+                  {results.map((result, index) => (
+                    <button
+                      key={result.code}
+                      onClick={() => handleSelect(result)}
+                      className={`w-full text-right px-4 py-3 hover:bg-[#F9FAFB] transition-colors border-b border-[#F3F4F6] last:border-0 ${
+                        index === selectedIndex ? 'bg-[#EFF6FF]' : ''
+                      }`}
+                    >
+                      <span className="font-cairo font-medium text-[13px] text-[#030712]">{result.description}</span>
+                      <span className="font-mono text-[10px] text-[#9CA3AF] mr-2">{result.code}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {/* Custom free-text option when no ICD results */}
+            {showCustomInput && query.length >= 2 && (
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={customDiagnosis}
+                  onChange={(e) => setCustomDiagnosis(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleCustomDiagnosis()}
+                  placeholder="أو اكتب تشخيص مخصص..."
+                  autoFocus
+                  className="flex-1 px-3 py-2 border border-[#E5E7EB] rounded-[8px] text-[13px] font-cairo focus:outline-none"
+                />
+                <button
+                  onClick={handleCustomDiagnosis}
+                  disabled={!customDiagnosis.trim()}
+                  className="px-3 py-2 bg-[#2563EB] text-white text-[12px] font-cairo font-semibold rounded-[8px] disabled:opacity-40"
+                >
+                  إضافة
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Add more button — shown when not already in add-more mode */}
+        {!showAddMore && (
+          <button
+            onClick={() => { setShowAddMore(true); setQuery('') }}
+            className="w-full font-cairo text-[12px] text-[#2563EB] hover:text-[#1D4ED8] font-semibold underline py-1"
+          >
+            + إضافة تشخيص آخر
+          </button>
+        )}
       </div>
     )
   }

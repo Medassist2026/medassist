@@ -445,11 +445,43 @@ export async function createWalkInPatient(
     sex?: 'Male' | 'Female' | 'Other'
     isDependent?: boolean
     parentPhone?: string
+    /** UUID of the guardian's patients row — preferred over parent_phone for FK integrity */
+    guardianId?: string
     clinicId?: string
   }
 ): Promise<OnboardingResult> {
   const adminSupabase = createAdminClient('patient-onboarding')
-  
+
+  // ============================================
+  // STEP 0: Resolve guardian_id
+  // If the caller already found the guardian's UUID, use it directly.
+  // Otherwise, attempt to look up by parent_phone so we always store
+  // a proper FK when the guardian exists in the patients table.
+  // ============================================
+  let resolvedGuardianId: string | null = data.guardianId || null
+
+  if (data.isDependent && data.parentPhone && !resolvedGuardianId) {
+    // Try exact phone match. Walk-in phones are stored as entered (e.g. "01012345678").
+    // Also try international format (+201XXXXXXXXX) in case guardian registered via app.
+    const phone = data.parentPhone
+    const intlPhone = phone.startsWith('0') ? '+2' + phone.slice(1) : null
+
+    const orFilter = intlPhone
+      ? `phone.eq.${phone},phone.eq.${intlPhone}`
+      : `phone.eq.${phone}`
+
+    const { data: guardianRow } = await adminSupabase
+      .from('patients')
+      .select('id')
+      .or(orFilter)
+      .limit(1)
+      .maybeSingle()
+
+    if (guardianRow?.id) {
+      resolvedGuardianId = guardianRow.id
+    }
+  }
+
   // ============================================
   // STEP 1: Create auth user (silent auth)
   // ============================================
@@ -503,6 +535,8 @@ export async function createWalkInPatient(
       sex: data.sex ?? null,
       is_dependent: data.isDependent || false,
       parent_phone: data.isDependent ? data.parentPhone : null,
+      // FK link to guardian's patient record (preferred over parent_phone for integrity)
+      guardian_id: data.isDependent ? resolvedGuardianId : null,
       registered: false,
       phone_verified: false,
       account_status: 'active',

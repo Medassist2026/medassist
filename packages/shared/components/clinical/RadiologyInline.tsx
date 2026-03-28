@@ -2,11 +2,11 @@
 
 import { useState } from 'react'
 import { ar } from '@shared/lib/i18n/ar'
-import { TimingBadges, type TimingOption } from './TimingBadges'
 
 export interface RadiologyItem {
   name: string
-  timing: TimingOption[]
+  timing?: string[]   // kept for backward compat with saved data (not shown in UI)
+  notes?: string      // optional free text per scan
 }
 
 interface RadiologyInlineProps {
@@ -34,25 +34,35 @@ const commonRadiology = [
 export function RadiologyInline({ items, onChange }: RadiologyInlineProps) {
   const [search, setSearch] = useState('')
   const [showSuggestions, setShowSuggestions] = useState(false)
+  const [notesOpen, setNotesOpen] = useState<Record<number, boolean>>({})
 
   const filtered = commonRadiology.filter(r =>
     r.includes(search) && !items.some(i => i.name === r)
   )
 
   const addItem = (name: string) => {
-    onChange([...items, { name, timing: [] }])
+    onChange([...items, { name }])
     setSearch('')
     setShowSuggestions(false)
   }
 
   const removeItem = (index: number) => {
     onChange(items.filter((_, i) => i !== index))
+    setNotesOpen(prev => {
+      const next = { ...prev }
+      delete next[index]
+      return next
+    })
   }
 
-  const updateTiming = (index: number, timing: TimingOption[]) => {
+  const updateNotes = (index: number, notes: string) => {
     const updated = [...items]
-    updated[index] = { ...updated[index], timing }
+    updated[index] = { ...updated[index], notes }
     onChange(updated)
+  }
+
+  const toggleNotes = (index: number) => {
+    setNotesOpen(prev => ({ ...prev, [index]: !prev[index] }))
   }
 
   return (
@@ -96,14 +106,34 @@ export function RadiologyInline({ items, onChange }: RadiologyInlineProps) {
       {items.map((item, i) => (
         <div key={i} className="bg-[#F9FAFB] rounded-[12px] p-3">
           <div className="flex items-center justify-between">
-            <span className="text-[14px] font-cairo font-medium text-[#030712]">{item.name}</span>
-            <button onClick={() => removeItem(i)} className="text-[#DC2626] hover:text-red-800">
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => toggleNotes(i)}
+                className="font-cairo text-[11px] text-[#9CA3AF] hover:text-[#6B7280] transition-colors"
+                title="إضافة ملاحظة"
+              >
+                {notesOpen[i] ? '▲' : '+ ملاحظة'}
+              </button>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-[14px] font-cairo font-medium text-[#030712]">{item.name}</span>
+              <button onClick={() => removeItem(i)} className="text-[#DC2626] hover:text-red-800">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
           </div>
-          <TimingBadges selected={item.timing} onChange={(t) => updateTiming(i, t)} />
+          {notesOpen[i] && (
+            <input
+              type="text"
+              value={item.notes || ''}
+              onChange={(e) => updateNotes(i, e.target.value)}
+              placeholder="ملاحظات اختيارية..."
+              autoFocus
+              className="mt-2 w-full px-3 py-1.5 text-[12px] font-cairo border border-[#E5E7EB] rounded-[8px] focus:outline-none focus:ring-1 focus:ring-[#22C55E] bg-white"
+            />
+          )}
         </div>
       ))}
     </div>
