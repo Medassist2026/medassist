@@ -286,6 +286,14 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
   const [complaintCollapsed, setComplaintCollapsed] = useState(false)
   const diagnosisSectionRef = useRef<HTMLDivElement>(null)
   const [diagnosisCollapsed, setDiagnosisCollapsed] = useState(false)
+  const [medicationsCollapsed, setMedicationsCollapsed] = useState(false)
+  const additionalSectionsRef = useRef<HTMLDivElement>(null)
+
+  // Computed: which section currently has the active (green ring) treatment
+  const activeSection = !complaintCollapsed ? 'complaint'
+    : !diagnosisCollapsed ? 'diagnosis'
+    : !medicationsCollapsed ? 'medications'
+    : 'additional'
 
   useEffect(() => {
     if (diagnosis.length > 0 && !diagnosisCollapsed) {
@@ -1934,7 +1942,11 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
 
       {/* ===== CHIEF COMPLAINT — collapsible when done ===== */}
       <div className={`bg-white rounded-[12px] border transition-all duration-300 overflow-hidden ${
-        complaintCollapsed ? 'border-[#BBF7D0]' : 'border-[#E5E7EB]'
+        complaintCollapsed
+          ? 'border-[#BBF7D0]'
+          : activeSection === 'complaint'
+          ? 'border-[#22C55E] shadow-[0_0_0_3px_rgba(34,197,94,0.1)]'
+          : 'border-[#E5E7EB]'
       }`}>
         <button
           type="button"
@@ -1967,7 +1979,11 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
             )}
           </div>
         </button>
-        {!complaintCollapsed && (
+        <div style={{
+          maxHeight: complaintCollapsed ? '0px' : '700px',
+          overflow: 'hidden',
+          transition: 'max-height 280ms cubic-bezier(0.4,0,0.2,1)'
+        }}>
         <div className="p-4 space-y-3">
           {/* Quick complaint chips — ordered by this doctor's usage frequency */}
           <div className="flex flex-wrap gap-1.5">
@@ -2035,7 +2051,7 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
             )}
           </div>
         </div>
-        )}
+        </div>{/* end animation wrapper */}
       </div>
 
       {/* FIX 9: Pending labs from last visit banner */}
@@ -2063,7 +2079,11 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
           }
         }}
         className={`bg-white rounded-[12px] border transition-all duration-300 overflow-hidden ${
-        diagnosisCollapsed ? 'border-[#BBF7D0]' : 'border-[#E5E7EB]'
+        diagnosisCollapsed
+          ? 'border-[#BBF7D0]'
+          : activeSection === 'diagnosis'
+          ? 'border-[#22C55E] shadow-[0_0_0_3px_rgba(34,197,94,0.1)]'
+          : 'border-[#E5E7EB]'
       }`}>
         {/* Header — clickable to expand/collapse when complete */}
         <button
@@ -2105,8 +2125,12 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
           </div>
         </button>
 
-        {/* Body — hidden when collapsed */}
-        {!diagnosisCollapsed && (
+        {/* Body — animated slide */}
+        <div style={{
+          maxHeight: diagnosisCollapsed ? '0px' : '700px',
+          overflow: 'hidden',
+          transition: 'max-height 280ms cubic-bezier(0.4,0,0.2,1)'
+        }}>
           <div className="p-4">
             <DiagnosisInput
               value={diagnosis}
@@ -2116,28 +2140,104 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
               personalised={chipsPersonalised}
             />
           </div>
-        )}
+        </div>
       </div>
 
-      {/* ===== PRESCRIPTION — MEDICATIONS (Accordion) ===== */}
-      <div ref={prescriptionSectionRef}>
-      <CollapsibleSection
-        title="الروشتة"
-        icon="pill"
-        defaultOpen={true}
-        badge={medications.length > 0 ? `${medications.length}` : undefined}
+      {/* ===== PRESCRIPTION — MEDICATIONS (controlled, smart-collapse) ===== */}
+      <div
+        ref={prescriptionSectionRef}
+        onFocusCapture={() => {
+          // When doctor touches medications: collapse filled sections above
+          if (chiefComplaint.trim() && !complaintCollapsed) setComplaintCollapsed(true)
+          if (diagnosis.length > 0 && !diagnosisCollapsed) setDiagnosisCollapsed(true)
+          // Ensure medications is open
+          if (medicationsCollapsed) setMedicationsCollapsed(false)
+        }}
+        className={`bg-white rounded-[12px] border transition-all duration-300 overflow-hidden ${
+          medicationsCollapsed
+            ? 'border-[#BBF7D0]'
+            : activeSection === 'medications'
+            ? 'border-[#22C55E] shadow-[0_0_0_3px_rgba(34,197,94,0.1)]'
+            : 'border-[#E5E7EB]'
+        }`}
       >
-        <MedicationChips
-          medications={medications}
-          onChange={handleMedicationsChange}
-          allergies={allergies}
-          onAllergyWarning={handleAllergyWarningCheck}
-          onOpenTemplates={() => setShowTemplateModal(true)}
-          quickMeds={medicationChips}
-          personalised={chipsPersonalised}
-        />
-      </CollapsibleSection>
+        {/* Header — click to toggle when medications filled */}
+        <button
+          type="button"
+          onClick={() => medications.length > 0 && setMedicationsCollapsed(p => !p)}
+          className={`w-full px-4 py-3 flex items-center justify-between transition-colors ${
+            medicationsCollapsed
+              ? 'bg-[#F0FDF4] border-b border-[#BBF7D0] cursor-pointer hover:bg-[#DCFCE7]'
+              : 'bg-[#F9FAFB] border-b border-[#E5E7EB] cursor-default'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <span className={`w-6 h-6 rounded-[6px] flex items-center justify-center flex-shrink-0 ${
+              medicationsCollapsed ? 'bg-[#DCFCE7]' : 'bg-[#FCE7F3]'
+            }`}>
+              <svg className={`w-3.5 h-3.5 ${medicationsCollapsed ? 'text-[#16A34A]' : 'text-[#EC4899]'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+              </svg>
+            </span>
+            <h3 className="font-cairo font-bold text-[14px] text-[#030712]">الروشتة</h3>
+            {medications.length > 0 && (
+              <span className="px-2 py-0.5 bg-[#DCFCE7] text-[#16A34A] rounded-full text-[11px] font-cairo font-semibold">
+                {medications.length}
+              </span>
+            )}
+            {medicationsCollapsed && medications[0] && (
+              <span className="font-cairo text-[12px] text-[#16A34A] truncate max-w-[180px]">{(medications[0] as any).name}</span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {medicationsCollapsed ? (
+              <span className="font-cairo text-[11px] text-[#16A34A] font-medium">✓ مكتمل · اضغط للتعديل</span>
+            ) : (
+              <span className="font-cairo text-[11px] text-[#9CA3AF]">اختياري</span>
+            )}
+          </div>
+        </button>
+
+        {/* Body — animated slide */}
+        <div style={{
+          maxHeight: medicationsCollapsed ? '0px' : '2000px',
+          overflow: 'hidden',
+          transition: 'max-height 280ms cubic-bezier(0.4,0,0.2,1)'
+        }}>
+          <div className="p-4 space-y-3">
+            <MedicationChips
+              medications={medications}
+              onChange={handleMedicationsChange}
+              allergies={allergies}
+              onAllergyWarning={handleAllergyWarningCheck}
+              onOpenTemplates={() => setShowTemplateModal(true)}
+              quickMeds={medicationChips}
+              personalised={chipsPersonalised}
+            />
+            {/* "Done with medications" CTA — collapses section & scrolls to labs/follow-up */}
+            {medications.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMedicationsCollapsed(true)
+                  setTimeout(() => {
+                    additionalSectionsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                  }, 300)
+                }}
+                className="w-full py-2.5 bg-[#F0FDF4] border border-[#BBF7D0] text-[#16A34A] rounded-[10px] font-cairo font-bold text-[13px] hover:bg-[#DCFCE7] transition-colors flex items-center justify-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+                تم الروشتة — انتهيت من الأدوية
+              </button>
+            )}
+          </div>
+        </div>
       </div>
+
+      {/* ===== ADDITIONAL SECTIONS — scroll target after "Done with medications" ===== */}
+      <div ref={additionalSectionsRef} className="space-y-4">
 
       {/* ===== LABS (Accordion) ===== */}
       <CollapsibleSection
@@ -2238,6 +2338,8 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
           </div>
         </div>
       </CollapsibleSection>
+
+      </div>{/* end additionalSectionsRef wrapper */}
 
       {/* ===== ACTION BAR ===== */}
       <div className="sticky bottom-16 bg-white border-t border-[#E5E7EB] p-4 -mx-4">
