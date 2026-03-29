@@ -7,6 +7,7 @@ import PrescriptionPrint from '@shared/components/clinical/PrescriptionPrint'
 import { ar } from '@shared/lib/i18n/ar'
 import { FileText, ArrowRight } from 'lucide-react'
 import { DEFAULT_TEMPLATES, type PrescriptionTemplate } from '@shared/components/clinical/TemplateModal'
+import { MedicationChips, type MedicationEntry } from '@shared/components/clinical/MedicationChips'
 
 // ============================================================================
 // TYPES
@@ -94,20 +95,13 @@ function CreateTemplateDrawer({
   onSave,
   onClose,
 }: {
-  onSave: (name: string, meds: { name: string; frequency: string; duration: string }[]) => Promise<void>
+  onSave: (name: string, meds: MedicationEntry[]) => Promise<void>
   onClose: () => void
 }) {
-  const [name, setName]       = useState('')
-  const [meds, setMeds]       = useState<{ name: string; frequency: string; duration: string }[]>([
-    { name: '', frequency: '', duration: '' }
-  ])
-  const [saving, setSaving]   = useState(false)
-  const [error, setError]     = useState('')
-
-  const addMed  = () => setMeds(p => [...p, { name: '', frequency: '', duration: '' }])
-  const removeMed = (i: number) => setMeds(p => p.filter((_, idx) => idx !== i))
-  const updateMed = (i: number, field: string, val: string) =>
-    setMeds(p => p.map((m, idx) => idx === i ? { ...m, [field]: val } : m))
+  const [name, setName]     = useState('')
+  const [meds, setMeds]     = useState<MedicationEntry[]>([])
+  const [saving, setSaving] = useState(false)
+  const [error, setError]   = useState('')
 
   const handleSave = async () => {
     const validMeds = meds.filter(m => m.name.trim())
@@ -128,7 +122,7 @@ function CreateTemplateDrawer({
   return (
     <div className="fixed inset-0 z-50 flex flex-col" dir="rtl">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="absolute bottom-0 left-0 right-0 max-h-[90vh] bg-white rounded-t-[20px] flex flex-col">
+      <div className="absolute bottom-0 left-0 right-0 max-h-[92vh] bg-white rounded-t-[20px] flex flex-col">
         {/* Handle */}
         <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
           <div className="w-10 h-1 rounded-full bg-[#E5E7EB]" />
@@ -159,55 +153,13 @@ function CreateTemplateDrawer({
             />
           </div>
 
-          {/* Medications */}
+          {/* Medications — same component & data source as clinical session */}
           <div>
             <label className="block font-cairo text-[12px] font-semibold text-[#4B5563] mb-2">الأدوية</label>
-            <div className="space-y-3">
-              {meds.map((med, i) => (
-                <div key={i} className="bg-[#F9FAFB] rounded-[10px] p-3 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-cairo text-[11px] text-[#9CA3AF]">دواء {i + 1}</span>
-                    {meds.length > 1 && (
-                      <button type="button" onClick={() => removeMed(i)} className="text-[#DC2626]">
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    )}
-                  </div>
-                  <input
-                    type="text"
-                    value={med.name}
-                    onChange={e => updateMed(i, 'name', e.target.value)}
-                    placeholder="اسم الدواء *"
-                    className="w-full px-3 py-2 border border-[#E5E7EB] rounded-[8px] text-[13px] font-cairo focus:outline-none focus:ring-1 focus:ring-[#22C55E] bg-white"
-                  />
-                  <div className="grid grid-cols-2 gap-2">
-                    <input
-                      type="text"
-                      value={med.frequency}
-                      onChange={e => updateMed(i, 'frequency', e.target.value)}
-                      placeholder="التكرار (مثال: مرتين يومياً)"
-                      className="px-3 py-2 border border-[#E5E7EB] rounded-[8px] text-[12px] font-cairo focus:outline-none focus:ring-1 focus:ring-[#22C55E] bg-white"
-                    />
-                    <input
-                      type="text"
-                      value={med.duration}
-                      onChange={e => updateMed(i, 'duration', e.target.value)}
-                      placeholder="المدة (مثال: 7 أيام)"
-                      className="px-3 py-2 border border-[#E5E7EB] rounded-[8px] text-[12px] font-cairo focus:outline-none focus:ring-1 focus:ring-[#22C55E] bg-white"
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-            <button
-              type="button"
-              onClick={addMed}
-              className="mt-2 text-[13px] font-cairo font-medium text-[#16A34A] hover:text-[#15803d]"
-            >
-              + إضافة دواء آخر
-            </button>
+            <MedicationChips
+              medications={meds}
+              onChange={setMeds}
+            />
           </div>
 
           {error && (
@@ -419,19 +371,12 @@ export default function PrescriptionPage() {
 
   const handleCreateTemplate = async (
     name: string,
-    meds: { name: string; frequency: string; duration: string }[]
+    meds: MedicationEntry[]
   ) => {
-    const medications = meds.map(m => ({
-      name: m.name,
-      frequency: m.frequency || undefined,
-      duration: m.duration || undefined,
-      form: 'قرص',
-      dosageCount: '1',
-    }))
     const res = await fetch('/api/clinical/templates', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, medications }),
+      body: JSON.stringify({ name, medications: meds }),
     })
     if (!res.ok) {
       const err = await res.json()
