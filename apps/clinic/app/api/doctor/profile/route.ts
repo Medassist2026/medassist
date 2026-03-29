@@ -5,6 +5,34 @@ import { createAdminClient } from '@shared/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 
 /**
+ * GET /api/doctor/profile
+ * Returns the logged-in doctor's name and specialty.
+ * Used by the print-only prescription view to populate doctor identity.
+ */
+export async function GET() {
+  try {
+    const user = await requireApiRole('doctor')
+    const admin = createAdminClient('doctor-profile-get')
+
+    const { data, error } = await admin
+      .from('doctors')
+      .select('full_name, specialty, unique_id')
+      .eq('id', user.id)
+      .maybeSingle()
+
+    if (error) throw new Error(error.message)
+
+    return NextResponse.json({
+      full_name: data?.full_name || '',
+      specialty: data?.specialty || '',
+      unique_id: data?.unique_id || null,
+    })
+  } catch (error: any) {
+    return toApiErrorResponse(error, 'فشل في تحميل الملف الشخصي')
+  }
+}
+
+/**
  * PATCH /api/doctor/profile
  * Updates doctor profile fields (specialty, full_name, etc.)
  * Used during setup and profile editing.

@@ -91,7 +91,7 @@ export default function PrescriptionPage() {
   }, [noteId])
 
   // Load from sessionStorage (print-only mode)
-  const loadFromSession = useCallback(() => {
+  const loadFromSession = useCallback(async () => {
     try {
       const stored = sessionStorage.getItem('printOnlyData')
       if (!stored) {
@@ -103,16 +103,38 @@ export default function PrescriptionPage() {
       const parsed = JSON.parse(stored)
       sessionStorage.removeItem('printOnlyData') // Clean up
 
+      // Fetch the authenticated doctor's real name and specialty
+      let doctorName = 'طبيب'
+      let doctorSpecialty = ''
+      try {
+        const profileRes = await fetch('/api/doctor/profile')
+        if (profileRes.ok) {
+          const profile = await profileRes.json()
+          doctorName = profile.full_name || doctorName
+          doctorSpecialty = profile.specialty || doctorSpecialty
+        }
+      } catch {
+        // Non-fatal: fall back to generic name
+      }
+
+      // Map medications: sessionStorage uses 'form' field; PrescriptionPrint expects 'type'
+      const medications = Array.isArray(parsed.medications)
+        ? parsed.medications.map((m: any) => ({
+            ...m,
+            type: m.type || m.form || 'أقراص',
+          }))
+        : []
+
       setData({
-        doctorName: 'طبيب', // Will be filled from context if available
-        doctorSpecialty: '',
+        doctorName,
+        doctorSpecialty,
         patientName: parsed.patient?.name || 'مريض',
         patientAge: parsed.patient?.age,
         patientSex: parsed.patient?.sex,
         patientPhone: parsed.patient?.phone,
         prescriptionNumber: generateRefNumber(),
         prescriptionDate: new Date().toISOString().split('T')[0],
-        medications: parsed.medications || [],
+        medications,
         diagnosis: Array.isArray(parsed.diagnosis) ? parsed.diagnosis.join(', ') : parsed.diagnosis,
         radiology: parsed.radiology,
         labs: parsed.labs,

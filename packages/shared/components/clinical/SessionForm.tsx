@@ -12,6 +12,7 @@ import { TemplateModal, type PrescriptionTemplate } from './TemplateModal'
 import { AllergyWarning } from './AllergyWarning'
 import { PatientHistorySheet } from './PatientHistorySheet'
 import DiagnosisInput from './DiagnosisInput'
+import { PatientLivingCard } from './PatientLivingCard'
 import type { VisitType } from '@ui-clinic/components/doctor/PatientQueueCard'
 
 // ============================================================================
@@ -269,6 +270,61 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
     return () => formEl.removeEventListener('keydown', handler)
   }, [])
 
+  // ===== F4: PRESCRIPTION SMS TOGGLE =====
+  // Default OFF — doctor must explicitly enable per session.
+  // Disabled when no medications are added or patient has no phone.
+  const [sendPrescriptionSMS, setSendPrescriptionSMS] = useState(false)
+
+  // ===== F5 ALERT 3: ANTIBIOTIC WITHOUT INFECTIOUS INDICATION — SOFT NUDGE =====
+  // Shows a dismissable blue nudge when the doctor prescribes an antibiotic
+  // but the chief complaint contains no infectious keywords.
+  // Source of truth: medication.category field (set from drug DB at add time).
+  // Resets dismiss state each time a NEW antibiotic is added.
+  const [showAntibioticNudge, setShowAntibioticNudge] = useState(false)
+  const [antibioticNudgeDismissed, setAntibioticNudgeDismissed] = useState(false)
+  const prevAntibioticCountRef = useRef(0)
+
+  useEffect(() => {
+    const INFECTIOUS_KEYWORDS = [
+      'عدوى', 'التهاب', 'حرارة', 'حمى', 'سعال', 'صديد', 'بكتيريا',
+      'أذن', 'حلق', 'جيوب', 'رئة', 'إسهال', 'بلغم', 'بول', 'تقيح',
+      'infection', 'fever', 'throat', 'ear', 'sinus', 'pneumonia',
+    ]
+
+    const antibiotics = medications.filter(m =>
+      (m.category || '').toLowerCase().includes('antibiotic')
+    )
+
+    // Reset dismiss state whenever a NEW antibiotic is added so the doctor
+    // is gently re-prompted for each new addition.
+    if (antibiotics.length > prevAntibioticCountRef.current) {
+      setAntibioticNudgeDismissed(false)
+    }
+    prevAntibioticCountRef.current = antibiotics.length
+
+    if (antibiotics.length === 0) {
+      setShowAntibioticNudge(false)
+      return
+    }
+
+    const complaintText = [chiefComplaint, ...complaintChips].join(' ').toLowerCase()
+    const hasInfectiousIndication = INFECTIOUS_KEYWORDS.some(kw => complaintText.includes(kw))
+
+    setShowAntibioticNudge(!hasInfectiousIndication)
+  }, [medications, chiefComplaint, complaintChips])
+
+  // ===== QUICK-TAP TEMPLATES (loaded once when entering prescription step) =====
+  const [quickTemplates, setQuickTemplates] = useState<PrescriptionTemplate[]>([])
+
+  // Load doctor's templates for the quick-tap bar when entering step 2
+  useEffect(() => {
+    if (step !== 2 || quickTemplates.length > 0) return
+    fetch('/api/clinical/templates')
+      .then(r => r.ok ? r.json() : { templates: [] })
+      .then(data => setQuickTemplates((data.templates || []).slice(0, 5)))
+      .catch(() => { /* templates unavailable — bar stays empty */ })
+  }, [step]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // ===== UI STATE =====
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -287,6 +343,10 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
   const diagnosisSectionRef = useRef<HTMLDivElement>(null)
   const [diagnosisCollapsed, setDiagnosisCollapsed] = useState(false)
   const [medicationsCollapsed, setMedicationsCollapsed] = useState(false)
+  // Labs and radiology use controlled CollapsibleSection so SessionForm
+  // can auto-open them when items are added and auto-close when done
+  const [labsOpen, setLabsOpen]           = useState(false)
+  const [radiologyOpen, setRadiologyOpen] = useState(false)
   const additionalSectionsRef = useRef<HTMLDivElement>(null)
 
   // Computed: which section currently has the active (green ring) treatment
@@ -312,6 +372,18 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
   useEffect(() => {
     if (!chiefComplaint.trim()) setComplaintCollapsed(false)
   }, [chiefComplaint])
+
+  // ===== AUTO-OPEN/CLOSE LABS & RADIOLOGY =====
+  // Open the section when the first item is added, collapse when cleared.
+  useEffect(() => {
+    if (labs.length > 0 && !labsOpen)         setLabsOpen(true)
+    if (labs.length === 0 && labsOpen)         setLabsOpen(false)
+  }, [labs.length])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (radiology.length > 0 && !radiologyOpen) setRadiologyOpen(true)
+    if (radiology.length === 0 && radiologyOpen) setRadiologyOpen(false)
+  }, [radiology.length])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // ===== B03: BEFOREUNLOAD WARNING =====
   const hasUnsavedData = medications.length > 0 || labs.length > 0 || radiology.length > 0 || doctorNotes.length > 0 || chiefComplaint.length > 0
@@ -654,7 +726,21 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
     }))
     setMedications(prev => [...prev, ...newMeds])
     setShowTemplateModal(false)
-    showToastMessage(`تمت إضافة ${template.medications.length} أدوية`)
+    showToastMessage(`تمت إضافة ${template.medications.length} أدوية من قالب "${template.name}"`)
+
+    // Increment usage count for doctor's own templates (not hardcoded defaults)
+    // Default templates have IDs starting with 'tpl_'; doctor templates have UUIDs
+    if (template.id && !template.id.startsWith('tpl_')) {
+      fetch(`/api/clinical/templates?id=${template.id}`, { method: 'PATCH' })
+        .catch(() => { /* non-critical — analytics only */ })
+      // Also update local quick-tap bar order
+      setQuickTemplates(prev => {
+        const updated = prev.map(t =>
+          t.id === template.id ? { ...t, _usageCount: ((t as any)._usageCount || 0) + 1 } : t
+        )
+        return updated.sort((a, b) => ((b as any)._usageCount || 0) - ((a as any)._usageCount || 0))
+      })
+    }
   }
 
   // ===== STEP TRANSITION (creates patient inline if new) =====
@@ -797,6 +883,7 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
         patientId: selectedPatient.id,
         durationSeconds,
         keystrokeCount: keystrokeCountRef.current,
+        sendPrescriptionSMS: sendPrescriptionSMS && medications.length > 0,
         noteData: {
           chief_complaint: chiefComplaint ? [chiefComplaint] : [],
           diagnosis,
@@ -1021,7 +1108,7 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
                       <div className="font-cairo font-bold text-[14px] text-[#030712]">{selectedPatient.name}</div>
                       <div className="font-cairo text-[12px] text-[#4B5563]" dir="ltr">
                         {selectedPatient.phone} {selectedPatient.age && `· ${selectedPatient.age} سنة`}
-                        {selectedPatient.sex && ` · ${selectedPatient.sex === 'male' ? 'ذكر' : 'أنثى'}`}
+                        {selectedPatient.sex && ` · ${selectedPatient.sex?.toLowerCase() === 'male' ? 'ذكر' : 'أنثى'}`}
                       </div>
                     </div>
                   </div>
@@ -1847,7 +1934,7 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
               <div className="flex items-center gap-2 text-[11px] font-cairo text-[#6B7280] mt-0.5 flex-wrap">
                 <span dir="ltr">{selectedPatient?.phone}</span>
                 {selectedPatient?.age && <span>· {selectedPatient.age} سنة</span>}
-                {selectedPatient?.sex && <span>· {selectedPatient.sex === 'male' ? 'ذكر' : 'أنثى'}</span>}
+                {selectedPatient?.sex && <span>· {selectedPatient.sex?.toLowerCase() === 'male' ? 'ذكر' : 'أنثى'}</span>}
                 {chronicDiseases.length > 0 && (
                   <span className="text-[#6B7280]">· {chronicDiseases.slice(0, 2).join('، ')}{chronicDiseases.length > 2 ? `...` : ''}</span>
                 )}
@@ -1938,6 +2025,37 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
           </div>
           <p className="font-cairo font-semibold text-[13px] text-[#16A34A]">ملف موثّق ✓ — تم ربط التاريخ الطبي الكامل</p>
         </div>
+      )}
+
+      {/* ===== LIVING PATIENT CARD — shown only for returning patients ===== */}
+      {/* Loaded lazily from /api/clinical/patient-summary — hides itself for new patients */}
+      {selectedPatient?.id && (
+        <PatientLivingCard
+          patientId={selectedPatient.id}
+          onRenewMedication={(med) => {
+            // Add renewed medication to the prescription and open medications section
+            setMedications(prev => {
+              // Avoid duplicates
+              if (prev.some(m => m.name.toLowerCase() === med.name.toLowerCase())) return prev
+              return [...prev, med]
+            })
+            setMedicationsCollapsed(false)
+          }}
+          onApplyAllergies={(incoming) => {
+            setAllergies(prev => {
+              const existing = new Set(prev.map(a => a.toLowerCase()))
+              const toAdd = incoming.filter(a => !existing.has(a.toLowerCase()))
+              return toAdd.length > 0 ? [...prev, ...toAdd] : prev
+            })
+          }}
+          onApplyChronicDiseases={(incoming) => {
+            setChronicDiseases(prev => {
+              const existing = new Set(prev.map(d => d.toLowerCase()))
+              const toAdd = incoming.filter(d => !existing.has(d.toLowerCase()))
+              return toAdd.length > 0 ? [...prev, ...toAdd] : prev
+            })
+          }}
+        />
       )}
 
       {/* ===== CHIEF COMPLAINT — collapsible when done ===== */}
@@ -2205,6 +2323,51 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
           transition: 'max-height 280ms cubic-bezier(0.4,0,0.2,1)'
         }}>
           <div className="p-4 space-y-3">
+
+            {/* ── QUICK-TAP TEMPLATE BAR ──────────────────────────────────────
+                Shows doctor's top-5 custom templates as instant-apply chips.
+                Sorted by usage_count (most-used first).
+                Only visible when the doctor has at least one custom template.
+                Goal: a returning doctor can fill the entire prescription section
+                with a single tap, before ever touching the search field.
+            ─────────────────────────────────────────────────────────────────── */}
+            {quickTemplates.length > 0 && (
+              <div>
+                <p className="font-cairo text-[11px] font-semibold text-[#6B7280] mb-2">
+                  قوالبك السريعة
+                </p>
+                <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+                  {quickTemplates.map((tpl) => (
+                    <button
+                      key={tpl.id}
+                      type="button"
+                      onClick={() => handleTemplateApply(tpl)}
+                      className="flex-shrink-0 flex items-center gap-1.5 px-3 py-2 bg-[#F0FDF4] border border-[#BBF7D0] rounded-[10px] hover:bg-[#DCFCE7] hover:border-[#86EFAC] transition-colors"
+                    >
+                      <svg className="w-3 h-3 text-[#16A34A] flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                      </svg>
+                      <div className="text-right">
+                        <p className="font-cairo font-bold text-[12px] text-[#030712] whitespace-nowrap">{tpl.name}</p>
+                        <p className="font-cairo text-[10px] text-[#4B5563]">{tpl.medications.length} أدوية</p>
+                      </div>
+                    </button>
+                  ))}
+                  {/* "More" chip — opens full template modal */}
+                  <button
+                    type="button"
+                    onClick={() => setShowTemplateModal(true)}
+                    className="flex-shrink-0 flex items-center gap-1 px-3 py-2 bg-white border border-[#E5E7EB] rounded-[10px] hover:bg-[#F9FAFB] transition-colors"
+                  >
+                    <svg className="w-3 h-3 text-[#4B5563]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16m-7 6h7" />
+                    </svg>
+                    <span className="font-cairo text-[11px] text-[#4B5563] whitespace-nowrap">كل القوالب</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
             <MedicationChips
               medications={medications}
               onChange={handleMedicationsChange}
@@ -2214,6 +2377,35 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
               quickMeds={medicationChips}
               personalised={chipsPersonalised}
             />
+
+            {/* ── Alert 3: Antibiotic without infectious indication ───────────────
+                 Soft blue nudge — informational only, never blocks the save.
+                 Disappears when: dismissed, antibiotic removed, or infectious
+                 keyword found in the chief complaint. */}
+            {showAntibioticNudge && !antibioticNudgeDismissed && (
+              <div className="flex items-start gap-2 px-3 py-2.5 bg-[#EFF6FF] border border-[#BFDBFE] rounded-[10px]">
+                <span className="text-[15px] mt-0.5 shrink-0">💊</span>
+                <div className="flex-1 min-w-0">
+                  <p className="font-cairo text-[12px] font-semibold text-[#1E40AF] leading-snug">
+                    تنبيه: مضاد حيوي بدون مؤشر عدوى واضح
+                  </p>
+                  <p className="font-cairo text-[11px] text-[#3B82F6] mt-0.5 leading-snug">
+                    الشكوى الحالية لا تتضمن أعراض عدوى — تأكد من وجود مؤشر سريري
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAntibioticNudgeDismissed(true)}
+                  className="shrink-0 p-1 text-[#93C5FD] hover:text-[#1E40AF] transition-colors"
+                  aria-label="إغلاق"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            )}
+
             {/* "Done with medications" CTA — collapses section & scrolls to labs/follow-up */}
             {medications.length > 0 && (
               <button
@@ -2239,20 +2431,24 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
       {/* ===== ADDITIONAL SECTIONS — scroll target after "Done with medications" ===== */}
       <div ref={additionalSectionsRef} className="space-y-4">
 
-      {/* ===== LABS (Accordion) ===== */}
+      {/* ===== LABS (Accordion — controlled so we can auto-open/close) ===== */}
       <CollapsibleSection
         title="التحاليل"
         icon="flask"
         badge={labs.length > 0 ? `${labs.length}` : undefined}
+        isOpen={labsOpen}
+        onToggle={setLabsOpen}
       >
         <LabsInline items={labs} onChange={setLabs} />
       </CollapsibleSection>
 
-      {/* ===== RADIOLOGY (Accordion) ===== */}
+      {/* ===== RADIOLOGY (Accordion — controlled) ===== */}
       <CollapsibleSection
         title="الأشعة"
         icon="scan"
         badge={radiology.length > 0 ? `${radiology.length}` : undefined}
+        isOpen={radiologyOpen}
+        onToggle={setRadiologyOpen}
       >
         <RadiologyInline items={radiology} onChange={setRadiology} />
       </CollapsibleSection>
@@ -2343,6 +2539,42 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
 
       {/* ===== ACTION BAR ===== */}
       <div className="sticky bottom-16 bg-white border-t border-[#E5E7EB] p-4 -mx-4">
+
+        {/* F4: SMS toggle — visible only when medications exist */}
+        {medications.length > 0 && selectedPatient?.phone && (
+          <button
+            type="button"
+            onClick={() => setSendPrescriptionSMS(p => !p)}
+            className={`w-full flex items-center gap-2.5 px-3 py-2 mb-3 rounded-[10px] border transition-colors ${
+              sendPrescriptionSMS
+                ? 'bg-[#EFF6FF] border-[#BFDBFE]'
+                : 'bg-[#F9FAFB] border-[#E5E7EB]'
+            }`}
+          >
+            {/* Toggle pill */}
+            <div className={`relative w-9 h-5 rounded-full flex-shrink-0 transition-colors ${
+              sendPrescriptionSMS ? 'bg-[#3B82F6]' : 'bg-[#D1D5DB]'
+            }`}>
+              <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
+                sendPrescriptionSMS ? 'translate-x-4' : 'translate-x-0.5'
+              }`} />
+            </div>
+            <div className="text-right flex-1 min-w-0">
+              <p className={`font-cairo text-[12px] font-semibold ${sendPrescriptionSMS ? 'text-[#1D4ED8]' : 'text-[#4B5563]'}`}>
+                إرسال ملخص الروشتة بـ SMS
+              </p>
+              <p className="font-cairo text-[10px] text-[#9CA3AF]">
+                {sendPrescriptionSMS
+                  ? `سيُرسل تلقائياً إلى ${selectedPatient.phone} بعد الحفظ`
+                  : 'يصل للمريض حتى بدون إنترنت أو تطبيق'}
+              </p>
+            </div>
+            <svg className="w-4 h-4 text-[#9CA3AF] flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 006 3.75v16.5a2.25 2.25 0 002.25 2.25h7.5A2.25 2.25 0 0018 20.25V3.75a2.25 2.25 0 00-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 8.25h3m-3 3.75h3" />
+            </svg>
+          </button>
+        )}
+
         <button
           onClick={() => confirmAndSave('save_and_print')}
           disabled={saving}

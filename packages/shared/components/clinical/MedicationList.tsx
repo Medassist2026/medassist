@@ -491,7 +491,7 @@ function AddMedicationForm({ onAdd, onCancel, existingMedications }: AddMedicati
     try {
       const response = await fetch(`/api/drugs/search?q=${encodeURIComponent(q)}`)
       const data = await response.json()
-      setResults(data.results || [])
+      setResults(data.drugs || [])
       setShowDropdown(true)
     } catch (error) {
       console.error('Drug search error:', error)

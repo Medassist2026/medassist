@@ -24,6 +24,7 @@ function diagnosisToText(diagnosis: any): string {
 function medicationsToUi(medications: any): Array<{
   name: string
   type: string
+  dosageCount?: string
   frequency: string
   duration: string
   endDate?: string
@@ -32,14 +33,27 @@ function medicationsToUi(medications: any): Array<{
 }> {
   if (!Array.isArray(medications)) return []
   return medications.map((m) => ({
-    name: m?.name || m?.drug || 'Unnamed Medication',
-    type: m?.type || 'pill',
-    frequency: m?.frequency || '',
+    name: m?.name || m?.drug || 'دواء',
+    type: m?.form || m?.type || 'أقراص',
+    dosageCount: m?.dosageCount || '',
+    frequency: buildFrequencyString(m),
     duration: m?.duration || '',
     endDate: m?.endDate,
     notes: m?.notes,
     taperingInstructions: m?.taperingInstructions
   }))
+}
+
+/** Combine frequency + timings + instructions into a readable frequency string */
+function buildFrequencyString(m: any): string {
+  let freq = m?.frequency || ''
+  if (Array.isArray(m?.timings) && m.timings.length > 0) {
+    freq += (freq ? ' · ' : '') + m.timings.join(' + ')
+  }
+  if (m?.instructions) {
+    freq += (freq ? ' · ' : '') + m.instructions
+  }
+  return freq
 }
 
 export async function GET(request: Request) {
@@ -70,6 +84,7 @@ export async function GET(request: Request) {
         medications,
         chief_complaint,
         created_at,
+        note_data,
         doctor:doctors (
           id,
           full_name,
@@ -101,7 +116,14 @@ export async function GET(request: Request) {
     }
 
     // Extract extra fields from note_data JSONB
+    // note_data stores the full session payload (radiology, labs, follow-up, notes, full med data)
     const noteData = (note as any).note_data || {}
+
+    // Prefer note_data.medications (has form, dosageCount, timings, instructions)
+    // Fall back to the main medications column (stored as {drug, frequency, duration, notes})
+    const medsSource = Array.isArray(noteData.medications) && noteData.medications.length > 0
+      ? noteData.medications
+      : note.medications
 
     const payload = {
       id: note.id,
@@ -109,11 +131,11 @@ export async function GET(request: Request) {
       prescription_date: note.prescription_date || note.created_at?.split('T')[0] || new Date().toISOString().split('T')[0],
       chief_complaints: note.chief_complaint || [],
       diagnosis: diagnosisToText(note.diagnosis),
-      medications: medicationsToUi(note.medications),
+      medications: medicationsToUi(medsSource),
       radiology: noteData.radiology || [],
       labs: noteData.labs || [],
       doctor_notes: noteData.plan || '',
-      show_notes_in_print: noteData.show_notes_in_print || false,
+      show_notes_in_print: noteData.show_notes_in_print !== false,
       follow_up_date: noteData.follow_up_date || null,
       patient: {
         id: patient?.id || note.patient_id,

@@ -141,10 +141,16 @@ function toArabicNum(s: string): string {
   return s.replace(/[0-9]/g, (d) => '٠١٢٣٤٥٦٧٨٩'[parseInt(d)])
 }
 
-/** Format a date string as Arabic long date */
+/** Format a date string as Arabic long date.
+ *  Parses YYYY-MM-DD as a LOCAL date (not UTC midnight) to avoid timezone-induced day shifts. */
 function formatDate(dateString: string): string {
   try {
-    const date = new Date(dateString)
+    // For ISO date strings (YYYY-MM-DD), construct using local year/month/day
+    // so the date doesn't roll back by one day in UTC+ timezones.
+    const isoMatch = dateString.match(/^(\d{4})-(\d{2})-(\d{2})/)
+    const date = isoMatch
+      ? new Date(parseInt(isoMatch[1]), parseInt(isoMatch[2]) - 1, parseInt(isoMatch[3]))
+      : new Date(dateString)
     return date.toLocaleDateString('ar-EG', {
       day: 'numeric',
       month: 'long',
@@ -302,14 +308,18 @@ export default function PrescriptionPrint({
         {/* ============================================================ */}
         {/* ℞ MEDICATIONS                                                */}
         {/* ============================================================ */}
-        {medications.length > 0 && (
-          <div className="mb-4">
-            {/* ℞ symbol header */}
-            <div className="flex items-center gap-2 mb-2">
-              <span style={{ fontFamily: 'Georgia, "Times New Roman", serif', fontSize: '22px', fontWeight: 'bold', color: '#0f172a', lineHeight: 1 }}>℞</span>
-              <div style={{ flex: 1, height: '1px', background: '#e2e8f0' }} />
-            </div>
+        <div className="mb-4">
+          {/* ℞ symbol header */}
+          <div className="flex items-center gap-2 mb-2">
+            <span style={{ fontFamily: 'Georgia, "Times New Roman", serif', fontSize: '22px', fontWeight: 'bold', color: '#0f172a', lineHeight: 1 }}>℞</span>
+            <div style={{ flex: 1, height: '1px', background: '#e2e8f0' }} />
+          </div>
 
+          {medications.length === 0 ? (
+            <div className="text-[12px] text-[#64748b] italic py-1">
+              لم يتم وصف أدوية في هذه الجلسة
+            </div>
+          ) : (
             <div className="space-y-2">
               {medications.map((med, i) => (
                 <div key={i} className="flex items-start gap-2">
@@ -345,8 +355,8 @@ export default function PrescriptionPrint({
                 </div>
               ))}
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
         {/* ============================================================ */}
         {/* LABS                                                         */}
