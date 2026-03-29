@@ -184,59 +184,86 @@ function CreateTemplateDrawer({
 }
 
 // ============================================================================
-// EDIT TEMPLATE NAME INLINE
+// EDIT TEMPLATE DRAWER  — name + medications
 // ============================================================================
 
-function EditableTemplateName({
+function EditTemplateDrawer({
   template,
-  onRename,
+  onSave,
+  onClose,
 }: {
   template: CustomTemplate
-  onRename: (id: string, name: string) => Promise<void>
+  onSave: (id: string, name: string, meds: MedicationEntry[]) => Promise<void>
+  onClose: () => void
 }) {
-  const [editing, setEditing] = useState(false)
-  const [name, setName]       = useState(template.name)
-  const [saving, setSaving]   = useState(false)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const [name, setName]     = useState(template.name)
+  const [meds, setMeds]     = useState<MedicationEntry[]>(template.medications as MedicationEntry[])
+  const [saving, setSaving] = useState(false)
+  const [error, setError]   = useState('')
 
-  const startEdit = () => { setEditing(true); setTimeout(() => inputRef.current?.focus(), 30) }
-
-  const save = async () => {
-    if (!name.trim() || name.trim() === template.name) { setEditing(false); setName(template.name); return }
+  const handleSave = async () => {
+    const validMeds = meds.filter(m => m.name.trim())
+    if (!name.trim())          { setError('أدخل اسم القالب'); return }
+    if (validMeds.length === 0){ setError('أضف دواء واحد على الأقل'); return }
     setSaving(true)
-    try { await onRename(template.id, name.trim()); setEditing(false) }
-    finally { setSaving(false) }
-  }
-
-  if (editing) {
-    return (
-      <form onSubmit={e => { e.preventDefault(); save() }} className="flex items-center gap-2">
-        <input
-          ref={inputRef}
-          type="text"
-          value={name}
-          onChange={e => setName(e.target.value)}
-          onBlur={save}
-          className="flex-1 px-2 py-1 border-b-2 border-[#16A34A] text-[14px] font-cairo font-bold outline-none bg-transparent"
-        />
-        {saving && <div className="w-4 h-4 border-2 border-[#16A34A] border-t-transparent rounded-full animate-spin" />}
-      </form>
-    )
+    setError('')
+    try {
+      await onSave(template.id, name.trim(), validMeds)
+      onClose()
+    } catch (e: any) {
+      setError(e?.message || 'فشل الحفظ')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
-    <div className="flex items-center gap-1.5 group">
-      <span className="font-cairo font-bold text-[14px] text-[#030712]">{template.name}</span>
-      <button
-        type="button"
-        onClick={startEdit}
-        className="opacity-0 group-hover:opacity-100 transition-opacity text-[#9CA3AF] hover:text-[#16A34A]"
-        title="تعديل الاسم"
-      >
-        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-        </svg>
-      </button>
+    <div className="fixed inset-0 z-50 flex flex-col" dir="rtl">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="absolute bottom-0 left-0 right-0 max-h-[92vh] bg-white rounded-t-[20px] flex flex-col">
+        <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
+          <div className="w-10 h-1 rounded-full bg-[#E5E7EB]" />
+        </div>
+        <div className="flex items-center justify-between px-5 py-3 border-b border-[#E5E7EB] flex-shrink-0">
+          <h3 className="font-cairo font-bold text-[16px] text-[#030712]">تعديل القالب</h3>
+          <button onClick={onClose} className="w-8 h-8 rounded-full bg-[#F3F4F6] flex items-center justify-center">
+            <svg className="w-4 h-4 text-[#4B5563]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="overflow-y-auto flex-1 px-5 py-4 space-y-4">
+          <div>
+            <label className="block font-cairo text-[12px] font-semibold text-[#4B5563] mb-1.5">اسم القالب</label>
+            <input
+              type="text"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              className="w-full px-4 py-2.5 border border-[#E5E7EB] rounded-[10px] text-[14px] font-cairo focus:outline-none focus:ring-2 focus:ring-[#22C55E]"
+              autoFocus
+            />
+          </div>
+
+          <div>
+            <label className="block font-cairo text-[12px] font-semibold text-[#4B5563] mb-2">الأدوية</label>
+            <MedicationChips medications={meds} onChange={setMeds} />
+          </div>
+
+          {error && <p className="text-[12px] font-cairo text-[#DC2626]">{error}</p>}
+        </div>
+
+        <div className="px-5 py-4 border-t border-[#E5E7EB] flex-shrink-0">
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving}
+            className="w-full py-3 bg-[#16A34A] text-white rounded-xl font-cairo font-bold text-[14px] hover:bg-[#15803d] disabled:opacity-50 transition-colors"
+          >
+            {saving ? 'جاري الحفظ...' : 'حفظ التعديلات'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -263,6 +290,7 @@ export default function PrescriptionPage() {
   const [hiddenDefaults, setHiddenDefaults]     = useState<string[]>([])
   const [templatesLoading, setTemplatesLoading] = useState(false)
   const [showCreateDrawer, setShowCreateDrawer] = useState(false)
+  const [editingTemplate, setEditingTemplate]   = useState<CustomTemplate | null>(null)
   const [templateSearch, setTemplateSearch]     = useState('')
 
   // ── Load functions ──────────────────────────────────────────────────────
@@ -397,6 +425,19 @@ export default function PrescriptionPage() {
       body: JSON.stringify({ name }),
     })
     setCustomTemplates(p => p.map(t => t.id === id ? { ...t, name } : t))
+  }
+
+  const handleUpdateTemplate = async (id: string, name: string, meds: MedicationEntry[]) => {
+    const res = await fetch(`/api/clinical/templates?id=${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, medications: meds }),
+    })
+    if (!res.ok) {
+      const err = await res.json()
+      throw new Error(err.error || 'فشل التحديث')
+    }
+    setCustomTemplates(p => p.map(t => t.id === id ? { ...t, name, medications: meds } : t))
   }
 
   const toggleHideDefault = (id: string) => {
@@ -678,16 +719,27 @@ export default function PrescriptionPage() {
                     className="bg-white border border-[#E5E7EB] rounded-xl px-4 py-3"
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <EditableTemplateName template={tpl} onRename={handleRenameTemplate} />
-                      <button
-                        onClick={() => handleDeleteTemplate(tpl.id)}
-                        className="flex-shrink-0 text-[#9CA3AF] hover:text-[#DC2626] transition-colors mt-0.5"
-                        title="حذف"
-                      >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                      </button>
+                      <span className="font-cairo font-bold text-[14px] text-[#030712]">{tpl.name}</span>
+                      <div className="flex items-center gap-2 flex-shrink-0 mt-0.5">
+                        <button
+                          onClick={() => setEditingTemplate(tpl)}
+                          className="text-[#9CA3AF] hover:text-[#16A34A] transition-colors"
+                          title="تعديل"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                          </svg>
+                        </button>
+                        <button
+                          onClick={() => handleDeleteTemplate(tpl.id)}
+                          className="text-[#9CA3AF] hover:text-[#DC2626] transition-colors"
+                          title="حذف"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      </div>
                     </div>
                     <MedChipRow meds={tpl.medications} />
                     {tpl.usage_count != null && tpl.usage_count > 0 && (
@@ -769,6 +821,15 @@ export default function PrescriptionPage() {
         <CreateTemplateDrawer
           onSave={handleCreateTemplate}
           onClose={() => setShowCreateDrawer(false)}
+        />
+      )}
+
+      {/* ── Edit template drawer ── */}
+      {editingTemplate && (
+        <EditTemplateDrawer
+          template={editingTemplate}
+          onSave={handleUpdateTemplate}
+          onClose={() => setEditingTemplate(null)}
         />
       )}
     </div>

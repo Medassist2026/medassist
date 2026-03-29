@@ -181,14 +181,18 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: 'Template id required' }, { status: 400 })
     }
 
-    const { name } = await req.json()
+    const body = await req.json()
+    const { name, medications } = body
     if (!name || !name.trim()) {
       return NextResponse.json({ error: 'Template name required' }, { status: 400 })
     }
 
+    const updatePayload: Record<string, any> = { name: name.trim(), updated_at: new Date().toISOString() }
+    if (medications !== undefined) updatePayload.medications = medications
+
     const { error } = await supabase
       .from('prescription_templates')
-      .update({ name: name.trim(), updated_at: new Date().toISOString() })
+      .update(updatePayload)
       .eq('id', id)
       .eq('doctor_id', user.id)  // enforce ownership
 
