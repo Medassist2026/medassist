@@ -24,7 +24,7 @@ interface TemplateModalProps {
 // DEFAULT TEMPLATES (common Egyptian prescriptions)
 // ============================================================================
 
-const DEFAULT_TEMPLATES: PrescriptionTemplate[] = [
+export const DEFAULT_TEMPLATES: PrescriptionTemplate[] = [
   {
     id: 'tpl_cold',
     name: 'نزلة برد',
@@ -178,11 +178,13 @@ const DEFAULT_TEMPLATES: PrescriptionTemplate[] = [
 // TEMPLATE MODAL COMPONENT
 // ============================================================================
 
-const ONBOARDING_KEY = 'medassist_templates_hint_dismissed'
+const ONBOARDING_KEY    = 'medassist_templates_hint_dismissed'
+const HIDDEN_DEFAULTS_KEY = 'medassist_hidden_defaults'
 
 export function TemplateModal({ onApply, onClose, currentMedications }: TemplateModalProps) {
   const [search, setSearch]                 = useState('')
   const [doctorTemplates, setDoctorTemplates] = useState<PrescriptionTemplate[]>([])
+  const [hiddenDefaultIds, setHiddenDefaultIds] = useState<string[]>([])
 
   // Save-as-template state
   const [saveName, setSaveName]   = useState('')
@@ -198,6 +200,9 @@ export function TemplateModal({ onApply, onClose, currentMedications }: Template
   useEffect(() => {
     try {
       if (!localStorage.getItem(ONBOARDING_KEY)) setShowHint(true)
+      // Load hidden default template IDs set from the templates settings page
+      const hidden = JSON.parse(localStorage.getItem(HIDDEN_DEFAULTS_KEY) || '[]')
+      setHiddenDefaultIds(Array.isArray(hidden) ? hidden : [])
     } catch { /* SSR / private browsing — skip */ }
   }, [])
   const dismissHint = () => {
@@ -257,9 +262,12 @@ export function TemplateModal({ onApply, onClose, currentMedications }: Template
     }
   }
 
-  // Deduplicate — doctor templates override defaults with same name
+  // Deduplicate — doctor templates take priority; hidden defaults are excluded
   const doctorNames = new Set(doctorTemplates.map(t => t.name))
-  const deduped = [...doctorTemplates, ...DEFAULT_TEMPLATES.filter(t => !doctorNames.has(t.name))]
+  const visibleDefaults = DEFAULT_TEMPLATES.filter(
+    t => !doctorNames.has(t.name) && !hiddenDefaultIds.includes(t.id)
+  )
+  const deduped = [...doctorTemplates, ...visibleDefaults]
   const filtered = search
     ? deduped.filter(t => t.name.includes(search))
     : deduped

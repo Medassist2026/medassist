@@ -1,21 +1,22 @@
 export const dynamic = 'force-dynamic'
 
 import { searchEgyptianDrugs, getDrugsByCategory, type EgyptianDrug } from '@shared/lib/data/egyptian-drugs'
+import { searchExtendedDrugs, formatExtendedDrugResult } from '@shared/lib/data/extended-drug-search'
 import { NextResponse } from 'next/server'
 
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
-    const query = searchParams.get('q')
+    const query    = searchParams.get('q')
     const category = searchParams.get('category')
-    const limit = parseInt(searchParams.get('limit') || '15', 10)
+    const limit    = parseInt(searchParams.get('limit') || '15', 10)
 
-    // Category filter
+    // Category filter (curated only — extended drugs use same category strings)
     if (category) {
       const results = getDrugsByCategory(category)
       return NextResponse.json({
-        results: results.map(formatDrugResult),
-        count: results.length
+        drugs:  results.map(formatDrugResult),
+        count:  results.length,
       })
     }
 
@@ -27,11 +28,25 @@ export async function GET(request: Request) {
       )
     }
 
-    const results = searchEgyptianDrugs(query, limit)
+    // ── Tier 1: curated 801 drugs (always takes priority) ──────────────────
+    const curatedResults = searchEgyptianDrugs(query, limit)
+    const curatedFormatted = curatedResults.map(formatDrugResult)
+
+    // ── Tier 2: extended 25K drugs (fill remaining slots) ──────────────────
+    const remaining = limit - curatedResults.length
+    let extendedFormatted: ReturnType<typeof formatExtendedDrugResult>[] = []
+
+    if (remaining > 0) {
+      const excludeIds = new Set(curatedResults.map(d => d.id))
+      const extendedResults = searchExtendedDrugs(query, remaining, excludeIds)
+      extendedFormatted = extendedResults.map(formatExtendedDrugResult)
+    }
+
+    const combined = [...curatedFormatted, ...extendedFormatted]
 
     return NextResponse.json({
-      results: results.map(formatDrugResult),
-      count: results.length
+      drugs: combined,
+      count: combined.length,
     })
 
   } catch (error: any) {
@@ -44,23 +59,23 @@ export async function GET(request: Request) {
 }
 
 /**
- * Format drug result for API response
- * Includes smart defaults for auto-filling prescription fields
+ * Format a curated EgyptianDrug for the API response
  */
 function formatDrugResult(drug: EgyptianDrug) {
   return {
-    id: drug.id,
-    name: drug.brandName,
-    nameAr: drug.brandNameAr,
-    genericName: drug.genericName,
-    strength: drug.strength,
-    strengthVariants: drug.strengthVariants,
-    form: drug.form,
-    category: drug.category,
-    subcategory: drug.subcategory,
-    defaults: drug.defaults,
+    id:                 drug.id,
+    name:               drug.brandName,
+    nameAr:             drug.brandNameAr,
+    genericName:        drug.genericName,
+    strength:           drug.strength,
+    strengthVariants:   drug.strengthVariants,
+    form:               drug.form,
+    category:           drug.category,
+    subcategory:        drug.subcategory,
+    defaults:           drug.defaults,
     requiresMonitoring: drug.requiresMonitoring || false,
     controlledSubstance: drug.controlledSubstance || false,
-    pregnancyCategory: drug.pregnancyCategory,
+    pregnancyCategory:  drug.pregnancyCategory,
+    source:             'curated' as const,
   }
 }

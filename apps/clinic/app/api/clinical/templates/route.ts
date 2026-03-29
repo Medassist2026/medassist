@@ -4,8 +4,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@shared/lib/supabase/server'
 
 /**
- * GET /api/clinical/templates - Get doctor's custom prescription templates
- * POST /api/clinical/templates - Create/update a prescription template
+ * GET    /api/clinical/templates           - List doctor's custom templates
+ * POST   /api/clinical/templates           - Create a new template
+ * PATCH  /api/clinical/templates?id=xxx    - Increment usage_count
+ * PUT    /api/clinical/templates?id=xxx    - Rename template { name: string }
+ * DELETE /api/clinical/templates?id=xxx    - Delete template
  */
 
 export async function GET() {
@@ -76,6 +79,53 @@ export async function DELETE(req: NextRequest) {
   }
 }
 
+// ============================================================================
+// PATCH /api/clinical/templates?id=xxx  — increment usage_count when applied
+// ============================================================================
+
+export async function PATCH(req: NextRequest) {
+  try {
+    const supabase = await createClient()
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const { searchParams } = new URL(req.url)
+    const id = searchParams.get('id')
+    if (!id) {
+      return NextResponse.json({ error: 'Template id required' }, { status: 400 })
+    }
+
+    // Use rpc increment if available, otherwise raw update with current+1
+    const { error } = await supabase.rpc('increment_template_usage', { template_id: id, doc_id: user.id })
+
+    if (error) {
+      // Fallback: fetch current count and increment manually
+      const { data: tpl } = await supabase
+        .from('prescription_templates')
+        .select('usage_count')
+        .eq('id', id)
+        .eq('doctor_id', user.id)
+        .single()
+
+      await supabase
+        .from('prescription_templates')
+        .update({ usage_count: ((tpl?.usage_count || 0) as number) + 1 })
+        .eq('id', id)
+        .eq('doctor_id', user.id)
+    }
+
+    return NextResponse.json({ success: true })
+  } catch {
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
+}
+
+// ============================================================================
+// POST /api/clinical/templates — create a new template
+// ============================================================================
+
 export async function POST(req: NextRequest) {
   try {
     const supabase = await createClient()
@@ -111,6 +161,42 @@ export async function POST(req: NextRequest) {
     } catch {
       return NextResponse.json({ error: 'Failed to create template' }, { status: 500 })
     }
+  } catch {
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
+}
+
+// PUT /api/clinical/templates?id=xxx — rename a template
+export async function PUT(req: NextRequest) {
+  try {
+    const supabase = await createClient()
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const { searchParams } = new URL(req.url)
+    const id = searchParams.get('id')
+    if (!id) {
+      return NextResponse.json({ error: 'Template id required' }, { status: 400 })
+    }
+
+    const { name } = await req.json()
+    if (!name || !name.trim()) {
+      return NextResponse.json({ error: 'Template name required' }, { status: 400 })
+    }
+
+    const { error } = await supabase
+      .from('prescription_templates')
+      .update({ name: name.trim(), updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('doctor_id', user.id)  // enforce ownership
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+
+    return NextResponse.json({ success: true })
   } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }

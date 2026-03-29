@@ -8,6 +8,9 @@ interface CollapsibleSectionProps {
   defaultOpen?: boolean
   badge?: string
   children: React.ReactNode
+  /** Controlled mode — when provided, overrides internal state */
+  isOpen?: boolean
+  onToggle?: (open: boolean) => void
 }
 
 const ICONS: Record<string, React.ReactNode> = {
@@ -43,13 +46,24 @@ const ICONS: Record<string, React.ReactNode> = {
   ),
 }
 
-export function CollapsibleSection({ title, icon, defaultOpen = false, badge, children }: CollapsibleSectionProps) {
-  const [isOpen, setIsOpen] = useState(defaultOpen)
+export function CollapsibleSection({
+  title, icon, defaultOpen = false, badge, children,
+  isOpen: controlledIsOpen, onToggle,
+}: CollapsibleSectionProps) {
+  const [internalOpen, setInternalOpen] = useState(defaultOpen)
+
+  // Support both controlled (isOpen + onToggle) and uncontrolled modes
+  const isOpen   = controlledIsOpen !== undefined ? controlledIsOpen : internalOpen
+  const toggle   = () => {
+    const next = !isOpen
+    setInternalOpen(next)
+    onToggle?.(next)
+  }
 
   return (
     <div className="border border-[#E5E7EB] rounded-[12px] bg-white overflow-hidden">
       <button
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={toggle}
         className="w-full flex items-center justify-between px-4 py-3.5 text-right hover:bg-[#F9FAFB] transition-colors"
       >
         <div className="flex items-center gap-2">

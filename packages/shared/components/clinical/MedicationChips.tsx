@@ -18,6 +18,9 @@ export interface MedicationEntry {
   duration?: string        // "3 أيام", "7 أيام", "مستمر" — B01 fix
   notes?: string
   isExpanded?: boolean
+  priceEGP?: number | null // Estimated market price at time of prescribing
+  drugId?: string          // DB id — used for alternatives lookup
+  category?: string        // Drug category — enables antibiotic nudge alert in SessionForm
 }
 
 interface DrugSearchResult {
@@ -29,6 +32,7 @@ interface DrugSearchResult {
   strengthVariants?: string[]
   form?: string
   category?: string
+  priceEGP?: number | null
   defaults?: {
     type: string
     frequency: string
@@ -119,6 +123,34 @@ const DURATION_OPTIONS = ['3 أيام', '5 أيام', '7 أيام', '10 أيام
 // MEDICATION CHIPS COMPONENT
 // ============================================================================
 
+// ============================================================================
+// PRICE INTELLIGENCE — alternative brands for same generic
+// ============================================================================
+
+interface DrugAlternative {
+  id: string
+  brandName: string
+  genericName: string | null
+  strength: string | null
+  form: string
+  company: string | null
+  priceEGP: number
+}
+
+interface AltPanelState {
+  medIndex: number
+  genericName: string
+  loading: boolean
+  results: DrugAlternative[]
+  error: string | null
+}
+
+const PRICE_PREF_KEY = 'medassist_show_drug_prices'
+
+// ============================================================================
+// MEDICATION CHIPS COMPONENT
+// ============================================================================
+
 export function MedicationChips({
   medications,
   onChange,
@@ -134,6 +166,114 @@ export function MedicationChips({
   const [searching, setSearching] = useState(false)
   const searchRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // Price intelligence state
+  const [showPrices, setShowPrices] = useState<boolean>(true)
+  const [altPanel, setAltPanel] = useState<AltPanelState | null>(null)
+
+  // Load price preference from localStorage on mount
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(PRICE_PREF_KEY)
+      if (stored === 'false') setShowPrices(false)
+    } catch { /* SSR / private mode */ }
+  }, [])
+
+  const togglePriceDisplay = () => {
+    const next = !showPrices
+    setShowPrices(next)
+    setAltPanel(null)
+    try { localStorage.setItem(PRICE_PREF_KEY, String(next)) } catch { /* ignore */ }
+  }
+
+  // Open / close the alternatives panel for a specific medication
+  const openAlternatives = async (medIndex: number, genericName: string, drugId?: string) => {
+    // Toggle off if already open for same med
+    if (altPanel?.medIndex === medIndex) {
+      setAltPanel(null)
+      return
+    }
+
+    setAltPanel({ medIndex, genericName, loading: true, results: [], error: null })
+
+    try {
+      const params = new URLSearchParams({ generic: genericName, limit: '8' })
+      if (drugId) params.set('excludeId', drugId)
+      const res = await fetch(`/api/drugs/alternatives?${params}`)
+      if (!res.ok) throw new Error('فشل تحميل البدائل')
+      const data = await res.json()
+      setAltPanel(prev => prev ? { ...prev, loading: false, results: data.alternatives || [] } : null)
+    } catch (e: any) {
+      setAltPanel(prev => prev ? { ...prev, loading: false, error: e.message || 'خطأ' } : null)
+    }
+  }
+
+  // Swap selected medication for an alternative
+  const swapForAlternative = (medIndex: number, alt: DrugAlternative) => {
+    const updated = [...medications]
+    updated[medIndex] = {
+      ...updated[medIndex],
+      name:        alt.brandName,
+      genericName: alt.genericName || updated[medIndex].genericName,
+      strength:    alt.strength    || updated[medIndex].strength,
+      priceEGP:    alt.priceEGP,
+      drugId:      alt.id,
+    }
+    onChange(updated)
+    setAltPanel(null)
+  }
+
+  // Total estimated cost (sum of per-package prices for meds that have them)
+  const pricedMeds = medications.filter(m => m.priceEGP && m.priceEGP > 0)
+  const totalEstimate = pricedMeds.reduce((sum, m) => sum + (m.priceEGP || 0), 0)
+
+  // ── Alert 1: Duplicate Generic ────────────────────────────────────────────
+  // State holds at most one pending duplicate warning at a time.
+  // { newIndex: index of newly added drug, existingIndex: index of the older one, generic }
+  const [dupWarning, setDupWarning] = useState<{
+    newIndex: number
+    existingIndex: number
+    newName: string
+    existingName: string
+    generic: string
+  } | null>(null)
+
+  /**
+   * Check if a newly added medication duplicates the generic name of an existing one.
+   * Must be called AFTER the medication has been appended to the list.
+   * @param newIndex  Index of the just-added drug in the new medications array
+   * @param newList   The full updated medications array (post-add)
+   */
+  const checkDuplicateGeneric = (newIndex: number, newList: MedicationEntry[]) => {
+    const newMed = newList[newIndex]
+    if (!newMed?.genericName) return
+
+    const normalise = (s: string) => s.toLowerCase().trim()
+    const newGeneric = normalise(newMed.genericName)
+
+    for (let i = 0; i < newIndex; i++) {
+      const existing = newList[i]
+      if (!existing.genericName) continue
+      const existingGeneric = normalise(existing.genericName)
+
+      // Exact match OR one is a prefix of the other (handles combos like "amoxicillin / clavulanate")
+      const isDuplicate =
+        existingGeneric === newGeneric ||
+        existingGeneric.startsWith(newGeneric) ||
+        newGeneric.startsWith(existingGeneric)
+
+      if (isDuplicate) {
+        setDupWarning({
+          newIndex,
+          existingIndex: i,
+          newName:       newMed.name,
+          existingName:  existing.name,
+          generic:       newMed.genericName,
+        })
+        return // Report first duplicate found — one at a time
+      }
+    }
+  }
 
   // ===== DRUG SEARCH =====
   const searchDrugs = useCallback(async (query: string) => {
@@ -226,16 +366,36 @@ export function MedicationChips({
       name: drug.nameAr || drug.name,
       genericName: drug.genericName,
       strength: drug.strength,
-      form: drug.form === 'capsule' ? 'كبسولة' : drug.form === 'tablet' ? 'أقراص' : drug.form === 'syrup' ? 'شراب' : drug.form === 'injection' ? 'حقن' : drug.form === 'cream' ? 'كريم' : 'أقراص',
+      form: (() => {
+        const f = drug.form || ''
+        // English form values (curated DB)
+        if (f === 'capsule')   return 'كبسولة'
+        if (f === 'tablet')    return 'أقراص'
+        if (f === 'syrup')     return 'شراب'
+        if (f === 'injection') return 'حقن'
+        if (f === 'cream')     return 'كريم'
+        if (f === 'drops')     return 'نقط'
+        if (f === 'spray' || f === 'inhaler') return 'بخاخ'
+        if (f === 'suppository') return 'لبوس'
+        // Arabic form values (extended DB already stores Arabic)
+        const VALID_ARABIC_FORMS = ['أقراص','كبسولة','شراب','حقن','كريم','نقط','بخاخ','لبوس']
+        if (VALID_ARABIC_FORMS.includes(f)) return f
+        return 'أقراص'   // safe default
+      })(),
       dosageCount: '1',
       frequency: freq,
       timings,
       instructions: drug.defaults?.instructions?.includes('after') ? 'بعد الأكل' : drug.defaults?.instructions?.includes('before') ? 'قبل الأكل' : undefined,
       duration,
       isExpanded: true, // Auto-expand newly added medication
+      priceEGP:  drug.priceEGP ?? null,
+      drugId:    drug.id,
+      category:  drug.category,
     }
 
-    onChange([...medications, newMed])
+    const newList = [...medications, newMed]
+    onChange(newList)
+    checkDuplicateGeneric(newList.length - 1, newList)
     setSearch('')
     setSearchResults([])
     setShowResults(false)
@@ -345,11 +505,41 @@ export function MedicationChips({
     return parts.join(' · ')
   }
 
-  // Quick-add a medication by name (opens it pre-filled or adds a minimal entry)
-  const addQuickMed = (name: string) => {
+  // Quick-add a medication by name — looks up drug database first to get smart defaults,
+  // then falls through to sensible Arabic defaults if the name isn't found.
+  const addQuickMed = async (name: string) => {
     // Don't add duplicates
     if (medications.some(m => m.name.toLowerCase() === name.toLowerCase())) return
-    const entry: MedicationEntry = { name, isExpanded: true }
+
+    try {
+      // Search the drug database for this exact name
+      const res = await fetch(`/api/drugs/search?q=${encodeURIComponent(name)}&limit=3`)
+      if (res.ok) {
+        const data = await res.json()
+        const drugs: DrugSearchResult[] = data.drugs || []
+        // Find the closest match: exact name match (case-insensitive) preferred
+        const match = drugs.find(d =>
+          (d.name || '').toLowerCase() === name.toLowerCase() ||
+          (d.nameAr || '') === name
+        ) || drugs[0]
+
+        if (match) {
+          // Reuse the full addMedication() path — gets smart defaults from database
+          addMedication(match)
+          return
+        }
+      }
+    } catch { /* ignore network errors — fall through to sensible defaults */ }
+
+    // Fallback: not in database — add with sensible defaults (same as addCustomMedication)
+    const entry: MedicationEntry = {
+      name,
+      form: 'أقراص',
+      dosageCount: '1',
+      frequency: 'كل 12 ساعة',
+      timings: ['صباح', 'مساء'],
+      isExpanded: true,
+    }
     onChange([...medications, entry])
   }
 
@@ -494,8 +684,29 @@ export function MedicationChips({
                 )}
               </div>
             </div>
-            {/* Collapsed: show edit + delete buttons */}
-            <div className="flex items-center gap-3 flex-shrink-0">
+            {/* Collapsed: price badge + delete */}
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {/* Price badge — only when prices enabled, collapsed, and price known */}
+              {showPrices && !med.isExpanded && med.priceEGP && med.priceEGP > 0 && med.genericName && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    openAlternatives(i, med.genericName!, med.drugId)
+                  }}
+                  className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-cairo font-medium border transition-colors ${
+                    altPanel?.medIndex === i
+                      ? 'bg-[#FEF3C7] border-[#F59E0B] text-[#B45309]'
+                      : 'bg-[#F9FAFB] border-[#E5E7EB] text-[#6B7280] hover:border-[#F59E0B] hover:text-[#B45309]'
+                  }`}
+                  title="عرض البدائل الأرخص"
+                >
+                  <span>~{med.priceEGP.toLocaleString('ar-EG', { maximumFractionDigits: 0 })}</span>
+                  <span className="text-[10px]">ج</span>
+                  <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+              )}
               {!med.isExpanded && (
                 <button
                   onClick={(e) => { e.stopPropagation(); removeMedication(i) }}
@@ -512,6 +723,66 @@ export function MedicationChips({
               </svg>
             </div>
           </button>
+
+          {/* Alternatives Panel — slides open below the chip when price badge is tapped */}
+          {showPrices && altPanel?.medIndex === i && (
+            <div className="border-t border-[#FEF3C7] bg-[#FFFBEB] px-3 py-2.5">
+              <div className="flex items-center justify-between mb-2">
+                <p className="font-cairo text-[11px] font-semibold text-[#92400E]">
+                  بدائل أرخص · {altPanel.genericName}
+                </p>
+                <button onClick={() => setAltPanel(null)} className="text-[#D97706]">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              {altPanel.loading && (
+                <div className="flex items-center gap-2 py-2">
+                  <span className="inline-block w-3.5 h-3.5 border-2 border-[#D97706] border-t-transparent rounded-full animate-spin" />
+                  <span className="font-cairo text-[11px] text-[#92400E]">جاري التحميل…</span>
+                </div>
+              )}
+
+              {!altPanel.loading && altPanel.error && (
+                <p className="font-cairo text-[11px] text-[#DC2626]">{altPanel.error}</p>
+              )}
+
+              {!altPanel.loading && !altPanel.error && altPanel.results.length === 0 && (
+                <p className="font-cairo text-[11px] text-[#92400E] italic">لا توجد بدائل بأسعار معروفة في قاعدة البيانات</p>
+              )}
+
+              {!altPanel.loading && altPanel.results.length > 0 && (
+                <div className="space-y-1.5">
+                  {altPanel.results.map((alt) => (
+                    <div key={alt.id} className="flex items-center justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-cairo text-[12px] font-semibold text-[#030712] truncate">{alt.brandName}</p>
+                        {alt.strength && (
+                          <p className="font-cairo text-[10px] text-[#6B7280]">{alt.strength} {alt.company && `· ${alt.company}`}</p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <span className="font-cairo text-[12px] font-bold text-[#16A34A]">
+                          {alt.priceEGP.toLocaleString('ar-EG', { maximumFractionDigits: 0 })} ج
+                        </span>
+                        <button
+                          onClick={() => swapForAlternative(i, alt)}
+                          className="px-2 py-0.5 bg-[#16A34A] text-white rounded-[6px] font-cairo text-[10px] font-bold hover:bg-[#15803d] transition-colors"
+                        >
+                          استبدال
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  <p className="font-cairo text-[9px] text-[#9CA3AF] pt-1 border-t border-[#FEF3C7] mt-1">
+                    ⚠️ الأسعار تقريبية (بيانات 2024–2026) وقد تختلف عن سعر الصيدلية الفعلي
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Expanded Edit View — shape-first, condensed */}
           {med.isExpanded && (
@@ -669,6 +940,83 @@ export function MedicationChips({
           )}
         </div>
       ))}
+
+      {/* ===== TOTAL COST BAR ===== */}
+      {medications.length > 0 && showPrices && pricedMeds.length >= 1 && (
+        <div className="flex items-center justify-between px-3 py-2 bg-[#F0FDF4] border border-[#BBF7D0] rounded-[10px]">
+          <div className="flex items-center gap-1.5">
+            <svg className="w-3.5 h-3.5 text-[#16A34A]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <div>
+              <span className="font-cairo text-[12px] font-semibold text-[#15803D]">
+                إجمالي تقريبي للعبوات:
+              </span>
+              <span className="font-cairo text-[12px] font-bold text-[#15803D] mr-1">
+                ~{totalEstimate.toLocaleString('ar-EG', { maximumFractionDigits: 0 })} جنيه
+              </span>
+              {pricedMeds.length < medications.length && (
+                <span className="font-cairo text-[10px] text-[#4B5563] mr-1">
+                  ({pricedMeds.length}/{medications.length} بسعر معروف)
+                </span>
+              )}
+            </div>
+          </div>
+          <button
+            onClick={togglePriceDisplay}
+            className="font-cairo text-[10px] text-[#4B5563] hover:text-[#030712] underline underline-offset-2"
+          >
+            إخفاء
+          </button>
+        </div>
+      )}
+
+      {/* ── Alert 1: Duplicate Generic Banner ─────────────────────────────────
+           Amber inline warning — appears directly after a duplicate is added.
+           Doctor can dismiss it (setDupWarning(null)) or remove the new drug. */}
+      {dupWarning && (
+        <div className="flex items-start gap-2 px-3 py-2.5 bg-[#FFFBEB] border border-[#FCD34D] rounded-[10px] mt-1">
+          <span className="text-[14px] mt-0.5 shrink-0">⚠️</span>
+          <div className="flex-1 min-w-0">
+            <p className="font-cairo text-[12px] font-semibold text-[#92400E] leading-snug">
+              تكرار في المادة الفعالة
+            </p>
+            <p className="font-cairo text-[11px] text-[#B45309] mt-0.5 leading-snug">
+              <span className="font-bold">{dupWarning.newName}</span> و{' '}
+              <span className="font-bold">{dupWarning.existingName}</span> كلاهما يحتوي على{' '}
+              <span className="font-bold">{dupWarning.generic}</span>
+            </p>
+          </div>
+          <div className="flex flex-col gap-1 shrink-0">
+            <button
+              onClick={() => {
+                // Remove the newly added drug (the duplicate)
+                onChange(medications.filter((_, idx) => idx !== dupWarning.newIndex))
+                setDupWarning(null)
+              }}
+              className="px-2 py-1 bg-[#FCD34D] text-[#78350F] rounded-[6px] font-cairo text-[10px] font-bold hover:bg-[#FBD82C] transition-colors whitespace-nowrap"
+            >
+              حذف الأحدث
+            </button>
+            <button
+              onClick={() => setDupWarning(null)}
+              className="px-2 py-1 bg-transparent text-[#92400E] rounded-[6px] font-cairo text-[10px] hover:bg-[#FEF3C7] transition-colors whitespace-nowrap text-center"
+            >
+              تجاهل
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Price display re-enable hint — shown when prices are hidden and there are priced meds */}
+      {medications.length > 0 && !showPrices && (
+        <button
+          onClick={togglePriceDisplay}
+          className="w-full text-center font-cairo text-[11px] text-[#9CA3AF] hover:text-[#4B5563] py-1 transition-colors"
+        >
+          إظهار الأسعار التقريبية
+        </button>
+      )}
     </div>
   )
 }

@@ -6,13 +6,14 @@ import { getActiveClinicIdFromCookies } from '@shared/lib/data/clinic-context'
 import { createAdminClient } from '@shared/lib/supabase/admin'
 import { trackSessionCompletion } from '@shared/lib/analytics/tracking'
 import { logAuditEvent } from '@shared/lib/data/audit'
+import { sendPrescriptionSMS } from '@shared/lib/sms/prescription-sms'
 import { NextResponse } from 'next/server'
 
 export async function POST(request: Request) {
   try {
     const user = await requireApiRole('doctor')
 
-    const { patientId, noteData, keystrokeCount, durationSeconds, syncToPatient, clinicId: bodyClinicId } = await request.json()
+    const { patientId, noteData, keystrokeCount, durationSeconds, syncToPatient, sendPrescriptionSMS: sendSMS, clinicId: bodyClinicId } = await request.json()
 
     // Validation
     if (!patientId || !noteData) {
@@ -80,6 +81,55 @@ export async function POST(request: Request) {
       entityId: note.id,
       metadata: { patientId, chiefComplaints: noteData.chief_complaint?.length || 0 }
     })
+
+    // ── Prescription SMS (Feature 4) ────────────────────────────────────────
+    // Fire-and-forget: SMS failure must NEVER block the save response.
+    // Only sends when the doctor explicitly enables the toggle (sendSMS=true)
+    // and the session contains at least one medication.
+    if (sendSMS && noteData.medications && noteData.medications.length > 0) {
+      ;(async () => {
+        try {
+          const admin = createAdminClient('prescription-sms-lookup')
+
+          // Fetch patient phone + doctor name in parallel
+          const [patientRes, doctorRes] = await Promise.all([
+            admin.from('patients').select('phone, full_name').eq('id', patientId).single(),
+            admin.from('doctors').select('full_name, clinic_id').eq('id', user.id).single(),
+          ])
+
+          const phone      = patientRes.data?.phone
+          const doctorName = doctorRes.data?.full_name || 'طبيبك'
+
+          // Also fetch clinic name if available
+          let clinicName: string | undefined
+          const resolvedClinicId = clinicId || doctorRes.data?.clinic_id
+          if (resolvedClinicId) {
+            const clinicRes = await admin.from('clinics').select('name').eq('id', resolvedClinicId).single()
+            clinicName = clinicRes.data?.name
+          }
+
+          if (!phone) {
+            console.warn('[prescription-sms] Patient has no phone number — SMS skipped')
+            return
+          }
+
+          await sendPrescriptionSMS({
+            patientId,
+            phoneNumber: phone,
+            medications: noteData.medications,
+            doctorName,
+            clinicName,
+            followUpDate:  noteData.follow_up_date  || null,
+            followUpNotes: noteData.follow_up_notes || null,
+            clinicId:      resolvedClinicId || undefined,
+            noteId:        note.id,
+          })
+        } catch (smsError) {
+          // Log but never rethrow — session is already saved
+          console.error('[prescription-sms] Background send failed:', smsError)
+        }
+      })()
+    }
 
     // Track analytics
     await trackSessionCompletion({

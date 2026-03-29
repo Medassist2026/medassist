@@ -9620,41 +9620,119 @@ function getFuseInstance(): Fuse<EgyptianDrug> {
 }
 
 /**
+ * Arabic generic name → English generic name lookup.
+ * Doctors often type Arabic pharmacological names; this translates them so they
+ * match the English `genericName` field in the curated drug DB.
+ * Only needs to cover the ~50 most frequently typed generics — the extended
+ * 26K DB is the catch-all for everything else.
+ */
+const ARABIC_GENERIC_MAP: Record<string, string> = {
+  'باراسيتامول': 'paracetamol',
+  'بنادول': 'paracetamol',
+  'اسبرين': 'aspirin',
+  'أسبرين': 'aspirin',
+  'ايبوبروفين': 'ibuprofen',
+  'إيبوبروفين': 'ibuprofen',
+  'ديكلوفيناك': 'diclofenac',
+  'أموكسيسيلين': 'amoxicillin',
+  'اموكسيسيلين': 'amoxicillin',
+  'أزيثروميسين': 'azithromycin',
+  'ازيثروميسين': 'azithromycin',
+  'سيبروفلوكساسين': 'ciprofloxacin',
+  'ميتفورمين': 'metformin',
+  'أتورفاستاتين': 'atorvastatin',
+  'اتورفاستاتين': 'atorvastatin',
+  'أملوديبين': 'amlodipine',
+  'املوديبين': 'amlodipine',
+  'أوميبرازول': 'omeprazole',
+  'اوميبرازول': 'omeprazole',
+  'سالبوتامول': 'salbutamol',
+  'سيتيريزين': 'cetirizine',
+  'لوراتادين': 'loratadine',
+  'كليندامايسين': 'clindamycin',
+  'ميترونيدازول': 'metronidazole',
+  'فلاجيل': 'metronidazole',
+  'بروفين': 'ibuprofen',
+  'ديكلاك': 'diclofenac',
+  'كيتوبروفين': 'ketoprofen',
+  'كيتوفان': 'ketoprofen',
+  'بريدنيزولون': 'prednisolone',
+  'ديكساميثازون': 'dexamethasone',
+  'هيدروكورتيزون': 'hydrocortisone',
+  'بيسوبرولول': 'bisoprolol',
+  'اتينولول': 'atenolol',
+  'فالسارتان': 'valsartan',
+  'لوسارتان': 'losartan',
+  'راميبريل': 'ramipril',
+  'سيمفاستاتين': 'simvastatin',
+  'روزوفاستاتين': 'rosuvastatin',
+  'انسولين': 'insulin',
+  'أنسولين': 'insulin',
+  'ليفوثيروكسين': 'levothyroxine',
+  'ازيتروميسين': 'azithromycin',
+  'موكسيفلوكساسين': 'moxifloxacin',
+  'امبيسيلين': 'ampicillin',
+  'أمبيسيلين': 'ampicillin',
+  'سيفالكسين': 'cefalexin',
+  'كيتوكونازول': 'ketoconazole',
+  'فلوكونازول': 'fluconazole',
+}
+
+/**
  * Search Egyptian drug database
- * Supports Arabic + English, brand names + generic names
+ * Supports Arabic + English, brand names + generic names (including Arabic generics)
  * Optimized for speed (client-side ready)
  */
 export function searchEgyptianDrugs(query: string, limit: number = 15): EgyptianDrug[] {
   if (!query || query.trim().length < 2) return []
 
-  const normalizedQuery = query.trim().toLowerCase()
+  const q        = query.trim()
+  const qLower   = q.toLowerCase()
 
-  // 1. Exact brand name matches first
-  const exactMatches = EGYPTIAN_DRUGS.filter(d =>
-    d.brandName.toLowerCase() === normalizedQuery ||
-    d.brandNameAr === query.trim()
-  )
+  // Translate Arabic generic query → English so it matches genericName field
+  const translatedGeneric = ARABIC_GENERIC_MAP[q] || ARABIC_GENERIC_MAP[qLower] || null
 
-  // 2. Starts-with matches
-  const startsWithMatches = EGYPTIAN_DRUGS.filter(d =>
-    !exactMatches.includes(d) && (
-      d.brandName.toLowerCase().startsWith(normalizedQuery) ||
-      d.brandNameAr.startsWith(query.trim()) ||
-      d.genericName.toLowerCase().startsWith(normalizedQuery) ||
-      d.searchTerms.some(t => t.toLowerCase().startsWith(normalizedQuery))
-    )
-  )
+  const seen = new Set<string>()
+  const push = (d: EgyptianDrug, arr: EgyptianDrug[]) => {
+    if (!seen.has(d.id)) { seen.add(d.id); arr.push(d) }
+  }
 
-  // 3. Fuzzy matches via Fuse.js
+  const exact: EgyptianDrug[]      = []
+  const startsWith: EgyptianDrug[] = []
+  const includes: EgyptianDrug[]   = []
+
+  for (const d of EGYPTIAN_DRUGS) {
+    const bn  = d.brandName.toLowerCase()
+    const bAr = d.brandNameAr
+    const gn  = d.genericName.toLowerCase()
+    const st  = d.searchTerms.map(t => t.toLowerCase())
+
+    // Exact
+    if (bn === qLower || bAr === q || (translatedGeneric && gn === translatedGeneric)) {
+      push(d, exact); continue
+    }
+    // Starts-with (Arabic brand, English brand, English generic, translated Arabic generic)
+    if (bn.startsWith(qLower) || bAr.startsWith(q) || gn.startsWith(qLower) ||
+        (translatedGeneric && gn.startsWith(translatedGeneric)) ||
+        st.some(t => t.startsWith(qLower))) {
+      push(d, startsWith); continue
+    }
+    // Contains — catches mid-string Arabic brand name and English generic includes
+    if (bn.includes(qLower) || bAr.includes(q) || gn.includes(qLower) ||
+        (translatedGeneric && gn.includes(translatedGeneric)) ||
+        st.some(t => t.includes(qLower))) {
+      push(d, includes)
+    }
+  }
+
+  // 4. Fuzzy via Fuse.js (for typos in Latin input)
   const fuse = getFuseInstance()
-  const fuseResults = fuse.search(query.trim())
-  const fuzzyMatches = fuseResults
-    .filter(r => !exactMatches.includes(r.item) && !startsWithMatches.includes(r.item))
+  const fuzzy: EgyptianDrug[] = fuse.search(q)
     .map(r => r.item)
+    .filter(d => !seen.has(d.id))
+    .slice(0, limit)
 
-  // Combine: exact → starts-with → fuzzy
-  const combined = [...exactMatches, ...startsWithMatches, ...fuzzyMatches]
-
+  const combined = [...exact, ...startsWith, ...includes, ...fuzzy]
   return combined.slice(0, limit)
 }
 
@@ -9673,8 +9751,15 @@ export function getDrugsByCategory(category: string): EgyptianDrug[] {
 }
 
 /**
- * Get total drug count
+ * Get curated drug count (801 hand-curated drugs with full clinical data)
  */
 export function getDrugCount(): number {
+  return EGYPTIAN_DRUGS.length
+}
+
+/**
+ * Alias — same as getDrugCount(), kept for backwards compatibility
+ */
+export function getCuratedDrugCount(): number {
   return EGYPTIAN_DRUGS.length
 }
