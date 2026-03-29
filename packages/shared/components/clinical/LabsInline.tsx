@@ -12,8 +12,6 @@ export interface LabItem {
 interface LabsInlineProps {
   items: LabItem[]
   onChange: (items: LabItem[]) => void
-  /** Called when the doctor taps "Done with labs" — parent collapses the section */
-  onDone?: () => void
 }
 
 const commonLabs = [
@@ -47,7 +45,7 @@ const quickChips = [
   'هيموجلوبين سكري HbA1c',
 ]
 
-export function LabsInline({ items, onChange, onDone }: LabsInlineProps) {
+export function LabsInline({ items, onChange }: LabsInlineProps) {
   const [search, setSearch] = useState('')
   const [showSuggestions, setShowSuggestions] = useState(false)
   // Track which items have the notes field expanded
@@ -182,19 +180,6 @@ export function LabsInline({ items, onChange, onDone }: LabsInlineProps) {
         </div>
       ))}
 
-      {/* ── Done button (shown when at least one item added) ─────────── */}
-      {items.length > 0 && onDone && (
-        <button
-          type="button"
-          onClick={onDone}
-          className="w-full py-2.5 bg-[#F0FDF4] border border-[#BBF7D0] text-[#16A34A] rounded-[10px] font-cairo font-bold text-[13px] hover:bg-[#DCFCE7] transition-colors flex items-center justify-center gap-2"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-          </svg>
-          تم — انتهيت من التحاليل
-        </button>
-      )}
     </div>
   )
 }

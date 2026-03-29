@@ -343,10 +343,11 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
   const diagnosisSectionRef = useRef<HTMLDivElement>(null)
   const [diagnosisCollapsed, setDiagnosisCollapsed] = useState(false)
   const [medicationsCollapsed, setMedicationsCollapsed] = useState(false)
-  // Labs and radiology use controlled CollapsibleSection so SessionForm
-  // can auto-open them when items are added and auto-close when done
+  // All additional sections are fully controlled so we can drive smart collapse
   const [labsOpen, setLabsOpen]           = useState(false)
   const [radiologyOpen, setRadiologyOpen] = useState(false)
+  const [notesOpen, setNotesOpen]         = useState(false)
+  const [followUpOpen, setFollowUpOpen]   = useState(false)
   const additionalSectionsRef = useRef<HTMLDivElement>(null)
 
   // Computed: which section currently has the active (green ring) treatment
@@ -354,6 +355,20 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
     : !diagnosisCollapsed ? 'diagnosis'
     : !medicationsCollapsed ? 'medications'
     : 'additional'
+
+  // ===== SMART SECTION FOCUS =====
+  // Section order indices: complaint=0, diagnosis=1, medications=2,
+  //                        labs=3, radiology=4, notes=5, followup=6
+  // Rule: when doctor opens section N, all filled sections before N collapse.
+  // Empty sections are left untouched so the doctor can still fill them.
+  const collapseEarlierSections = (openedIdx: number) => {
+    if (openedIdx > 0 && chiefComplaint.trim())  setComplaintCollapsed(true)
+    if (openedIdx > 1 && diagnosis.length > 0)   setDiagnosisCollapsed(true)
+    if (openedIdx > 2 && medications.length > 0) setMedicationsCollapsed(true)
+    if (openedIdx > 3 && labs.length > 0)        setLabsOpen(false)
+    if (openedIdx > 4 && radiology.length > 0)   setRadiologyOpen(false)
+    if (openedIdx > 5 && doctorNotes.trim())     setNotesOpen(false)
+  }
 
   useEffect(() => {
     if (diagnosis.length > 0 && !diagnosisCollapsed) {
@@ -375,13 +390,20 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
 
   // ===== AUTO-OPEN/CLOSE LABS & RADIOLOGY =====
   // Open the section when the first item is added, collapse when cleared.
+  // When labs open via item add, also collapse earlier filled sections.
   useEffect(() => {
-    if (labs.length > 0 && !labsOpen)         setLabsOpen(true)
-    if (labs.length === 0 && labsOpen)         setLabsOpen(false)
+    if (labs.length > 0 && !labsOpen) {
+      setLabsOpen(true)
+      collapseEarlierSections(3)
+    }
+    if (labs.length === 0 && labsOpen) setLabsOpen(false)
   }, [labs.length])  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (radiology.length > 0 && !radiologyOpen) setRadiologyOpen(true)
+    if (radiology.length > 0 && !radiologyOpen) {
+      setRadiologyOpen(true)
+      collapseEarlierSections(4)
+    }
     if (radiology.length === 0 && radiologyOpen) setRadiologyOpen(false)
   }, [radiology.length])  // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -2437,13 +2459,12 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
         icon="flask"
         badge={labs.length > 0 ? `${labs.length}` : undefined}
         isOpen={labsOpen}
-        onToggle={setLabsOpen}
+        onToggle={(open) => {
+          setLabsOpen(open)
+          if (open) collapseEarlierSections(3)
+        }}
       >
-        <LabsInline
-          items={labs}
-          onChange={setLabs}
-          onDone={() => setLabsOpen(false)}
-        />
+        <LabsInline items={labs} onChange={setLabs} />
       </CollapsibleSection>
 
       {/* ===== RADIOLOGY (Accordion — controlled) ===== */}
@@ -2452,13 +2473,12 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
         icon="scan"
         badge={radiology.length > 0 ? `${radiology.length}` : undefined}
         isOpen={radiologyOpen}
-        onToggle={setRadiologyOpen}
+        onToggle={(open) => {
+          setRadiologyOpen(open)
+          if (open) collapseEarlierSections(4)
+        }}
       >
-        <RadiologyInline
-          items={radiology}
-          onChange={setRadiology}
-          onDone={() => setRadiologyOpen(false)}
-        />
+        <RadiologyInline items={radiology} onChange={setRadiology} />
       </CollapsibleSection>
 
       {/* ===== DOCTOR NOTES ===== */}
@@ -2466,7 +2486,11 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
         title="ملاحظات الطبيب"
         icon="notes"
         badge={doctorNotes.trim() ? '✓' : undefined}
-        defaultOpen={false}
+        isOpen={notesOpen}
+        onToggle={(open) => {
+          setNotesOpen(open)
+          if (open) collapseEarlierSections(5)
+        }}
       >
         <textarea
           value={doctorNotes}
@@ -2497,7 +2521,11 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
         title="المتابعة"
         icon="calendar"
         badge={followUpDate ? followUpDate : undefined}
-        defaultOpen={false}
+        isOpen={followUpOpen}
+        onToggle={(open) => {
+          setFollowUpOpen(open)
+          if (open) collapseEarlierSections(6)
+        }}
       >
         <div className="space-y-3 mt-2">
           {/* Quick date chips first for speed */}

@@ -12,8 +12,6 @@ export interface RadiologyItem {
 interface RadiologyInlineProps {
   items: RadiologyItem[]
   onChange: (items: RadiologyItem[]) => void
-  /** Called when the doctor taps "Done with radiology" — parent collapses the section */
-  onDone?: () => void
 }
 
 const commonRadiology = [
@@ -43,7 +41,7 @@ const quickChips = [
   'سونار على الحوض',
 ]
 
-export function RadiologyInline({ items, onChange, onDone }: RadiologyInlineProps) {
+export function RadiologyInline({ items, onChange }: RadiologyInlineProps) {
   const [search, setSearch] = useState('')
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [notesOpen, setNotesOpen] = useState<Record<number, boolean>>({})
@@ -177,19 +175,6 @@ export function RadiologyInline({ items, onChange, onDone }: RadiologyInlineProp
         </div>
       ))}
 
-      {/* ── Done button (shown when at least one item added) ─────────── */}
-      {items.length > 0 && onDone && (
-        <button
-          type="button"
-          onClick={onDone}
-          className="w-full py-2.5 bg-[#F0FDF4] border border-[#BBF7D0] text-[#16A34A] rounded-[10px] font-cairo font-bold text-[13px] hover:bg-[#DCFCE7] transition-colors flex items-center justify-center gap-2"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-          </svg>
-          تم — انتهيت من الأشعة
-        </button>
-      )}
     </div>
   )
 }
