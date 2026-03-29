@@ -2439,7 +2439,11 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
         isOpen={labsOpen}
         onToggle={setLabsOpen}
       >
-        <LabsInline items={labs} onChange={setLabs} />
+        <LabsInline
+          items={labs}
+          onChange={setLabs}
+          onDone={() => setLabsOpen(false)}
+        />
       </CollapsibleSection>
 
       {/* ===== RADIOLOGY (Accordion — controlled) ===== */}
@@ -2450,7 +2454,11 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
         isOpen={radiologyOpen}
         onToggle={setRadiologyOpen}
       >
-        <RadiologyInline items={radiology} onChange={setRadiology} />
+        <RadiologyInline
+          items={radiology}
+          onChange={setRadiology}
+          onDone={() => setRadiologyOpen(false)}
+        />
       </CollapsibleSection>
 
       {/* ===== DOCTOR NOTES ===== */}

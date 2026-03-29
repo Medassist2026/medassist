@@ -35,15 +35,18 @@ export function PatientHistorySheet({ patientId, patientName, onClose }: Patient
         const res = await fetch(`/api/doctor/patients/${patientId}`)
         if (res.ok) {
           const data = await res.json()
-          const patient = data.patient
-          if (patient?.visits) {
-            setVisits(patient.visits.map((v: any) => ({
+          // API returns visits at root level — not nested inside data.patient
+          const visitsList = data.visits || data.patient?.visits
+          if (visitsList && visitsList.length > 0) {
+            setVisits(visitsList.map((v: any) => ({
               id: v.id,
               date: v.created_at || v.date,
-              chiefComplaint: Array.isArray(v.chief_complaint) ? v.chief_complaint.join('، ') : (v.chief_complaint || v.chiefComplaint || ''),
+              chiefComplaint: Array.isArray(v.chief_complaint)
+                ? v.chief_complaint.join('، ')
+                : (v.chief_complaint || v.chiefComplaint || v.reason || ''),
               medications: v.medications || [],
               labs: v.labs || [],
-              doctorNotes: v.plan || v.doctorNotes,
+              doctorNotes: v.plan || v.notes || v.doctorNotes || '',
             })))
           }
         }
