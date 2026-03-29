@@ -72,7 +72,8 @@ export async function GET(request: Request) {
     // Use admin client to bypass RLS — doctor ownership is enforced by .eq('doctor_id', user.id)
     const admin = createAdminClient('prescription-fetch')
 
-    const { data: note, error: noteError } = await admin
+    // Full query with note_data (requires migration 029)
+    let { data: note, error: noteError } = await admin
       .from('clinical_notes')
       .select(`
         id,
@@ -95,6 +96,44 @@ export async function GET(request: Request) {
       .eq('id', noteId)
       .eq('doctor_id', user.id)
       .single()
+
+    // Graceful fallback: if note_data / prescription_number / prescription_date columns
+    // are missing (migration 029 not applied yet), retry with a minimal column list
+    const isMissingColumnError = (e: any) =>
+      e?.code === '42703' ||
+      e?.code === 'PGRST204' ||
+      typeof e?.message === 'string' && (
+        e.message.includes('note_data') ||
+        e.message.includes('prescription_number') ||
+        e.message.includes('prescription_date') ||
+        e.message.includes('does not exist')
+      )
+
+    if (noteError && isMissingColumnError(noteError)) {
+      console.warn('prescription/route: falling back to minimal select (migration 029 not applied?):', noteError.message)
+      const fallback = await admin
+        .from('clinical_notes')
+        .select(`
+          id,
+          doctor_id,
+          patient_id,
+          diagnosis,
+          medications,
+          chief_complaint,
+          created_at,
+          doctor:doctors (
+            id,
+            full_name,
+            specialty,
+            unique_id
+          )
+        `)
+        .eq('id', noteId)
+        .eq('doctor_id', user.id)
+        .single()
+      note = fallback.data as any
+      noteError = fallback.error
+    }
 
     if (noteError || !note) {
       console.error('Prescription fetch error:', noteError?.message, { noteId, doctorId: user.id })
