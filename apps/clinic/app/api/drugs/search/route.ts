@@ -3,6 +3,8 @@ export const dynamic = 'force-dynamic'
 import { searchEgyptianDrugs, getDrugsByCategory, type EgyptianDrug } from '@shared/lib/data/egyptian-drugs'
 import { searchExtendedDrugs, formatExtendedDrugResult } from '@shared/lib/data/extended-drug-search'
 import { NextResponse } from 'next/server'
+// Price map built by matching curated drugs to extended DB brand names (83% coverage)
+import CURATED_PRICE_MAP from '@shared/lib/data/curated-price-map.json'
 
 export async function GET(request: Request) {
   try {
@@ -62,6 +64,7 @@ export async function GET(request: Request) {
  * Format a curated EgyptianDrug for the API response
  */
 function formatDrugResult(drug: EgyptianDrug) {
+  const priceMap = CURATED_PRICE_MAP as Record<string, number | null>
   return {
     id:                 drug.id,
     name:               drug.brandName,
@@ -76,6 +79,7 @@ function formatDrugResult(drug: EgyptianDrug) {
     requiresMonitoring: drug.requiresMonitoring || false,
     controlledSubstance: drug.controlledSubstance || false,
     pregnancyCategory:  drug.pregnancyCategory,
+    priceEGP:           priceMap[drug.id] ?? null,
     source:             'curated' as const,
   }
 }
