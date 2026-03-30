@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
-import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
+import { requireApiRole, toApiErrorResponse, getClinicRole } from '@shared/lib/auth/session'
 import { getClinicContext, getClinicMembers } from '@shared/lib/data/clinic-context'
 
 // ============================================================================
@@ -17,9 +17,15 @@ export async function GET() {
       return NextResponse.json({ error: 'No clinic found' }, { status: 404 })
     }
 
-    const members = await getClinicMembers(context.clinicId)
-    const doctors = members.filter(m => m.role === 'doctor' || m.role === 'OWNER' || m.role === 'DOCTOR')
-    const staff = members.filter(m => m.role === 'frontdesk' || m.role === 'FRONT_DESK' || m.role === 'ASSISTANT')
+    const [members, userRole] = await Promise.all([
+      getClinicMembers(context.clinicId),
+      getClinicRole(user.id, context.clinicId),
+    ])
+
+    // Normalize role strings (DB may store lowercase legacy values)
+    const normalizeRole = (r: string) => r.toUpperCase()
+    const doctors = members.filter(m => ['OWNER', 'DOCTOR'].includes(normalizeRole(m.role)))
+    const staff   = members.filter(m => ['ASSISTANT', 'FRONT_DESK'].includes(normalizeRole(m.role)))
 
     return NextResponse.json({
       clinicId: context.clinicId,
@@ -28,6 +34,7 @@ export async function GET() {
       doctors,
       staff,
       currentUserId: user.id,
+      userRole: (userRole || 'DOCTOR').toUpperCase(), // 'OWNER' | 'DOCTOR' | 'ASSISTANT' | 'FRONT_DESK'
       hasMultipleClinics: context.hasMultipleClinics,
       allClinicsCount: context.allClinics.length,
     })

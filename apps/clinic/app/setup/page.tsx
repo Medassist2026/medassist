@@ -56,8 +56,9 @@ function SetupPageInner() {
   const [step, setStep] = useState<SetupStep>(initialStep)
 
   // Create clinic
-  const [clinicName, setClinicName] = useState('')
-  const [specialty,  setSpecialty]  = useState('')
+  const [clinicName,    setClinicName]    = useState('')
+  const [clinicAddress, setClinicAddress] = useState('')
+  const [specialty,     setSpecialty]     = useState('')
 
   // Join clinic
   const [inviteCode, setInviteCode] = useState('')
@@ -76,6 +77,10 @@ function SetupPageInner() {
       setError('أدخل اسم العيادة (حرفين على الأقل)')
       return
     }
+    if (!clinicAddress.trim() || clinicAddress.trim().length < 5) {
+      setError('أدخل عنوان العيادة (خمسة أحرف على الأقل) — يظهر على الروشتة')
+      return
+    }
     if (!specialty) {
       setError('اختر التخصص')
       return
@@ -91,7 +96,7 @@ function SetupPageInner() {
       const res = await fetch('/api/clinic/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: clinicName.trim() }),
+        body: JSON.stringify({ name: clinicName.trim(), address: clinicAddress.trim() }),
       })
       if (!res.ok) {
         const data = await res.json()
@@ -327,6 +332,23 @@ function SetupPageInner() {
                 </div>
 
                 <div className="flex flex-col gap-2 mt-5">
+                  <label className="font-cairo text-[14px] font-medium text-[#030712]">
+                    عنوان العيادة
+                    <span className="text-red-500 mr-1">*</span>
+                    <span className="font-normal text-[12px] text-[#6B7280] mr-1">— يظهر على الروشتة</span>
+                  </label>
+                  <div className="flex items-center bg-[#F3F4F6] border-[0.8px] border-[#E5E7EB] rounded-xl h-[52px] px-4 focus-within:border-[#16A34A] focus-within:ring-2 focus-within:ring-[#16A34A]/20 transition-all">
+                    <input
+                      type="text"
+                      value={clinicAddress}
+                      onChange={(e) => setClinicAddress(e.target.value)}
+                      placeholder="مثال: ١٢ شارع التحرير، المعادي، القاهرة"
+                      className="flex-1 bg-transparent font-cairo text-[15px] text-[#030712] placeholder:text-[#9CA3AF] outline-none text-right"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-2 mt-5">
                   <label className="font-cairo text-[14px] font-medium text-[#030712]">التخصص</label>
                   {/* FIX 4: Click-based specialty picker */}
                   <div className="flex flex-wrap gap-2">
@@ -357,11 +379,11 @@ function SetupPageInner() {
                 )}
 
                 <motion.button
-                  whileTap={clinicName.trim() && specialty ? { scale: 0.97 } : {}}
+                  whileTap={clinicName.trim() && clinicAddress.trim() && specialty ? { scale: 0.97 } : {}}
                   onClick={handleCreateClinic}
-                  disabled={loading || !clinicName.trim() || !specialty}
+                  disabled={loading || !clinicName.trim() || !clinicAddress.trim() || !specialty}
                   className={`w-full h-[52px] rounded-xl font-cairo font-semibold text-[16px] transition-all mt-7 ${
-                    clinicName.trim() && specialty
+                    clinicName.trim() && clinicAddress.trim() && specialty
                       ? 'bg-[#22C55E] text-white shadow-md shadow-green-200 hover:bg-[#16A34A]'
                       : 'bg-[#E5E7EB] text-[#9CA3AF] cursor-not-allowed'
                   }`}

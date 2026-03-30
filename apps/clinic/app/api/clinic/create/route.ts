@@ -7,7 +7,7 @@ import { NextResponse } from 'next/server'
 export async function POST(request: Request) {
   try {
     const user = await requireApiRole('doctor')
-    const { name } = await request.json()
+    const { name, address } = await request.json()
 
     if (!name || name.trim().length < 2) {
       return NextResponse.json(
@@ -15,9 +15,16 @@ export async function POST(request: Request) {
         { status: 400 }
       )
     }
+    if (!address || address.trim().length < 5) {
+      return NextResponse.json(
+        { error: 'Clinic address is required — it appears on every prescription' },
+        { status: 400 }
+      )
+    }
 
     const result = await createClinic({
       name: name.trim(),
+      address: address.trim(),
       doctorId: user.id
     })
 

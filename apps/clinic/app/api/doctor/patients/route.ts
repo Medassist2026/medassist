@@ -45,6 +45,39 @@ export async function GET() {
       ;(patientRows || []).forEach((p: any) => relationshipPatientMap.set(p.id, p))
     }
 
+    // Shared-with-me source: patients shared by another doctor via patient_visibility
+    const clinicId = await getActiveClinicIdFromCookies()
+    if (clinicId) {
+      try {
+        const { data: sharedRows } = await admin
+          .from('patient_visibility')
+          .select('patient_id')
+          .eq('clinic_id', clinicId)
+          .eq('grantee_user_id', user.id)
+          .eq('mode', 'SHARED_BY_CONSENT')
+
+        const sharedIds = (sharedRows || [])
+          .map((r: any) => r.patient_id as string)
+          .filter(id => id && !relationshipPatientIds.includes(id)) // no duplicates
+
+        if (sharedIds.length > 0) {
+          const { data: sharedPatients } = await admin
+            .from('patients')
+            .select('id, full_name, phone, sex, registered, created_at')
+            .in('id', sharedIds)
+
+          ;(sharedPatients || []).forEach((p: any) => {
+            relationshipPatientMap.set(p.id, p)
+            relationshipPatients.push({
+              relationship_status: 'active',
+              relationship_type: 'shared',
+              patient_id: p.id,
+            })
+          })
+        }
+      } catch { /* patient_visibility may not exist — non-fatal */ }
+    }
+
     // Fallback source for legacy doctors without relationship rows:
     // patients inferred from clinical notes.
     let basePatients = relationshipPatients

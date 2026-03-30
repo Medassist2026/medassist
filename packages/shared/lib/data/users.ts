@@ -26,6 +26,7 @@ export interface CreateFrontDeskParams {
 
 export interface CreateClinicParams {
   name: string
+  address: string
   doctorId: string
 }
 
@@ -204,7 +205,8 @@ export async function createClinic(params: CreateClinicParams) {
     .from('clinics')
     .insert({
       unique_id: clinicUniqueId,
-      name: params.name
+      name: params.name,
+      address: params.address,
     })
     .select()
     .single()

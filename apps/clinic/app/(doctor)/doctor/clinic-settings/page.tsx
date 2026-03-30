@@ -41,6 +41,7 @@ interface ClinicData {
   doctors: any[]
   staff: any[]
   currentUserId: string
+  userRole: string // 'OWNER' | 'DOCTOR' | 'ASSISTANT' | 'FRONT_DESK'
 }
 
 export default function ClinicSettingsPage() {
@@ -102,21 +103,46 @@ export default function ClinicSettingsPage() {
     )
   }
 
+  const isOwner = clinic.userRole === 'OWNER'
+
   return (
     <div className="max-w-md mx-auto px-4 py-4 space-y-4 lg:max-w-2xl lg:px-0 lg:py-6" dir="rtl">
+
+      {/* Non-owner banner */}
+      {!isOwner && (
+        <div className="flex items-start gap-3 bg-[#FFF7ED] border border-[#FED7AA] rounded-2xl p-4">
+          <svg className="w-5 h-5 text-[#EA580C] flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <div>
+            <p className="font-cairo font-semibold text-[13px] text-[#9A3412]">عرض فقط</p>
+            <p className="font-cairo text-[12px] text-[#C2410C] mt-0.5">
+              أنت عضو في هذه العيادة. تعديل الإعدادات ودعوة الفريق متاح للمالك فقط.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Clinic Info Header */}
       <div className="bg-white rounded-2xl border border-gray-100 p-4">
-        <h2 className="font-bold text-base text-gray-900 mb-1">{clinic.clinicName}</h2>
-        <p className="text-xs text-gray-400 font-mono">ID: {clinic.clinicUniqueId}</p>
-
-        {/* Doctors count */}
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <h2 className="font-bold text-base text-gray-900 mb-1">{clinic.clinicName}</h2>
+            <p className="text-xs text-gray-400 font-mono">ID: {clinic.clinicUniqueId}</p>
+          </div>
+          {isOwner && (
+            <span className="flex-shrink-0 px-2 py-0.5 bg-[#DCFCE7] text-[#16A34A] font-cairo font-semibold text-[11px] rounded-full">
+              مالك
+            </span>
+          )}
+        </div>
         <div className="mt-3 flex items-center gap-4 text-sm text-gray-600">
           <span>الأطباء: {clinic.doctors.length}</span>
           <span>المساعدين: {clinic.staff.length}</span>
         </div>
       </div>
 
-      {/* Quick Links */}
+      {/* Quick Links — templates visible to all, staff management owner-only */}
       <div className="grid grid-cols-2 gap-3">
         <Link
           href="/doctor/clinic-settings/templates"
@@ -133,29 +159,43 @@ export default function ClinicSettingsPage() {
           </div>
         </Link>
 
-        <Link
-          href="/doctor/clinic-settings/staff"
-          className="bg-white rounded-2xl border border-gray-100 p-4 flex items-center gap-3 hover:border-gray-300 transition-colors"
-        >
-          <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center flex-shrink-0">
-            <svg className="w-5 h-5 text-[#3B82F6]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
+        {isOwner ? (
+          <Link
+            href="/doctor/clinic-settings/staff"
+            className="bg-white rounded-2xl border border-gray-100 p-4 flex items-center gap-3 hover:border-gray-300 transition-colors"
+          >
+            <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center flex-shrink-0">
+              <svg className="w-5 h-5 text-[#3B82F6]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </div>
+            <div>
+              <p className="font-cairo font-bold text-[13px] text-[#030712]">إدارة الفريق</p>
+              <p className="font-cairo text-[11px] text-[#6B7280]">دعوة وإدارة المساعدين</p>
+            </div>
+          </Link>
+        ) : (
+          <div className="bg-[#F9FAFB] rounded-2xl border border-dashed border-[#E5E7EB] p-4 flex items-center gap-3 opacity-50 cursor-not-allowed">
+            <div className="w-9 h-9 rounded-xl bg-[#F3F4F6] flex items-center justify-center flex-shrink-0">
+              <svg className="w-5 h-5 text-[#9CA3AF]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+            </div>
+            <div>
+              <p className="font-cairo font-bold text-[13px] text-[#9CA3AF]">إدارة الفريق</p>
+              <p className="font-cairo text-[11px] text-[#9CA3AF]">للمالك فقط</p>
+            </div>
           </div>
-          <div>
-            <p className="font-cairo font-bold text-[13px] text-[#030712]">الطاقم</p>
-            <p className="font-cairo text-[11px] text-[#6B7280]">إدارة المساعدين</p>
-          </div>
-        </Link>
+        )}
       </div>
 
-      {/* Assistant Manager (invite codes + staff list) */}
-      <AssistantManager />
+      {/* Assistant Manager — owner only sees invite + manage, others see read-only list */}
+      <AssistantManager isOwner={isOwner} />
 
       {/* Doctors List */}
       {clinic.doctors.length > 0 && (
         <div className="bg-white rounded-2xl border border-gray-100 p-4">
-          <h3 className="font-bold text-sm text-gray-900 mb-3">الأطباء</h3>
+          <h3 className="font-bold text-sm text-gray-900 mb-3">الأطباء ({clinic.doctors.length})</h3>
           <div className="space-y-2">
             {clinic.doctors.map((doc: any) => (
               <div key={doc.userId} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
@@ -173,6 +213,9 @@ export default function ClinicSettingsPage() {
                     <div className="text-xs text-gray-500">{toAr(doc.specialty)}</div>
                   )}
                 </div>
+                {(doc.role?.toUpperCase() === 'OWNER') && (
+                  <span className="text-[10px] px-2 py-0.5 bg-[#DCFCE7] text-[#16A34A] rounded-full font-cairo font-semibold">مالك</span>
+                )}
               </div>
             ))}
           </div>
