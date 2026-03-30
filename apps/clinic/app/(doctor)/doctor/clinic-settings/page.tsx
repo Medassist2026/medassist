@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { ar } from '@shared/lib/i18n/ar'
 import { AssistantManager } from '@ui-clinic/components/doctor/AssistantManager'
@@ -34,6 +34,13 @@ function toAr(slug?: string) {
   return SPECIALTY_AR[slug] ?? SPECIALTY_AR[slug.toLowerCase()] ?? slug
 }
 
+interface ClinicInfo {
+  id: string
+  name: string
+  uniqueId: string
+  role: string  // 'owner' | 'doctor'
+}
+
 interface ClinicData {
   clinicId: string
   clinicName: string
@@ -41,16 +48,32 @@ interface ClinicData {
   doctors: any[]
   staff: any[]
   currentUserId: string
-  userRole: string // 'OWNER' | 'DOCTOR' | 'ASSISTANT' | 'FRONT_DESK'
+  userRole: string // 'OWNER' | 'DOCTOR' | 'ASSISTANT'
+  hasMultipleClinics: boolean
+  allClinics: ClinicInfo[]
 }
 
 export default function ClinicSettingsPage() {
   const [loading, setLoading] = useState(true)
+  const [switching, setSwitching] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [clinic, setClinic] = useState<ClinicData | null>(null)
+  const [dropdownOpen, setDropdownOpen] = useState(false)
+  const dropdownRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     loadClinicData()
+  }, [])
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
   }, [])
 
   const loadClinicData = async () => {
@@ -69,6 +92,23 @@ export default function ClinicSettingsPage() {
       setError(err.message)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleSwitchClinic = async (clinicId: string) => {
+    if (clinicId === clinic?.clinicId) { setDropdownOpen(false); return }
+    setSwitching(true)
+    setDropdownOpen(false)
+    try {
+      await fetch('/api/clinic/switch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clinicId }),
+      })
+      setLoading(true)
+      await loadClinicData()
+    } finally {
+      setSwitching(false)
     }
   }
 
@@ -123,12 +163,59 @@ export default function ClinicSettingsPage() {
         </div>
       )}
 
-      {/* Clinic Info Header */}
+      {/* Clinic Info Header — with switcher when doctor belongs to multiple clinics */}
       <div className="bg-white rounded-2xl border border-gray-100 p-4">
         <div className="flex items-start justify-between gap-2">
-          <div>
-            <h2 className="font-bold text-base text-gray-900 mb-1">{clinic.clinicName}</h2>
-            <p className="text-xs text-gray-400 font-mono">ID: {clinic.clinicUniqueId}</p>
+          <div className="flex-1 min-w-0">
+            {clinic.hasMultipleClinics ? (
+              /* Clinic switcher dropdown */
+              <div className="relative" ref={dropdownRef}>
+                <button
+                  onClick={() => setDropdownOpen(v => !v)}
+                  className="flex items-center gap-1.5 group"
+                  disabled={switching}
+                >
+                  <h2 className="font-bold text-base text-gray-900 truncate group-hover:text-[#16A34A] transition-colors">
+                    {switching ? 'جاري التبديل...' : clinic.clinicName}
+                  </h2>
+                  <svg
+                    className={`w-4 h-4 text-[#9CA3AF] flex-shrink-0 transition-transform ${dropdownOpen ? 'rotate-180' : ''}`}
+                    fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+                <p className="text-xs text-gray-400 font-mono mt-0.5">ID: {clinic.clinicUniqueId}</p>
+
+                {dropdownOpen && (
+                  <div className="absolute top-full mt-1 right-0 bg-white border border-[#E5E7EB] rounded-xl shadow-lg z-20 min-w-[220px] overflow-hidden">
+                    <p className="font-cairo text-[11px] text-[#9CA3AF] px-3 pt-2 pb-1">تبديل العيادة</p>
+                    {clinic.allClinics.map(c => (
+                      <button
+                        key={c.id}
+                        onClick={() => handleSwitchClinic(c.id)}
+                        className={`w-full text-right px-3 py-2.5 flex items-center gap-2 transition-colors ${
+                          c.id === clinic.clinicId
+                            ? 'bg-[#F0FDF4] text-[#16A34A]'
+                            : 'hover:bg-[#F9FAFB] text-[#030712]'
+                        }`}
+                      >
+                        <div className={`w-2 h-2 rounded-full flex-shrink-0 ${c.id === clinic.clinicId ? 'bg-[#16A34A]' : 'bg-[#E5E7EB]'}`} />
+                        <span className="font-cairo text-[13px] font-medium flex-1 truncate">{c.name}</span>
+                        {c.role === 'owner' && (
+                          <span className="text-[10px] px-1.5 py-0.5 bg-[#DCFCE7] text-[#16A34A] rounded-full font-cairo font-semibold flex-shrink-0">مالك</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div>
+                <h2 className="font-bold text-base text-gray-900 mb-1">{clinic.clinicName}</h2>
+                <p className="text-xs text-gray-400 font-mono">ID: {clinic.clinicUniqueId}</p>
+              </div>
+            )}
           </div>
           {isOwner && (
             <span className="flex-shrink-0 px-2 py-0.5 bg-[#DCFCE7] text-[#16A34A] font-cairo font-semibold text-[11px] rounded-full">
