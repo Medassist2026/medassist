@@ -61,7 +61,10 @@ export async function POST(request: Request) {
         .maybeSingle()
 
       if (lookupError || !userByPhone) {
-        return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
+        return NextResponse.json(
+          { error: 'رقم الهاتف غير مسجل في النظام', code: 'PHONE_NOT_FOUND' },
+          { status: 401 }
+        )
       }
 
       // Most accounts authenticate via email even if phone exists in profile.
@@ -95,7 +98,7 @@ export async function POST(request: Request) {
 
     if (authError) {
       return NextResponse.json(
-        { error: 'Invalid credentials' },
+        { error: 'كلمة المرور غير صحيحة', code: 'WRONG_PASSWORD' },
         { status: 401 }
       )
     }

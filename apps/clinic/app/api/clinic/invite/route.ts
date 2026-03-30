@@ -21,9 +21,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Phone number is required' }, { status: 400 })
     }
 
-    const validRoles = ['DOCTOR', 'FRONT_DESK', 'ASSISTANT']
+    const validRoles = ['DOCTOR', 'ASSISTANT']
     if (!role || !validRoles.includes(role)) {
-      return NextResponse.json({ error: 'Invalid role. Must be DOCTOR, FRONT_DESK, or ASSISTANT' }, { status: 400 })
+      return NextResponse.json({ error: 'Invalid role. Must be DOCTOR or ASSISTANT' }, { status: 400 })
     }
 
     // Get clinic context — doctor must have a clinic

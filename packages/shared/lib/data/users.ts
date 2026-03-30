@@ -6,7 +6,7 @@ export interface CreateDoctorParams {
   phone: string
   email?: string
   password: string
-  specialty: 'general-practitioner' | 'pediatrics' | 'cardiology' | 'endocrinology'
+  specialty: string
   fullName: string
 }
 

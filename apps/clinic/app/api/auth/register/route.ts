@@ -112,7 +112,7 @@ export async function POST(request: Request) {
               .insert({
                 clinic_id: clinic.id,
                 user_id: result.userId,
-                role: 'FRONT_DESK',
+                role: 'ASSISTANT',
                 status: 'ACTIVE'
               })
 

@@ -46,7 +46,7 @@ export async function POST(request: Request) {
     if (user.role === 'doctor') {
       membershipRole = 'DOCTOR'
     } else if (user.role === 'frontdesk') {
-      membershipRole = 'FRONT_DESK'
+      membershipRole = 'ASSISTANT'
     } else {
       return NextResponse.json(
         { error: 'Only doctors and frontdesk staff can join clinics' },

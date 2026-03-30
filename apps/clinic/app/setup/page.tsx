@@ -137,9 +137,23 @@ function SetupPageInner() {
       setError('أدخل كود الدعوة')
       return
     }
+    // Doctors must select specialty before joining
+    if (roleParam !== 'frontdesk' && !specialty) {
+      setError('اختر تخصصك أولاً')
+      return
+    }
     setLoading(true)
     setError('')
     try {
+      // Update specialty for doctor users (fire-and-forget — non-blocking)
+      if (roleParam !== 'frontdesk' && specialty) {
+        await fetch('/api/doctor/profile', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ specialty }),
+        })
+      }
+
       // FIX 5C: Strip dashes from invite code
       const cleanCode = inviteCode.replace(/[\s-]/g, '').toUpperCase()
       const res = await fetch('/api/clinic/join', {
@@ -502,6 +516,31 @@ function SetupPageInner() {
                   </div>
                 )}
 
+                {/* Specialty picker — doctors only */}
+                {roleParam !== 'frontdesk' && (
+                  <div className="flex flex-col gap-2 mt-6">
+                    <label className="font-cairo text-[14px] font-medium text-[#030712]">
+                      تخصصك <span className="text-red-500">*</span>
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {specialties.map(s => (
+                        <button
+                          key={s.value}
+                          type="button"
+                          onClick={() => setSpecialty(s.value)}
+                          className={`px-3 py-1.5 rounded-lg font-cairo text-[13px] font-medium border transition-all ${
+                            specialty === s.value
+                              ? 'border-[#16A34A] bg-[#F0FDF4] text-[#16A34A]'
+                              : 'border-[#E5E7EB] bg-[#F9FAFB] text-[#4B5563] hover:border-[#16A34A]/40'
+                          }`}
+                        >
+                          {s.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex flex-col gap-2 mt-6">
                   <label className="font-cairo text-[14px] font-medium text-[#030712]">كود الدعوة</label>
                   <div className="flex items-center bg-[#F3F4F6] border-[0.8px] border-[#E5E7EB] rounded-xl h-[52px] px-4 focus-within:border-[#2563EB] focus-within:ring-2 focus-within:ring-[#2563EB]/20 transition-all">
@@ -527,11 +566,11 @@ function SetupPageInner() {
                 )}
 
                 <motion.button
-                  whileTap={inviteCode.trim() ? { scale: 0.97 } : {}}
+                  whileTap={(inviteCode.trim() && (roleParam === 'frontdesk' || specialty)) ? { scale: 0.97 } : {}}
                   onClick={handleJoinClinic}
-                  disabled={loading || !inviteCode.trim()}
+                  disabled={loading || !inviteCode.trim() || (roleParam !== 'frontdesk' && !specialty)}
                   className={`w-full h-[52px] rounded-xl font-cairo font-semibold text-[16px] transition-all mt-6 ${
-                    inviteCode.trim()
+                    inviteCode.trim() && (roleParam === 'frontdesk' || specialty)
                       ? 'bg-[#2563EB] text-white shadow-md shadow-blue-200 hover:bg-[#1D4ED8]'
                       : 'bg-[#E5E7EB] text-[#9CA3AF] cursor-not-allowed'
                   }`}

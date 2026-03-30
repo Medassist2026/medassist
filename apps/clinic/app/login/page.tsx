@@ -79,8 +79,9 @@ export default function AuthPage() {
   const [registerRole, setRegisterRole]       = useState<RegisterRole>('doctor')
 
   // Touched states for inline validation
-  const [nameTouched, setNameTouched]   = useState(false)
-  const [phoneTouched, setPhoneTouched] = useState(false)
+  const [nameTouched,     setNameTouched]     = useState(false)
+  const [phoneTouched,    setPhoneTouched]    = useState(false)
+  const [passwordTouched, setPasswordTouched] = useState(false)
 
   // State
   const [isLoading, setIsLoading]   = useState(false)
@@ -101,14 +102,24 @@ export default function AuthPage() {
 
   const isPhoneOk = isValidEgPhone(phone)
 
+  // Arabic character detection (Unicode block U+0600–U+06FF)
+  const ARABIC_RE = /[\u0600-\u06FF]/
+  const passwordHasArabic = ARABIC_RE.test(password)
+  const passwordError =
+    passwordTouched && password.length > 0 && passwordHasArabic
+      ? 'كلمة المرور لا تقبل الأحرف العربية — استخدم أحرف إنجليزية وأرقام'
+      : null
+
   const isLoginValid =
     isPhoneOk &&
-    password.length >= 8
+    password.length >= 8 &&
+    !passwordHasArabic
 
   const isRegisterValid =
     isNameValid &&
     isPhoneOk &&
     password.length >= 8 &&
+    !passwordHasArabic &&
     /\d/.test(password) &&
     confirmPassword.length >= 8 &&
     password === confirmPassword
@@ -122,6 +133,7 @@ export default function AuthPage() {
     setPhoneExists(false)
     setNameTouched(false)
     setPhoneTouched(false)
+    setPasswordTouched(false)
   }
 
   // ── Submit ────────────────────────────────────────────────────────────────
@@ -194,6 +206,8 @@ export default function AuthPage() {
       } else {
         // Login — try doctor then frontdesk
         let loginSuccess = false
+        let lastErrorCode: string | null = null
+        let lastErrorMsg: string | null  = null
 
         for (const role of ['doctor', 'frontdesk'] as const) {
           const res = await fetch('/api/auth/login', {
@@ -209,14 +223,28 @@ export default function AuthPage() {
             break
           }
 
+          const data = await res.json()
+
           if (res.status !== 401) {
-            const data = await res.json()
             throw new Error(data.error || 'حدث خطأ. حاول مرة أخرى.')
           }
+
+          // Capture the specific error code for UX messaging
+          lastErrorCode = data.code || null
+          lastErrorMsg  = data.error || null
+
+          // Phone not found means no account exists — no point trying the second role
+          if (data.code === 'PHONE_NOT_FOUND') break
         }
 
         if (!loginSuccess) {
-          throw new Error('بيانات الدخول غير صحيحة')
+          if (lastErrorCode === 'PHONE_NOT_FOUND') {
+            throw new Error('رقم الهاتف غير مسجل في النظام')
+          } else if (lastErrorCode === 'WRONG_PASSWORD') {
+            throw new Error('كلمة المرور غير صحيحة')
+          } else {
+            throw new Error(lastErrorMsg || 'بيانات الدخول غير صحيحة')
+          }
         }
       }
     } catch (err: any) {
@@ -387,13 +415,16 @@ export default function AuthPage() {
               <input
                 type={showPassword ? 'text' : 'password'}
                 value={password}
-                onChange={e => setPassword(e.target.value)}
+                onChange={e => { setPassword(e.target.value); setPasswordTouched(true) }}
+                onBlur={() => setPasswordTouched(true)}
                 placeholder="••••••••"
                 className="flex-1 bg-transparent font-cairo text-[14px] text-[#030712] placeholder:text-[#4B5563] outline-none text-right"
               />
             </div>
-            {activeTab === 'register' && (
-              <span className="font-cairo text-[12px] text-[#4B5563]">على الأقل ٨ أحرف وتحتوي على رقم</span>
+            {passwordError ? (
+              <span className="font-cairo text-[12px] text-red-500">{passwordError}</span>
+            ) : activeTab === 'register' && (
+              <span className="font-cairo text-[12px] text-[#4B5563]">على الأقل ٨ أحرف وتحتوي على رقم (إنجليزية فقط)</span>
             )}
           </div>
 

@@ -38,8 +38,9 @@ export function AssistantManager({ isOwner = true }: { isOwner?: boolean }) {
       const res = await fetch('/api/clinic/staff')
       if (res.ok) {
         const data = await res.json()
+        // FRONT_DESK is a legacy value — unified into ASSISTANT. Accept both.
         const assistants = (data.members || []).filter(
-          (m: StaffMember) => ['ASSISTANT', 'FRONT_DESK', 'frontdesk', 'assistant'].includes(m.role)
+          (m: StaffMember) => ['ASSISTANT', 'FRONT_DESK'].includes(m.role.toUpperCase())
         )
         setStaff(assistants)
       }
@@ -212,9 +213,7 @@ export function AssistantManager({ isOwner = true }: { isOwner?: boolean }) {
                     }`}>
                       {member.status === 'ACTIVE' ? 'نشط' : 'غير نشط'}
                     </span>
-                    <span className="text-[10px] text-gray-400">
-                      {['FRONT_DESK', 'frontdesk'].includes(member.role) ? 'استقبال' : 'مساعد'}
-                    </span>
+                    <span className="text-[10px] text-gray-400">مساعد</span>
                   </div>
                 </div>
 

@@ -168,8 +168,7 @@ export async function GET() {
         return bTime - aTime
       })
 
-    // Audit: doctor viewed patient list
-    const clinicId = await getActiveClinicIdFromCookies()
+    // Audit: doctor viewed patient list (clinicId already resolved above)
     logAuditEvent({
       clinicId: clinicId || undefined,
       actorUserId: user.id,
