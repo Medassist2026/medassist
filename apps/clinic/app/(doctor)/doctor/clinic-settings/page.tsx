@@ -361,34 +361,18 @@ export default function ClinicSettingsPage() {
           </div>
         </Link>
 
-        {isOwner ? (
-          <Link
-            href="/doctor/clinic-settings/staff"
-            className="bg-white rounded-2xl border border-gray-100 p-4 flex items-center gap-3 hover:border-gray-300 transition-colors"
-          >
-            <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center flex-shrink-0">
-              <svg className="w-5 h-5 text-[#3B82F6]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-            </div>
-            <div>
-              <p className="font-cairo font-bold text-[13px] text-[#030712]">إدارة الفريق</p>
-              <p className="font-cairo text-[11px] text-[#6B7280]">دعوة وإدارة المساعدين</p>
-            </div>
-          </Link>
-        ) : (
-          <div className="bg-[#F9FAFB] rounded-2xl border border-dashed border-[#E5E7EB] p-4 flex items-center gap-3 opacity-50 cursor-not-allowed">
-            <div className="w-9 h-9 rounded-xl bg-[#F3F4F6] flex items-center justify-center flex-shrink-0">
-              <svg className="w-5 h-5 text-[#9CA3AF]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-              </svg>
-            </div>
-            <div>
-              <p className="font-cairo font-bold text-[13px] text-[#9CA3AF]">إدارة الفريق</p>
-              <p className="font-cairo text-[11px] text-[#9CA3AF]">للمالك فقط</p>
-            </div>
+        <Link
+          href="/doctor/clinics"
+          className="bg-white rounded-2xl border border-gray-100 p-4 flex items-center gap-3 hover:border-[#16A34A] hover:bg-[#F0FDF4] transition-colors group"
+        >
+          <div className="w-9 h-9 rounded-xl bg-[#DCFCE7] flex items-center justify-center flex-shrink-0">
+            <Building2 className="w-5 h-5 text-[#16A34A]" />
           </div>
-        )}
+          <div>
+            <p className="font-cairo font-bold text-[13px] text-[#030712]">إدارة العيادات</p>
+            <p className="font-cairo text-[11px] text-[#6B7280]">انضم أو أنشئ عيادة جديدة</p>
+          </div>
+        </Link>
       </div>
 
       {/* Assistant Manager — owner only sees invite + manage, others see read-only list */}
