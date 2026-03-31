@@ -15,6 +15,7 @@ import {
   Banknote,
   BarChart3,
   Stethoscope,
+  Building2,
 } from 'lucide-react'
 
 export type SidebarRole = 'doctor' | 'frontdesk'
@@ -32,6 +33,7 @@ const doctorNav: NavItem[] = [
   { label: 'الرسائل', href: '/doctor/messages', icon: MessageSquare },
   { label: 'الوصفات', href: '/doctor/prescription', icon: FileText },
   { label: 'الملف الشخصي', href: '/doctor/profile', icon: UserCog },
+  { label: 'عياداتي', href: '/doctor/clinics', icon: Building2 },
   { label: 'إعدادات العيادة', href: '/doctor/clinic-settings', icon: Settings },
 ]
 

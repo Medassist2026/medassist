@@ -232,14 +232,21 @@ export async function getClinicContext(
   const clinics = await getDoctorClinics(userId)
   if (clinics.length === 0) return null
 
+  // Stable ordering: OWNER clinics first, then others — ensures consistent fallback
+  const sortedClinics = [...clinics].sort((a, b) => {
+    if (a.role === 'owner' && b.role !== 'owner') return -1
+    if (a.role !== 'owner' && b.role === 'owner') return 1
+    return 0
+  })
+
   // Determine active clinic — validate cookie/preferred ID against actual memberships
   const cookieClinicId = preferredClinicId || await getActiveClinicIdFromCookies()
   let activeClinic = cookieClinicId
-    ? clinics.find(c => c.id === cookieClinicId)
+    ? sortedClinics.find(c => c.id === cookieClinicId)
     : undefined
   if (!activeClinic) {
-    // Cookie clinic not found in active memberships — fall back to first clinic
-    activeClinic = clinics[0]
+    // Cookie clinic not found in active memberships — fall back to first (OWNER) clinic
+    activeClinic = sortedClinics[0]
   }
 
   const doctorIds = await getClinicDoctorIds(activeClinic.id)
@@ -247,8 +254,8 @@ export async function getClinicContext(
   return {
     clinicId: activeClinic.id,
     clinic: activeClinic,
-    allClinics: clinics,
-    hasMultipleClinics: clinics.length > 1,
+    allClinics: sortedClinics,
+    hasMultipleClinics: sortedClinics.length > 1,
     clinicDoctorIds: doctorIds,
   }
 }

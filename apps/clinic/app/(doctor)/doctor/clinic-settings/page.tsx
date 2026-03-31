@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { ar } from '@shared/lib/i18n/ar'
 import { AssistantManager } from '@ui-clinic/components/doctor/AssistantManager'
-import { Pencil, X, Check } from 'lucide-react'
+import { Pencil, X, Check, Building2 } from 'lucide-react'
 
 const SPECIALTY_AR: Record<string, string> = {
   'general': 'طب عام',
@@ -182,7 +182,14 @@ export default function ClinicSettingsPage() {
         <div className="bg-white rounded-2xl border border-gray-200 p-8 text-center">
           <div className="text-4xl mb-3">🏥</div>
           <h1 className="text-lg font-bold text-gray-900 mb-2">لا توجد عيادة</h1>
-          <p className="text-sm text-gray-500">يرجى إنشاء عيادة أولاً من لوحة التحكم</p>
+          <p className="text-sm text-gray-500 mb-4">أنشئ عيادة جديدة أو انضم لعيادة موجودة</p>
+          <Link
+            href="/doctor/clinics"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-[#16A34A] text-white font-cairo text-[13px] font-semibold rounded-[10px] hover:bg-[#15803D] transition-colors"
+          >
+            <Building2 className="w-4 h-4" />
+            إدارة العيادات
+          </Link>
         </div>
       </div>
     )
@@ -252,6 +259,16 @@ export default function ClinicSettingsPage() {
                         )}
                       </button>
                     ))}
+                    <div className="border-t border-[#F3F4F6] mt-1">
+                      <Link
+                        href="/doctor/clinics"
+                        onClick={() => setDropdownOpen(false)}
+                        className="w-full text-right px-3 py-2.5 flex items-center gap-2 hover:bg-[#F9FAFB] text-[#6B7280] hover:text-[#16A34A] transition-colors"
+                      >
+                        <Building2 className="w-3.5 h-3.5 flex-shrink-0" />
+                        <span className="font-cairo text-[12px] font-medium">إدارة العيادات</span>
+                      </Link>
+                    </div>
                   </div>
                 )}
               </div>
