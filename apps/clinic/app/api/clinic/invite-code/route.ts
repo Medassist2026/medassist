@@ -25,13 +25,21 @@ export async function GET() {
       .eq('id', context.clinic.id)
       .single()
 
-    // If no invite code yet, generate one
+    // If no invite code yet, generate one and persist it
     if (!clinic?.invite_code) {
       const code = await generateUniqueInviteCode()
-      await admin
+      const { error: updateError } = await admin
         .from('clinics')
         .update({ invite_code: code })
         .eq('id', context.clinic.id)
+
+      if (updateError) {
+        console.error('[invite-code] Failed to persist invite code:', updateError)
+        return NextResponse.json(
+          { error: 'فشل في حفظ رمز الدعوة — تأكد من تطبيق migration 034' },
+          { status: 500 }
+        )
+      }
 
       return NextResponse.json({ inviteCode: code })
     }
