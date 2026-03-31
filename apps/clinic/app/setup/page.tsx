@@ -44,8 +44,9 @@ export default function SetupPage() {
 function SetupPageInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const roleParam = (searchParams.get('role') as UserRole) ?? null
-  const modeParam = searchParams.get('mode')
+  const roleParam  = (searchParams.get('role') as UserRole) ?? null
+  const modeParam  = searchParams.get('mode')
+  const codeParam  = searchParams.get('code') ?? ''   // pre-filled invite code from share link
 
   // Frontdesk: skip choose step entirely — they can only join
   const initialStep: SetupStep =
@@ -60,8 +61,8 @@ function SetupPageInner() {
   const [clinicAddress, setClinicAddress] = useState('')
   const [specialty,     setSpecialty]     = useState('')
 
-  // Join clinic
-  const [inviteCode, setInviteCode] = useState('')
+  // Join clinic — pre-fill if a ?code= param was passed via the share link
+  const [inviteCode, setInviteCode] = useState(codeParam)
 
   // Success
   const [createdClinicCode, setCreatedClinicCode] = useState('')
@@ -103,7 +104,8 @@ function SetupPageInner() {
         throw new Error(data.error || 'فشل في إنشاء العيادة')
       }
       const data = await res.json()
-      setCreatedClinicCode(data.clinicUniqueId || '')
+      // Show the invite code (not unique_id) so the owner can share it immediately
+      setCreatedClinicCode(data.inviteCode || data.clinicUniqueId || '')
       setCreatedClinicName(clinicName.trim())
       setStep('clinic-created')
     } catch (err: any) {
@@ -154,12 +156,10 @@ function SetupPageInner() {
         })
       }
 
-      // FIX 5C: Strip dashes from invite code
-      const cleanCode = inviteCode.replace(/[\s-]/g, '').toUpperCase()
       const res = await fetch('/api/clinic/join', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clinicUniqueId: cleanCode }),
+        body: JSON.stringify({ inviteCode: inviteCode.trim() }),
       })
       if (!res.ok) {
         const data = await res.json()

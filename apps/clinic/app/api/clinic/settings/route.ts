@@ -46,18 +46,19 @@ export async function GET() {
         .limit(1)
 
       if (!ownerRows?.length) {
-        // 2. No OWNER row exists — check if this user is in clinic_doctors
-        const { data: cdRow } = await admin
+        // 2. No OWNER row exists — check if this user is the SOLE member of
+        //    clinic_doctors (i.e. they created the clinic, nobody else has joined yet).
+        //    If multiple doctors are in clinic_doctors, we cannot safely infer ownership.
+        const { data: allCdRows } = await admin
           .from('clinic_doctors')
           .select('doctor_id')
           .eq('clinic_id', context.clinicId)
-          .eq('doctor_id', user.id)
-          .limit(1)
-          .maybeSingle()
 
-        if (cdRow) {
-          // This doctor was linked at clinic creation — they ARE the owner.
-          // Repair the missing membership row.
+        const doctorIds = (allCdRows || []).map((r: any) => r.doctor_id)
+        const isCreator = doctorIds.length === 1 && doctorIds[0] === user.id
+
+        if (isCreator) {
+          // This is definitively the clinic creator — repair the missing row.
           await admin
             .from('clinic_memberships')
             .upsert(

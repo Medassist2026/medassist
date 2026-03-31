@@ -60,7 +60,8 @@ export function AssistantManager({ isOwner = true }: { isOwner?: boolean }) {
   }
 
   const handleShareLink = () => {
-    const url = `${window.location.origin}/auth?invite=${inviteCode}`
+    // /setup?mode=join&code=XXXX-XX  — pre-fills the invite code on the join screen
+    const url = `${window.location.origin}/setup?mode=join&code=${encodeURIComponent(inviteCode)}`
     navigator.clipboard.writeText(url)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
@@ -81,7 +82,7 @@ export function AssistantManager({ isOwner = true }: { isOwner?: boolean }) {
   const handleRemove = async (userId: string) => {
     setRemoving(userId)
     try {
-      const res = await fetch('/api/clinic/staff', {
+      const res = await fetch('/api/clinic/membership', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId }),
@@ -112,7 +113,7 @@ export function AssistantManager({ isOwner = true }: { isOwner?: boolean }) {
               </div>
               <h3 className="font-cairo font-bold text-[15px] text-[#030712] text-center mb-2">تجديد رمز الدعوة</h3>
               <p className="font-cairo text-[12px] text-[#6B7280] text-center leading-relaxed">
-                سيُبطَل الرمز الحالي فوراً ولن يتمكن أي شخص من استخدامه للانضمام. هل أنت متأكد؟
+                سيُبطَل الرمز الحالي فوراً ولن يُستخدم للانضمام الجديد. الأعضاء الحاليون <strong>لن يتأثروا</strong>. هل أنت متأكد؟
               </p>
               <div className="flex gap-3 mt-4">
                 <button
@@ -141,7 +142,7 @@ export function AssistantManager({ isOwner = true }: { isOwner?: boolean }) {
             <h3 className="font-bold text-sm text-gray-900">رمز الدعوة</h3>
           </div>
           <p className="font-cairo text-[11px] text-[#6B7280] mb-3">
-            شارك هذا الرمز مع <strong>المساعدين وموظفي الاستقبال</strong> فقط — لدعوة طبيب آخر استخدم زر الدعوة المباشرة في صفحة الفريق
+            شارك هذا الرمز مع أي شخص تريد إضافته للعيادة — سواء طبيب أو مساعد. دوره يُحدَّد تلقائياً بحسب نوع حسابه.
           </p>
 
           {loadingCode ? (

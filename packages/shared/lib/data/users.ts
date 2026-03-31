@@ -1,5 +1,6 @@
 import { createClient } from '@shared/lib/supabase/server'
 import { createAdminClient } from '@shared/lib/supabase/admin'
+import { generateUniqueInviteCode } from '@shared/lib/utils/invite-code'
 import { nanoid } from 'nanoid'
 
 export interface CreateDoctorParams {
@@ -199,6 +200,8 @@ export async function createClinic(params: CreateClinicParams) {
   const adminSupabase = createAdminClient('clinic-registration')
 
   const clinicUniqueId = nanoid(10).toUpperCase()
+  // Generate invite_code eagerly so the owner can share it immediately
+  const inviteCode = await generateUniqueInviteCode()
 
   // 1. Create clinic
   const { data: clinic, error: clinicError } = await adminSupabase
@@ -207,6 +210,7 @@ export async function createClinic(params: CreateClinicParams) {
       unique_id: clinicUniqueId,
       name: params.name,
       address: params.address,
+      invite_code: inviteCode,
     })
     .select()
     .single()
@@ -245,7 +249,8 @@ export async function createClinic(params: CreateClinicParams) {
 
   return {
     clinicId: clinic.id,
-    clinicUniqueId
+    clinicUniqueId,
+    inviteCode,
   }
 }
 

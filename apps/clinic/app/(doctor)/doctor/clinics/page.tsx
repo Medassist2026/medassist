@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { ChevronRight, Plus, Building2, Users, Clock, Check, X } from 'lucide-react'
+import { ChevronRight, Plus, Building2, Users, Clock, Check, X, LogIn } from 'lucide-react'
 
 // ============================================================================
 // TYPES
@@ -19,7 +19,7 @@ interface ClinicData {
 }
 
 // ============================================================================
-// ADD CLINIC MODAL
+// ADD CLINIC MODAL  (create a brand-new clinic)
 // ============================================================================
 
 function AddClinicModal({
@@ -31,13 +31,18 @@ function AddClinicModal({
   onClose: () => void
   onCreated: (clinic: ClinicData) => void
 }) {
-  const [name, setName] = useState('')
+  const [name,    setName]    = useState('')
+  const [address, setAddress] = useState('')
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
 
   const handleCreate = async () => {
     if (!name.trim() || name.trim().length < 2) {
       setError('يرجى إدخال اسم العيادة (حرفين على الأقل)')
+      return
+    }
+    if (!address.trim() || address.trim().length < 5) {
+      setError('يرجى إدخال عنوان العيادة (يظهر على الروشتة)')
       return
     }
 
@@ -48,7 +53,7 @@ function AddClinicModal({
       const res = await fetch('/api/clinic/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim() }),
+        body: JSON.stringify({ name: name.trim(), address: address.trim() }),
       })
 
       const data = await res.json()
@@ -69,6 +74,7 @@ function AddClinicModal({
       })
 
       setName('')
+      setAddress('')
       onClose()
     } catch {
       setError('حدث خطأ. حاول مرة أخرى')
@@ -81,23 +87,16 @@ function AddClinicModal({
 
   return (
     <>
-      {/* Backdrop */}
       <div className="fixed inset-0 bg-black/40 z-50" onClick={onClose} />
-
-      {/* Modal */}
       <div className="fixed inset-x-4 top-1/2 -translate-y-1/2 z-50 max-w-sm mx-auto">
         <div className="bg-white rounded-[16px] shadow-xl overflow-hidden" dir="rtl">
-          {/* Header */}
           <div className="flex items-center justify-between px-5 pt-5 pb-3">
-            <h2 className="font-cairo text-[16px] font-bold text-[#030712]">
-              إضافة عيادة
-            </h2>
+            <h2 className="font-cairo text-[16px] font-bold text-[#030712]">إضافة عيادة</h2>
             <button onClick={onClose} className="w-8 h-8 rounded-full hover:bg-[#F3F4F6] flex items-center justify-center">
               <X className="w-5 h-5 text-[#6B7280]" />
             </button>
           </div>
 
-          {/* Body */}
           <div className="px-5 pb-5">
             <label className="font-cairo text-[13px] font-medium text-[#4B5563] block mb-2">
               اسم العيادة *
@@ -111,24 +110,31 @@ function AddClinicModal({
               autoFocus
             />
 
+            <label className="font-cairo text-[13px] font-medium text-[#4B5563] block mt-4 mb-2">
+              عنوان العيادة * <span className="font-normal text-[#9CA3AF]">(يظهر على الروشتة)</span>
+            </label>
+            <input
+              type="text"
+              value={address}
+              onChange={(e) => { setAddress(e.target.value); setError('') }}
+              placeholder="مثال: ١٢ شارع التحرير، المعادي، القاهرة"
+              className="w-full h-[44px] px-4 rounded-[10px] border-[0.8px] border-[#E5E7EB] font-cairo text-[14px] text-[#030712] placeholder:text-[#9CA3AF] focus:outline-none focus:border-[#16A34A] focus:ring-1 focus:ring-[#16A34A] text-right"
+            />
+
             {error && (
               <p className="font-cairo text-[12px] text-[#DC2626] mt-2">{error}</p>
             )}
 
-            {/* Buttons */}
             <div className="flex gap-3 mt-5">
               <button
                 onClick={handleCreate}
-                disabled={creating || !name.trim()}
+                disabled={creating || !name.trim() || !address.trim()}
                 className="flex-1 h-[44px] bg-[#16A34A] hover:bg-[#15803D] disabled:opacity-50 disabled:cursor-not-allowed text-white font-cairo text-[14px] font-semibold rounded-[10px] transition-colors flex items-center justify-center gap-2"
               >
                 {creating ? (
                   <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                 ) : (
-                  <>
-                    <Check className="w-4 h-4" />
-                    إنشاء
-                  </>
+                  <><Check className="w-4 h-4" /> إنشاء</>
                 )}
               </button>
               <button
@@ -146,7 +152,146 @@ function AddClinicModal({
 }
 
 // ============================================================================
-// CLINIC CARD COMPONENT
+// JOIN CLINIC MODAL  (join an existing clinic with an invite code)
+// ============================================================================
+
+function JoinClinicModal({
+  isOpen,
+  onClose,
+  onJoined,
+}: {
+  isOpen: boolean
+  onClose: () => void
+  onJoined: (clinic: ClinicData) => void
+}) {
+  const [code,    setCode]    = useState('')
+  const [joining, setJoining] = useState(false)
+  const [error,   setError]   = useState('')
+  const [success, setSuccess] = useState<string | null>(null)
+
+  // Reset state every time the modal opens
+  useEffect(() => {
+    if (isOpen) { setCode(''); setError(''); setSuccess(null) }
+  }, [isOpen])
+
+  const handleJoin = async () => {
+    if (!code.trim()) {
+      setError('أدخل رمز الدعوة')
+      return
+    }
+    setJoining(true)
+    setError('')
+    try {
+      const res = await fetch('/api/clinic/join', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ inviteCode: code.trim() }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data.error || 'رمز الدعوة غير صحيح')
+        return
+      }
+      // Show brief success state then close
+      setSuccess(data.clinicName || 'العيادة')
+      onJoined({
+        id: data.clinicId,
+        name: data.clinicName,
+        uniqueId: data.clinicUniqueId,
+        role: (data.role || 'doctor').toLowerCase(),
+        isActive: false,
+      })
+      setTimeout(onClose, 1800)
+    } catch {
+      setError('حدث خطأ. حاول مرة أخرى')
+    } finally {
+      setJoining(false)
+    }
+  }
+
+  if (!isOpen) return null
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-black/40 z-50" onClick={!joining ? onClose : undefined} />
+      <div className="fixed inset-x-4 top-1/2 -translate-y-1/2 z-50 max-w-sm mx-auto">
+        <div className="bg-white rounded-[16px] shadow-xl overflow-hidden" dir="rtl">
+          <div className="flex items-center justify-between px-5 pt-5 pb-3">
+            <h2 className="font-cairo text-[16px] font-bold text-[#030712]">الانضمام لعيادة</h2>
+            <button
+              onClick={onClose}
+              disabled={joining}
+              className="w-8 h-8 rounded-full hover:bg-[#F3F4F6] flex items-center justify-center disabled:opacity-40"
+            >
+              <X className="w-5 h-5 text-[#6B7280]" />
+            </button>
+          </div>
+
+          <div className="px-5 pb-5">
+            {success ? (
+              /* Success state */
+              <div className="text-center py-4">
+                <div className="w-12 h-12 rounded-full bg-[#DCFCE7] flex items-center justify-center mx-auto mb-3">
+                  <Check className="w-6 h-6 text-[#16A34A]" />
+                </div>
+                <p className="font-cairo text-[15px] font-bold text-[#030712]">تم الانضمام بنجاح!</p>
+                <p className="font-cairo text-[13px] text-[#6B7280] mt-1">{success}</p>
+              </div>
+            ) : (
+              <>
+                <p className="font-cairo text-[13px] text-[#6B7280] mb-4">
+                  اطلب رمز الدعوة من مدير العيادة وأدخله أدناه.
+                </p>
+
+                <label className="font-cairo text-[13px] font-medium text-[#4B5563] block mb-2">
+                  رمز الدعوة
+                </label>
+                <input
+                  type="text"
+                  value={code}
+                  onChange={(e) => { setCode(e.target.value.toUpperCase()); setError('') }}
+                  placeholder="مثال: ABCD-EF"
+                  maxLength={7}
+                  className="w-full h-[52px] px-4 rounded-[10px] border-[0.8px] border-[#E5E7EB] font-mono text-[20px] font-bold text-[#030712] tracking-widest placeholder:text-[#D1D5DB] placeholder:font-sans placeholder:text-[14px] placeholder:font-normal placeholder:tracking-normal focus:outline-none focus:border-[#16A34A] focus:ring-2 focus:ring-[#16A34A]/20 text-center"
+                  autoFocus
+                  onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
+                />
+
+                {error && (
+                  <p className="font-cairo text-[12px] text-[#DC2626] mt-2">{error}</p>
+                )}
+
+                <div className="flex gap-3 mt-5">
+                  <button
+                    onClick={handleJoin}
+                    disabled={joining || !code.trim()}
+                    className="flex-1 h-[44px] bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-50 disabled:cursor-not-allowed text-white font-cairo text-[14px] font-semibold rounded-[10px] transition-colors flex items-center justify-center gap-2"
+                  >
+                    {joining ? (
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <><LogIn className="w-4 h-4" /> انضم</>
+                    )}
+                  </button>
+                  <button
+                    onClick={onClose}
+                    disabled={joining}
+                    className="flex-1 h-[44px] bg-[#F3F4F6] hover:bg-[#E5E7EB] disabled:opacity-40 text-[#4B5563] font-cairo text-[14px] font-medium rounded-[10px] transition-colors"
+                  >
+                    إلغاء
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </>
+  )
+}
+
+// ============================================================================
+// CLINIC CARD
 // ============================================================================
 
 function ClinicCard({
@@ -156,6 +301,10 @@ function ClinicCard({
   clinic: ClinicData
   onSwitch: (clinicId: string) => void
 }) {
+  const roleLabel = clinic.role === 'OWNER' || clinic.role === 'owner' ? 'مالك العيادة'
+    : clinic.role === 'DOCTOR' || clinic.role === 'doctor' ? 'طبيب'
+    : 'مساعد'
+
   return (
     <div
       className={`bg-white rounded-[12px] border-[0.8px] p-4 transition-colors ${
@@ -163,14 +312,12 @@ function ClinicCard({
       }`}
     >
       <div className="flex items-start gap-3">
-        {/* Clinic icon */}
         <div className={`w-11 h-11 rounded-[10px] flex items-center justify-center flex-shrink-0 ${
           clinic.isActive ? 'bg-[#DCFCE7]' : 'bg-[#F3F4F6]'
         }`}>
           <Building2 className={`w-5 h-5 ${clinic.isActive ? 'text-[#16A34A]' : 'text-[#6B7280]'}`} />
         </div>
 
-        {/* Info */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <h3 className="font-cairo text-[15px] font-semibold text-[#030712] truncate">
@@ -183,33 +330,24 @@ function ClinicCard({
             )}
           </div>
 
-          {/* Role */}
-          <p className="font-cairo text-[12px] text-[#9CA3AF] mt-0.5">
-            {clinic.role === 'owner' ? 'مالك العيادة' : 'طبيب'}
-          </p>
+          <p className="font-cairo text-[12px] text-[#9CA3AF] mt-0.5">{roleLabel}</p>
 
-          {/* Stats row */}
           <div className="flex items-center gap-4 mt-2">
             {clinic.doctorCount !== undefined && (
               <div className="flex items-center gap-1">
                 <Users className="w-3.5 h-3.5 text-[#9CA3AF]" />
-                <span className="font-cairo text-[12px] text-[#6B7280]">
-                  {clinic.doctorCount} طبيب
-                </span>
+                <span className="font-cairo text-[12px] text-[#6B7280]">{clinic.doctorCount} طبيب</span>
               </div>
             )}
             {clinic.staffCount !== undefined && clinic.staffCount > 0 && (
               <div className="flex items-center gap-1">
                 <Clock className="w-3.5 h-3.5 text-[#9CA3AF]" />
-                <span className="font-cairo text-[12px] text-[#6B7280]">
-                  {clinic.staffCount} مساعد
-                </span>
+                <span className="font-cairo text-[12px] text-[#6B7280]">{clinic.staffCount} مساعد</span>
               </div>
             )}
           </div>
         </div>
 
-        {/* Switch button */}
         {!clinic.isActive && (
           <button
             onClick={() => onSwitch(clinic.id)}
@@ -231,7 +369,8 @@ export default function ClinicsPage() {
   const router = useRouter()
   const [clinics, setClinics] = useState<ClinicData[]>([])
   const [loading, setLoading] = useState(true)
-  const [showAddModal, setShowAddModal] = useState(false)
+  const [showAddModal,  setShowAddModal]  = useState(false)
+  const [showJoinModal, setShowJoinModal] = useState(false)
   const [switching, setSwitching] = useState(false)
 
   useEffect(() => {
@@ -241,7 +380,6 @@ export default function ClinicsPage() {
         if (res.ok) {
           const data = await res.json()
           if (data.success && data.allClinics) {
-            // Mark the active clinic
             const enriched: ClinicData[] = data.allClinics.map((c: any) => ({
               id: c.id,
               name: c.name,
@@ -249,7 +387,7 @@ export default function ClinicsPage() {
               role: c.role,
               isActive: c.id === data.clinic?.id,
               doctorCount: c.id === data.clinic?.id ? data.doctorCount : undefined,
-              staffCount: c.id === data.clinic?.id ? data.staffCount : undefined,
+              staffCount:  c.id === data.clinic?.id ? data.staffCount  : undefined,
             }))
             setClinics(enriched)
           }
@@ -270,24 +408,23 @@ export default function ClinicsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ clinicId }),
       })
-
       if (res.ok) {
-        // Update UI
         setClinics(prev => prev.map(c => ({ ...c, isActive: c.id === clinicId })))
-        // Reload after a moment to get fresh data
-        setTimeout(() => {
-          router.push('/doctor/dashboard')
-          router.refresh()
-        }, 300)
+        setTimeout(() => { router.push('/doctor/dashboard'); router.refresh() }, 300)
       }
-    } catch {
-      // ignore
-    }
+    } catch { /* ignore */ }
     setSwitching(false)
   }
 
   const handleClinicCreated = (newClinic: ClinicData) => {
     setClinics(prev => [...prev, newClinic])
+  }
+
+  const handleClinicJoined = (newClinic: ClinicData) => {
+    // Avoid duplicates — only add if not already in the list
+    setClinics(prev =>
+      prev.find(c => c.id === newClinic.id) ? prev : [...prev, newClinic]
+    )
   }
 
   return (
@@ -318,9 +455,7 @@ export default function ClinicsPage() {
           ) : clinics.length === 0 ? (
             <div className="text-center py-16">
               <Building2 className="w-12 h-12 text-[#D1D5DB] mx-auto mb-4" />
-              <p className="font-cairo text-[16px] font-semibold text-[#030712] mb-1">
-                لا توجد عيادات
-              </p>
+              <p className="font-cairo text-[16px] font-semibold text-[#030712] mb-1">لا توجد عيادات</p>
               <p className="font-cairo text-[14px] text-[#6B7280] mb-6">
                 أنشئ عيادتك الأولى أو انضم لعيادة موجودة
               </p>
@@ -328,11 +463,7 @@ export default function ClinicsPage() {
           ) : (
             <div className="space-y-3">
               {clinics.map((clinic) => (
-                <ClinicCard
-                  key={clinic.id}
-                  clinic={clinic}
-                  onSwitch={handleSwitch}
-                />
+                <ClinicCard key={clinic.id} clinic={clinic} onSwitch={handleSwitch} />
               ))}
             </div>
           )}
@@ -348,21 +479,26 @@ export default function ClinicsPage() {
             </button>
 
             <button
-              onClick={() => router.push('/setup?mode=join')}
-              className="w-full h-[48px] bg-white hover:bg-[#F9FAFB] border-[0.8px] border-[#E5E7EB] text-[#4B5563] font-cairo text-[14px] font-medium rounded-[12px] transition-colors flex items-center justify-center gap-2"
+              onClick={() => setShowJoinModal(true)}
+              className="w-full h-[48px] bg-white hover:bg-[#F0F9FF] border-[0.8px] border-[#BFDBFE] text-[#2563EB] font-cairo text-[14px] font-semibold rounded-[12px] transition-colors flex items-center justify-center gap-2"
             >
-              <Building2 className="w-5 h-5 text-[#9CA3AF]" />
+              <LogIn className="w-5 h-5" />
               انضم لعيادة بكود الدعوة
             </button>
           </div>
         </div>
       </div>
 
-      {/* Add Clinic Modal */}
+      {/* Modals */}
       <AddClinicModal
         isOpen={showAddModal}
         onClose={() => setShowAddModal(false)}
         onCreated={handleClinicCreated}
+      />
+      <JoinClinicModal
+        isOpen={showJoinModal}
+        onClose={() => setShowJoinModal(false)}
+        onJoined={handleClinicJoined}
       />
 
       {/* Switching overlay */}

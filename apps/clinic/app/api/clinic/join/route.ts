@@ -10,33 +10,46 @@ import { NextResponse } from 'next/server'
  * Unified join-clinic endpoint that works for ANY role (doctor, frontdesk, assistant).
  * Uses clinic_memberships as the primary membership store.
  *
- * Body: { clinicUniqueId: string }
+ * Body: { inviteCode: string }
+ *
+ * The inviteCode is the rotating 7-char code shown in clinic settings.
+ * Regenerating the code only prevents *new* joins via the old code — it does
+ * NOT remove existing members.
  */
 export async function POST(request: Request) {
   try {
     // Accept any authenticated user (not restricted to frontdesk)
     const user = await requireApiAuth()
-    const { clinicUniqueId } = await request.json()
+    const { inviteCode } = await request.json()
 
-    if (!clinicUniqueId || clinicUniqueId.trim().length < 3) {
+    if (!inviteCode || inviteCode.trim().length < 4) {
       return NextResponse.json(
-        { error: 'Valid Clinic ID is required' },
+        { error: 'رمز الدعوة مطلوب' },
         { status: 400 }
       )
     }
 
     const admin = createAdminClient('clinic-join')
 
-    // Find clinic by unique_id
+    // Normalize the invite code:
+    // Remove spaces; ensure XXXX-XX format (add dash if user omitted it)
+    const raw = inviteCode.replace(/\s/g, '').toUpperCase()
+    const normalizedCode = raw.includes('-')
+      ? raw
+      : raw.length === 6
+        ? `${raw.slice(0, 4)}-${raw.slice(4)}`
+        : raw
+
+    // Find clinic by invite_code (rotating code shared by the owner)
     const { data: clinic, error: findError } = await admin
       .from('clinics')
       .select('id, name, unique_id')
-      .eq('unique_id', clinicUniqueId.trim().toUpperCase())
+      .eq('invite_code', normalizedCode)
       .maybeSingle()
 
     if (findError || !clinic) {
       return NextResponse.json(
-        { error: 'Clinic not found. Please check the Clinic ID and try again.' },
+        { error: 'رمز الدعوة غير صحيح أو منتهي الصلاحية. تحقق من الرمز وحاول مجدداً.' },
         { status: 404 }
       )
     }
@@ -117,6 +130,41 @@ export async function POST(request: Request) {
         .update({ clinic_id: clinic.id })
         .eq('id', user.id)
     }
+
+    // ── Notify the clinic owner ────────────────────────────────────────────
+    // Fire-and-forget — a failure here must not block the join response.
+    ;(async () => {
+      try {
+        // Find the OWNER of this clinic
+        const { data: ownerRow } = await admin
+          .from('clinic_memberships')
+          .select('user_id')
+          .eq('clinic_id', clinic.id)
+          .eq('role', 'OWNER')
+          .eq('status', 'ACTIVE')
+          .limit(1)
+          .maybeSingle()
+
+        if (ownerRow?.user_id && ownerRow.user_id !== user.id) {
+          const joinerName = user.phone || user.email || 'شخص جديد'
+          const roleLabel  = membershipRole === 'DOCTOR' ? 'طبيب' : 'مساعد'
+          await admin
+            .from('notifications')
+            .insert({
+              recipient_id:   ownerRow.user_id,
+              recipient_role: 'doctor',
+              type:           'invite_accepted',
+              title:          `${roleLabel} جديد انضم للعيادة`,
+              body:           `${joinerName} انضم إلى ${clinic.name} كـ${roleLabel}.`,
+              clinic_id:      clinic.id,
+              read:           false,
+            })
+        }
+      } catch {
+        // Notification failure is non-fatal
+      }
+    })()
+    // ─────────────────────────────────────────────────────────────────────────
 
     // Determine redirect path
     const redirectPath = user.role === 'doctor' ? '/doctor/dashboard' : '/frontdesk/dashboard'

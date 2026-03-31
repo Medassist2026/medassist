@@ -139,9 +139,9 @@ export default function StaffManagementPage() {
 
   async function loadInviteCode() {
     try {
-      const res = await fetch('/api/clinic/invite')
+      const res = await fetch('/api/clinic/invite-code')
       const data = await res.json()
-      if (data.code) setInviteCode(data.code)
+      if (data.inviteCode) setInviteCode(data.inviteCode)
     } catch { /* ignore */ }
   }
 
@@ -177,15 +177,19 @@ export default function StaffManagementPage() {
 
   async function removeMember(userId: string) {
     try {
-      await fetch('/api/clinic/staff', {
+      const res = await fetch('/api/clinic/membership', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ memberUserId: userId }),
+        body: JSON.stringify({ userId }),
       })
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error || 'فشل في إزالة العضو')
+      }
       setMemberToRemove(null)
       loadStaff()
-    } catch {
-      setError('فشل في إزالة العضو')
+    } catch (err: any) {
+      setError(err.message || 'فشل في إزالة العضو')
     }
   }
 

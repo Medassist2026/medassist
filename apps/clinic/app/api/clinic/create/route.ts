@@ -31,7 +31,8 @@ export async function POST(request: Request) {
     return NextResponse.json({
       success: true,
       clinicId: result.clinicId,
-      clinicUniqueId: result.clinicUniqueId
+      clinicUniqueId: result.clinicUniqueId,
+      inviteCode: result.inviteCode,
     })
   } catch (error: any) {
     return toApiErrorResponse(error, 'Failed to create clinic')
