@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { ar } from '@shared/lib/i18n/ar'
 import { AssistantManager } from '@ui-clinic/components/doctor/AssistantManager'
+import { Pencil, X, Check } from 'lucide-react'
 
 const SPECIALTY_AR: Record<string, string> = {
   'general': 'طب عام',
@@ -61,6 +62,13 @@ export default function ClinicSettingsPage() {
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
+  // Edit clinic info state
+  const [editingClinic, setEditingClinic] = useState(false)
+  const [editName,    setEditName]    = useState('')
+  const [editAddress, setEditAddress] = useState('')
+  const [editSaving,  setEditSaving]  = useState(false)
+  const [editError,   setEditError]   = useState('')
+
   useEffect(() => {
     loadClinicData()
   }, [])
@@ -92,6 +100,43 @@ export default function ClinicSettingsPage() {
       setError(err.message)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const startEditClinic = () => {
+    if (!clinic) return
+    setEditName(clinic.clinicName)
+    setEditAddress('')   // not returned by settings API yet — leave blank for user to fill
+    setEditError('')
+    setEditingClinic(true)
+  }
+
+  const saveEditClinic = async () => {
+    if (!editName.trim() || editName.trim().length < 2) {
+      setEditError('الاسم لازم يكون على الأقل حرفين')
+      return
+    }
+    setEditSaving(true)
+    setEditError('')
+    try {
+      const body: Record<string, string> = { name: editName.trim() }
+      if (editAddress.trim().length >= 5) body.address = editAddress.trim()
+
+      const res = await fetch('/api/clinic/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'فشل الحفظ')
+
+      // Update local state so the header reflects the new name immediately
+      setClinic(prev => prev ? { ...prev, clinicName: editName.trim() } : prev)
+      setEditingClinic(false)
+    } catch (err: any) {
+      setEditError(err.message || 'فشل الحفظ')
+    } finally {
+      setEditSaving(false)
     }
   }
 
@@ -217,12 +262,65 @@ export default function ClinicSettingsPage() {
               </div>
             )}
           </div>
-          {isOwner && (
-            <span className="flex-shrink-0 px-2 py-0.5 bg-[#DCFCE7] text-[#16A34A] font-cairo font-semibold text-[11px] rounded-full">
-              مالك
-            </span>
-          )}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {isOwner && (
+              <span className="px-2 py-0.5 bg-[#DCFCE7] text-[#16A34A] font-cairo font-semibold text-[11px] rounded-full">
+                مالك
+              </span>
+            )}
+            {isOwner && !editingClinic && (
+              <button
+                onClick={startEditClinic}
+                className="w-7 h-7 rounded-full hover:bg-[#F3F4F6] flex items-center justify-center transition-colors"
+                title="تعديل بيانات العيادة"
+              >
+                <Pencil className="w-3.5 h-3.5 text-[#6B7280]" />
+              </button>
+            )}
+          </div>
         </div>
+
+        {/* Inline edit form — owner only */}
+        {editingClinic && (
+          <div className="mt-3 space-y-2">
+            <input
+              type="text"
+              value={editName}
+              onChange={e => { setEditName(e.target.value); setEditError('') }}
+              placeholder="اسم العيادة"
+              className="w-full h-[40px] px-3 rounded-[8px] border-[0.8px] border-[#E5E7EB] font-cairo text-[13px] text-[#030712] focus:outline-none focus:border-[#16A34A] focus:ring-1 focus:ring-[#16A34A] text-right"
+            />
+            <input
+              type="text"
+              value={editAddress}
+              onChange={e => { setEditAddress(e.target.value); setEditError('') }}
+              placeholder="العنوان (يظهر على الروشتة) — اتركه فارغاً للإبقاء على الحالي"
+              className="w-full h-[40px] px-3 rounded-[8px] border-[0.8px] border-[#E5E7EB] font-cairo text-[13px] text-[#030712] focus:outline-none focus:border-[#16A34A] focus:ring-1 focus:ring-[#16A34A] text-right"
+            />
+            {editError && (
+              <p className="font-cairo text-[11px] text-[#DC2626]">{editError}</p>
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={saveEditClinic}
+                disabled={editSaving}
+                className="flex items-center gap-1.5 px-3 h-[36px] bg-[#16A34A] hover:bg-[#15803D] disabled:opacity-50 text-white font-cairo text-[12px] font-semibold rounded-[8px] transition-colors"
+              >
+                {editSaving
+                  ? <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  : <><Check className="w-3.5 h-3.5" /> حفظ</>}
+              </button>
+              <button
+                onClick={() => setEditingClinic(false)}
+                disabled={editSaving}
+                className="flex items-center gap-1.5 px-3 h-[36px] bg-[#F3F4F6] hover:bg-[#E5E7EB] text-[#4B5563] font-cairo text-[12px] font-medium rounded-[8px] transition-colors"
+              >
+                <X className="w-3.5 h-3.5" /> إلغاء
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="mt-3 flex items-center gap-4 text-sm text-gray-600">
           <span>الأطباء: {clinic.doctors.length}</span>
           <span>المساعدين: {clinic.staff.length}</span>

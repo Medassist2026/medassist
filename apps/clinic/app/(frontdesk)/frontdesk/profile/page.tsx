@@ -18,6 +18,7 @@ import {
   Bell,
   ChevronLeft,
   RefreshCw,
+  LogIn,
 } from 'lucide-react'
 
 // ============================================================================
@@ -87,6 +88,16 @@ export default function ProfilePage() {
   // Clinic switch dialog
   const [switchTarget, setSwitchTarget] = useState<MembershipInfo | null>(null)
   const [switching, setSwitching] = useState(false)
+
+  // Join clinic with invite code
+  const [showJoinModal, setShowJoinModal] = useState(false)
+  const [joinCode,      setJoinCode]      = useState('')
+  const [joining,       setJoining]       = useState(false)
+  const [joinError,     setJoinError]     = useState('')
+
+  // Leave clinic
+  const [leaveTarget, setLeaveTarget] = useState<MembershipInfo | null>(null)
+  const [leaving,     setLeaving]     = useState(false)
 
   // Invite processing
   const [processingInvite, setProcessingInvite] = useState<string | null>(null)
@@ -189,27 +200,69 @@ export default function ProfilePage() {
     if (!switchTarget) return
     setSwitching(true)
     try {
-      const res = await fetch('/api/clinic/join', {
+      const res = await fetch('/api/clinic/switch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clinicUniqueId: switchTarget.clinic?.uniqueId }),
+        body: JSON.stringify({ clinicId: switchTarget.clinicId }),
       })
-
       const data = await res.json()
-      if (!res.ok && !data.error?.includes('already a member')) {
-        throw new Error(data.error || 'فشل التبديل')
-      }
+      if (!res.ok) throw new Error(data.error || 'فشل التبديل')
 
       showToast(`تم التبديل إلى ${switchTarget.clinic?.name || 'العيادة'} ✓`, 'success')
       setSwitchTarget(null)
-
-      // Reload to apply new clinic context
-      setTimeout(() => {
-        window.location.href = '/frontdesk/dashboard'
-      }, 800)
+      setTimeout(() => { window.location.href = '/frontdesk/dashboard' }, 800)
     } catch (err: any) {
       showToast(err.message || 'فشل التبديل', 'error')
       setSwitching(false)
+    }
+  }
+
+  // ─── JOIN CLINIC ───
+  const handleJoinClinic = async () => {
+    if (!joinCode.trim()) { setJoinError('أدخل رمز الدعوة'); return }
+    setJoining(true)
+    setJoinError('')
+    try {
+      const res = await fetch('/api/clinic/join', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ inviteCode: joinCode.trim() }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setJoinError(data.error || 'رمز الدعوة غير صحيح'); return }
+
+      showToast(`تم الانضمام إلى ${data.clinicName} ✓`, 'success')
+      setShowJoinModal(false)
+      setJoinCode('')
+      await fetchProfile()
+      setTimeout(() => { window.location.href = '/frontdesk/dashboard' }, 800)
+    } catch {
+      setJoinError('حدث خطأ. حاول مرة أخرى')
+    } finally {
+      setJoining(false)
+    }
+  }
+
+  // ─── LEAVE CLINIC ───
+  const handleLeaveClinic = async () => {
+    if (!leaveTarget) return
+    setLeaving(true)
+    try {
+      const res = await fetch('/api/clinic/leave', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clinicId: leaveTarget.clinicId }),
+      })
+      const data = await res.json()
+      if (!res.ok) { showToast(data.error || 'فشل المغادرة', 'error'); return }
+
+      showToast('تمت المغادرة بنجاح', 'success')
+      setLeaveTarget(null)
+      await fetchProfile()
+    } catch {
+      showToast('حدث خطأ. حاول مرة أخرى', 'error')
+    } finally {
+      setLeaving(false)
     }
   }
 
@@ -516,19 +569,27 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          {/* ─── ASSOCIATED CLINICS (with switch interaction) ─── */}
+          {/* ─── ASSOCIATED CLINICS ─── */}
           <div>
-            <h3 className="text-[13px] font-bold text-[#4B5563] mb-2">العيادات المرتبطة</h3>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-[13px] font-bold text-[#4B5563]">العيادات المرتبطة</h3>
+              <button
+                onClick={() => { setShowJoinModal(true); setJoinCode(''); setJoinError('') }}
+                className="flex items-center gap-1 text-[12px] font-semibold text-[#2563EB] hover:text-[#1D4ED8] transition-colors"
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                انضم بكود
+              </button>
+            </div>
 
             {activeMemberships.length === 0 ? (
-              /* Empty state */
               <div className="border-[0.8px] border-dashed border-[#D1D5DB] rounded-xl p-5 flex flex-col items-center gap-2.5">
                 <Building2 className="w-8 h-8 text-[#D1D5DB]" />
                 <p className="text-[13px] text-[#9CA3AF] text-center leading-relaxed">
                   لم يتم الانضمام لأي عيادة بعد
                 </p>
                 <p className="text-[12px] text-[#D1D5DB] text-center">
-                  اطلب من الدكتور إرسال دعوة لك عبر رقم الهاتف
+                  اطلب رمز الدعوة من مدير العيادة واضغط «انضم بكود»
                 </p>
               </div>
             ) : (
@@ -536,14 +597,9 @@ export default function ProfilePage() {
                 {activeMemberships.map((membership) => {
                   const isCurrent = membership.clinicId === currentClinicId
                   return (
-                    <button
+                    <div
                       key={membership.id}
-                      onClick={() => {
-                        if (!isCurrent && activeMemberships.length > 1) {
-                          setSwitchTarget(membership)
-                        }
-                      }}
-                      className={`w-full rounded-xl p-3.5 flex items-center gap-3 text-right transition-all active:scale-[0.98] ${
+                      className={`rounded-xl p-3.5 flex items-center gap-3 text-right ${
                         isCurrent
                           ? 'bg-[#F0FDF4] border-[1.5px] border-[#16A34A]/40'
                           : 'bg-white border-[0.8px] border-[#E5E7EB]'
@@ -559,17 +615,31 @@ export default function ProfilePage() {
                           {membership.clinic?.name || 'عيادة'}
                         </p>
                         <p className="text-[12px] text-[#6B7280] truncate">
-                          {getRoleLabel(membership.role)} · {membership.clinic?.uniqueId}
+                          {getRoleLabel(membership.role)}
                         </p>
                       </div>
-                      {isCurrent ? (
-                        <span className="text-[11px] font-bold text-[#16A34A] bg-[#16A34A]/10 px-2 py-0.5 rounded-full flex-shrink-0">
-                          الحالية
-                        </span>
-                      ) : (
-                        <ChevronLeft className="w-4 h-4 text-[#D1D5DB] flex-shrink-0" />
-                      )}
-                    </button>
+                      <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                        {isCurrent ? (
+                          <span className="text-[11px] font-bold text-[#16A34A] bg-[#16A34A]/10 px-2 py-0.5 rounded-full">
+                            الحالية
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => setSwitchTarget(membership)}
+                            className="text-[11px] font-semibold text-[#16A34A] bg-[#F0FDF4] hover:bg-[#DCFCE7] px-2 py-0.5 rounded-[6px] transition-colors"
+                          >
+                            تبديل
+                          </button>
+                        )}
+                        <button
+                          onClick={() => setLeaveTarget(membership)}
+                          className="text-[11px] text-[#EF4444] hover:text-[#DC2626] flex items-center gap-0.5 px-1 py-0.5 rounded hover:bg-[#FEF2F2] transition-colors"
+                        >
+                          <LogOut className="w-3 h-3" />
+                          مغادرة
+                        </button>
+                      </div>
+                    </div>
                   )
                 })}
               </div>
@@ -717,6 +787,106 @@ export default function ProfilePage() {
                 ) : (
                   'تبديل'
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════ */}
+      {/* JOIN CLINIC MODAL                                   */}
+      {/* ═══════════════════════════════════════════════════ */}
+      {showJoinModal && (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center px-4"
+          onClick={() => !joining && setShowJoinModal(false)}
+        >
+          <div
+            className="bg-white rounded-2xl p-5 w-full max-w-[340px] shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+            dir="rtl"
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-[15px] font-bold text-[#030712]">الانضمام لعيادة</h3>
+              <button onClick={() => setShowJoinModal(false)} disabled={joining}
+                className="w-7 h-7 rounded-full hover:bg-[#F3F4F6] flex items-center justify-center">
+                <X className="w-4 h-4 text-[#6B7280]" />
+              </button>
+            </div>
+            <p className="text-[12px] text-[#6B7280] mb-3">
+              اطلب رمز الدعوة من مدير العيادة وأدخله أدناه.
+            </p>
+            <input
+              type="text"
+              value={joinCode}
+              onChange={(e) => { setJoinCode(e.target.value.toUpperCase()); setJoinError('') }}
+              placeholder="مثال: ABCD-EF"
+              maxLength={7}
+              autoFocus
+              onKeyDown={(e) => e.key === 'Enter' && handleJoinClinic()}
+              className="w-full h-[52px] px-3 rounded-[10px] border-[0.8px] border-[#E5E7EB] font-mono text-[20px] font-bold text-[#030712] tracking-widest text-center placeholder:font-sans placeholder:text-[13px] placeholder:font-normal placeholder:tracking-normal focus:outline-none focus:border-[#2563EB] focus:ring-2 focus:ring-[#2563EB]/20"
+            />
+            {joinError && (
+              <p className="text-[11px] text-[#DC2626] mt-1.5">{joinError}</p>
+            )}
+            <div className="flex gap-3 mt-4">
+              <button
+                onClick={handleJoinClinic}
+                disabled={joining || !joinCode.trim()}
+                className="flex-1 h-11 rounded-xl bg-[#2563EB] text-white text-[14px] font-bold disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {joining ? <Loader2 className="w-4 h-4 animate-spin" /> : 'انضم'}
+              </button>
+              <button
+                onClick={() => setShowJoinModal(false)}
+                disabled={joining}
+                className="flex-1 h-11 rounded-xl border-[0.8px] border-[#E5E7EB] text-[14px] font-bold text-[#4B5563]"
+              >
+                إلغاء
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════ */}
+      {/* LEAVE CLINIC CONFIRM                                */}
+      {/* ═══════════════════════════════════════════════════ */}
+      {leaveTarget && (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center px-8"
+          onClick={() => !leaving && setLeaveTarget(null)}
+        >
+          <div
+            className="bg-white rounded-2xl p-6 w-full max-w-[310px] shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+            dir="rtl"
+          >
+            <div className="flex justify-center mb-4">
+              <div className="w-14 h-14 rounded-full bg-[#FEF2F2] flex items-center justify-center">
+                <LogOut className="w-6 h-6 text-[#EF4444]" />
+              </div>
+            </div>
+            <h3 className="text-[16px] font-bold text-[#030712] text-center mb-1.5">مغادرة العيادة؟</h3>
+            <p className="text-[13px] text-[#6B7280] text-center mb-5 leading-relaxed">
+              هل تريد مغادرة{' '}
+              <span className="font-bold text-[#030712]">{leaveTarget.clinic?.name}</span>
+              ؟ يمكنك الانضمام مجدداً برمز الدعوة.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setLeaveTarget(null)}
+                disabled={leaving}
+                className="flex-1 h-11 rounded-xl border-[0.8px] border-[#E5E7EB] text-[14px] font-bold text-[#4B5563]"
+              >
+                إلغاء
+              </button>
+              <button
+                onClick={handleLeaveClinic}
+                disabled={leaving}
+                className="flex-1 h-11 rounded-xl bg-[#EF4444] text-white text-[14px] font-bold flex items-center justify-center gap-2"
+              >
+                {leaving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'مغادرة'}
               </button>
             </div>
           </div>

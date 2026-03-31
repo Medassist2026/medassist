@@ -95,3 +95,62 @@ export async function GET() {
     return toApiErrorResponse(error, 'Failed to fetch clinic settings')
   }
 }
+
+// ============================================================================
+// PATCH /api/clinic/settings — Update clinic name and/or address (OWNER only)
+// ============================================================================
+
+export async function PATCH(request: Request) {
+  try {
+    const user = await requireApiRole('doctor')
+    const context = await getClinicContext(user.id, 'doctor')
+
+    if (!context) {
+      return NextResponse.json({ error: 'No clinic found' }, { status: 404 })
+    }
+
+    const role = await getClinicRole(user.id, context.clinicId)
+    if (role !== 'OWNER') {
+      return NextResponse.json(
+        { error: 'Only the clinic owner can edit clinic details' },
+        { status: 403 }
+      )
+    }
+
+    const body = await request.json()
+    const { name, address } = body
+
+    if (name !== undefined && (!name || name.trim().length < 2)) {
+      return NextResponse.json(
+        { error: 'اسم العيادة لازم يكون على الأقل حرفين' },
+        { status: 400 }
+      )
+    }
+    if (address !== undefined && (!address || address.trim().length < 5)) {
+      return NextResponse.json(
+        { error: 'العنوان لازم يكون على الأقل ٥ أحرف' },
+        { status: 400 }
+      )
+    }
+
+    const updates: Record<string, string> = {}
+    if (name)    updates.name    = name.trim()
+    if (address) updates.address = address.trim()
+
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json({ error: 'No fields to update' }, { status: 400 })
+    }
+
+    const admin = createAdminClient('clinic-settings-patch')
+    const { error: updateError } = await admin
+      .from('clinics')
+      .update(updates)
+      .eq('id', context.clinicId)
+
+    if (updateError) throw new Error(updateError.message)
+
+    return NextResponse.json({ success: true, ...updates })
+  } catch (error) {
+    return toApiErrorResponse(error, 'Failed to update clinic settings')
+  }
+}

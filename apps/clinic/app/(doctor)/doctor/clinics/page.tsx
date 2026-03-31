@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { ChevronRight, Plus, Building2, Users, Clock, Check, X, LogIn } from 'lucide-react'
+import { ChevronRight, Plus, Building2, Users, Clock, Check, X, LogIn, LogOut } from 'lucide-react'
 
 // ============================================================================
 // TYPES
@@ -297,20 +297,21 @@ function JoinClinicModal({
 function ClinicCard({
   clinic,
   onSwitch,
+  onLeave,
 }: {
   clinic: ClinicData
   onSwitch: (clinicId: string) => void
+  onLeave:  (clinic: ClinicData) => void
 }) {
-  const roleLabel = clinic.role === 'OWNER' || clinic.role === 'owner' ? 'مالك العيادة'
-    : clinic.role === 'DOCTOR' || clinic.role === 'doctor' ? 'طبيب'
+  const isOwner = clinic.role === 'OWNER' || clinic.role === 'owner'
+  const roleLabel = isOwner ? 'مالك العيادة'
+    : (clinic.role === 'DOCTOR' || clinic.role === 'doctor') ? 'طبيب'
     : 'مساعد'
 
   return (
-    <div
-      className={`bg-white rounded-[12px] border-[0.8px] p-4 transition-colors ${
-        clinic.isActive ? 'border-[#16A34A] bg-[#FAFFF9]' : 'border-[#E5E7EB]'
-      }`}
-    >
+    <div className={`bg-white rounded-[12px] border-[0.8px] p-4 transition-colors ${
+      clinic.isActive ? 'border-[#16A34A] bg-[#FAFFF9]' : 'border-[#E5E7EB]'
+    }`}>
       <div className="flex items-start gap-3">
         <div className={`w-11 h-11 rounded-[10px] flex items-center justify-center flex-shrink-0 ${
           clinic.isActive ? 'bg-[#DCFCE7]' : 'bg-[#F3F4F6]'
@@ -329,9 +330,7 @@ function ClinicCard({
               </span>
             )}
           </div>
-
           <p className="font-cairo text-[12px] text-[#9CA3AF] mt-0.5">{roleLabel}</p>
-
           <div className="flex items-center gap-4 mt-2">
             {clinic.doctorCount !== undefined && (
               <div className="flex items-center gap-1">
@@ -348,16 +347,87 @@ function ClinicCard({
           </div>
         </div>
 
-        {!clinic.isActive && (
-          <button
-            onClick={() => onSwitch(clinic.id)}
-            className="font-cairo text-[12px] font-semibold text-[#16A34A] bg-[#F0FDF4] hover:bg-[#DCFCE7] px-3 py-1.5 rounded-[8px] transition-colors flex-shrink-0"
-          >
-            تبديل
-          </button>
-        )}
+        <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+          {!clinic.isActive && (
+            <button
+              onClick={() => onSwitch(clinic.id)}
+              className="font-cairo text-[12px] font-semibold text-[#16A34A] bg-[#F0FDF4] hover:bg-[#DCFCE7] px-3 py-1.5 rounded-[8px] transition-colors"
+            >
+              تبديل
+            </button>
+          )}
+          {/* Leave is only available for non-owners */}
+          {!isOwner && (
+            <button
+              onClick={() => onLeave(clinic)}
+              className="font-cairo text-[11px] text-[#EF4444] hover:text-[#DC2626] flex items-center gap-1 px-2 py-1 rounded-[6px] hover:bg-[#FEF2F2] transition-colors"
+            >
+              <LogOut className="w-3 h-3" />
+              مغادرة
+            </button>
+          )}
+        </div>
       </div>
     </div>
+  )
+}
+
+// ============================================================================
+// LEAVE CONFIRM DIALOG
+// ============================================================================
+
+function LeaveConfirmDialog({
+  clinic,
+  onConfirm,
+  onCancel,
+  leaving,
+}: {
+  clinic: ClinicData
+  onConfirm: () => void
+  onCancel:  () => void
+  leaving:   boolean
+}) {
+  return (
+    <>
+      <div className="fixed inset-0 bg-black/40 z-50" onClick={!leaving ? onCancel : undefined} />
+      <div className="fixed inset-x-4 top-1/2 -translate-y-1/2 z-50 max-w-sm mx-auto">
+        <div className="bg-white rounded-[16px] shadow-xl p-5" dir="rtl">
+          <div className="w-12 h-12 rounded-full bg-[#FEF2F2] flex items-center justify-center mx-auto mb-3">
+            <LogOut className="w-6 h-6 text-[#DC2626]" />
+          </div>
+          <h3 className="font-cairo text-[16px] font-bold text-[#030712] text-center mb-1">
+            مغادرة العيادة
+          </h3>
+          <p className="font-cairo text-[13px] text-[#6B7280] text-center mb-1">
+            هل أنت متأكد أنك تريد مغادرة
+          </p>
+          <p className="font-cairo text-[14px] font-bold text-[#030712] text-center mb-4">
+            {clinic.name}؟
+          </p>
+          <p className="font-cairo text-[12px] text-[#9CA3AF] text-center mb-4">
+            يمكنك الانضمام مجدداً برمز الدعوة إذا احتجت.
+          </p>
+          <div className="flex gap-3">
+            <button
+              onClick={onConfirm}
+              disabled={leaving}
+              className="flex-1 h-[44px] bg-[#EF4444] hover:bg-[#DC2626] disabled:opacity-50 text-white font-cairo text-[14px] font-semibold rounded-[10px] transition-colors flex items-center justify-center"
+            >
+              {leaving
+                ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                : 'نعم، غادر'}
+            </button>
+            <button
+              onClick={onCancel}
+              disabled={leaving}
+              className="flex-1 h-[44px] bg-[#F3F4F6] hover:bg-[#E5E7EB] disabled:opacity-40 text-[#4B5563] font-cairo text-[14px] font-medium rounded-[10px] transition-colors"
+            >
+              إلغاء
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
   )
 }
 
@@ -372,6 +442,8 @@ export default function ClinicsPage() {
   const [showAddModal,  setShowAddModal]  = useState(false)
   const [showJoinModal, setShowJoinModal] = useState(false)
   const [switching, setSwitching] = useState(false)
+  const [leaveTarget, setLeaveTarget] = useState<ClinicData | null>(null)
+  const [leaving,     setLeaving]     = useState(false)
 
   useEffect(() => {
     async function load() {
@@ -420,6 +492,29 @@ export default function ClinicsPage() {
     setClinics(prev => [...prev, newClinic])
   }
 
+  const handleLeaveClinic = async () => {
+    if (!leaveTarget) return
+    setLeaving(true)
+    try {
+      const res = await fetch('/api/clinic/leave', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clinicId: leaveTarget.id }),
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        alert(data.error || 'فشل في مغادرة العيادة')
+        return
+      }
+      setClinics(prev => prev.filter(c => c.id !== leaveTarget.id))
+      setLeaveTarget(null)
+    } catch {
+      alert('حدث خطأ. حاول مرة أخرى')
+    } finally {
+      setLeaving(false)
+    }
+  }
+
   const handleClinicJoined = (newClinic: ClinicData) => {
     // Avoid duplicates — only add if not already in the list
     setClinics(prev =>
@@ -463,7 +558,12 @@ export default function ClinicsPage() {
           ) : (
             <div className="space-y-3">
               {clinics.map((clinic) => (
-                <ClinicCard key={clinic.id} clinic={clinic} onSwitch={handleSwitch} />
+                <ClinicCard
+                  key={clinic.id}
+                  clinic={clinic}
+                  onSwitch={handleSwitch}
+                  onLeave={setLeaveTarget}
+                />
               ))}
             </div>
           )}
@@ -488,6 +588,16 @@ export default function ClinicsPage() {
           </div>
         </div>
       </div>
+
+      {/* Leave confirm dialog */}
+      {leaveTarget && (
+        <LeaveConfirmDialog
+          clinic={leaveTarget}
+          onConfirm={handleLeaveClinic}
+          onCancel={() => setLeaveTarget(null)}
+          leaving={leaving}
+        />
+      )}
 
       {/* Modals */}
       <AddClinicModal
