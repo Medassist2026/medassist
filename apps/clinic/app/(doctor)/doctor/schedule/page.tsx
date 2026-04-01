@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { Suspense } from 'react'
 
 // ============================================================================
 // TYPES
@@ -32,10 +33,13 @@ interface Appointment {
   patient_id?: string
   patient_name: string
   patient_phone?: string
+  patient_age?: number
+  patient_sex?: string
   start_time: string
   duration_minutes: number
   status: 'scheduled' | 'confirmed' | 'completed' | 'cancelled' | 'no_show'
   type?: string
+  description?: string
 }
 
 // ============================================================================
@@ -538,9 +542,11 @@ interface NewAppointmentModalProps {
   onClose: () => void
   onCreated: () => void
   defaultDate?: Date
+  defaultPatientId?: string
+  defaultType?: string
 }
 
-function NewAppointmentModal({ onClose, onCreated, defaultDate }: NewAppointmentModalProps) {
+function NewAppointmentModal({ onClose, onCreated, defaultDate, defaultPatientId, defaultType }: NewAppointmentModalProps) {
   const [patientSearch, setPatientSearch] = useState('')
   const [patients, setPatients] = useState<any[]>([])
   const [selectedPatient, setSelectedPatient] = useState<any>(null)
@@ -548,11 +554,24 @@ function NewAppointmentModal({ onClose, onCreated, defaultDate }: NewAppointment
   const [date, setDate] = useState(defaultDate ? defaultDate.toISOString().split('T')[0] : new Date().toISOString().split('T')[0])
   const [time, setTime] = useState('16:00')
   const [duration, setDuration] = useState(15)
-  const [appointmentType, setAppointmentType] = useState('consultation')
+  const [appointmentType, setAppointmentType] = useState(defaultType || 'regular')
   const [notes, setNotes] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [modalError, setModalError] = useState<string | null>(null)
+  const [outsideHoursWarning, setOutsideHoursWarning] = useState(false)
   const searchTimeout = useRef<NodeJS.Timeout | null>(null)
+
+  // Auto-load default patient when coming from session end (follow-up booking)
+  useEffect(() => {
+    if (!defaultPatientId) return
+    fetch(`/api/doctor/patients/${defaultPatientId}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.patient) setSelectedPatient({ id: data.patient.id, full_name: data.patient.full_name || data.patient.name, phone: data.patient.phone })
+        else if (data?.id) setSelectedPatient(data)
+      })
+      .catch(() => {})
+  }, [defaultPatientId])
 
   const handlePatientSearch = (query: string) => {
     setPatientSearch(query)
@@ -589,10 +608,19 @@ function NewAppointmentModal({ onClose, onCreated, defaultDate }: NewAppointment
           durationMinutes: duration,
           appointmentType,
           notes: notes.trim() || undefined,
+          skipHoursCheck: outsideHoursWarning ? true : undefined,
         })
       })
       const data = await res.json()
-      if (!res.ok) { setModalError(data.error || 'فشل في إنشاء الموعد'); return }
+      if (!res.ok) {
+        if (data.outsideHours && !outsideHoursWarning) {
+          setOutsideHoursWarning(true)
+          setSubmitting(false)
+          return
+        }
+        setModalError(data.error || 'فشل في إنشاء الموعد')
+        return
+      }
       onCreated()
     } catch { setModalError('فشل في إنشاء الموعد') } finally { setSubmitting(false) }
   }
@@ -618,6 +646,15 @@ function NewAppointmentModal({ onClose, onCreated, defaultDate }: NewAppointment
         <div className="p-6 space-y-5">
           {modalError && (
             <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{modalError}</div>
+          )}
+          {outsideHoursWarning && !modalError && (
+            <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-lg text-sm flex items-start gap-2">
+              <span className="text-amber-500 mt-0.5">⚠️</span>
+              <div>
+                <p className="font-medium">الموعد خارج ساعات العمل</p>
+                <p className="text-amber-700 mt-0.5">هذا الموعد خارج ساعات العمل المعتادة. اضغط &quot;حجز الموعد&quot; مرة أخرى للتأكيد.</p>
+              </div>
+            </div>
           )}
           {/* Patient Search */}
           <div>
@@ -651,11 +688,11 @@ function NewAppointmentModal({ onClose, onCreated, defaultDate }: NewAppointment
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">التاريخ</label>
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} min={new Date().toISOString().split('T')[0]} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none" />
+              <input type="date" value={date} onChange={(e) => { setDate(e.target.value); setOutsideHoursWarning(false) }} min={new Date().toISOString().split('T')[0]} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none" />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">الوقت</label>
-              <select value={time} onChange={(e) => setTime(e.target.value)} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none">
+              <select value={time} onChange={(e) => { setTime(e.target.value); setOutsideHoursWarning(false) }} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none">
                 {timeOptions.map(t => <option key={t} value={t}>{formatTime(t)}</option>)}
               </select>
             </div>
@@ -676,10 +713,9 @@ function NewAppointmentModal({ onClose, onCreated, defaultDate }: NewAppointment
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">النوع</label>
               <select value={appointmentType} onChange={(e) => setAppointmentType(e.target.value)} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none">
-                <option value="consultation">كشف</option>
+                <option value="regular">كشف</option>
                 <option value="followup">متابعة</option>
-                <option value="procedure">إجراء</option>
-                <option value="emergency">طوارئ</option>
+                <option value="emergency">طارئ</option>
               </select>
             </div>
           </div>
@@ -692,9 +728,150 @@ function NewAppointmentModal({ onClose, onCreated, defaultDate }: NewAppointment
         <div className="p-6 border-t border-gray-100 flex justify-start gap-3 flex-row-reverse">
           <button onClick={onClose} className="px-5 py-2.5 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50" disabled={submitting}>إلغاء</button>
           <button onClick={handleSubmit} disabled={submitting || !selectedPatient} className="px-5 py-2.5 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 font-medium">
-            {submitting ? 'جاري الإنشاء...' : 'إنشاء موعد'}
+            {submitting ? 'جاري الحجز...' : outsideHoursWarning ? 'تأكيد الحجز رغم ذلك' : 'حجز الموعد'}
           </button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================================
+// APPOINTMENT DETAIL BOTTOM SHEET
+// ============================================================================
+
+function getTypeLabelAr(type?: string): string {
+  switch (type) {
+    case 'followup': return 'متابعة'
+    case 'emergency': return 'طوارئ'
+    default: return 'كشف'
+  }
+}
+
+function getTypeColorAr(type?: string): string {
+  switch (type) {
+    case 'emergency': return 'bg-red-50 text-red-700'
+    case 'followup': return 'bg-blue-50 text-blue-700'
+    default: return 'bg-[#F3F4F6] text-[#4B5563]'
+  }
+}
+
+interface AppointmentDetailSheetProps {
+  appointment: Appointment | null
+  onClose: () => void
+  onStartSession: (apt: Appointment) => void
+  onCancel: (apt: Appointment) => void
+  cancelling: boolean
+}
+
+function AppointmentDetailSheet({
+  appointment,
+  onClose,
+  onStartSession,
+  onCancel,
+  cancelling,
+}: AppointmentDetailSheetProps) {
+  if (!appointment) return null
+
+  const aptDate = new Date(appointment.start_time)
+  const dateStr = aptDate.toLocaleDateString('ar-EG', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+  const timeStr = aptDate.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })
+  const isActionable = appointment.status === 'scheduled' || appointment.status === 'confirmed'
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/40 flex items-end"
+      onClick={onClose}
+    >
+      <div
+        className="w-full bg-white rounded-t-2xl pt-4 pb-8 px-4 max-w-md mx-auto shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+        dir="rtl"
+      >
+        {/* Handle bar */}
+        <div className="w-10 h-1 bg-[#E5E7EB] rounded-full mx-auto mb-4" />
+
+        {/* Patient name + type badge */}
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="font-cairo text-[18px] font-bold text-[#030712] truncate flex-1 min-w-0">
+            {appointment.patient_name}
+          </h3>
+          <span className={`font-cairo text-[11px] font-bold px-2.5 py-1 rounded-full flex-shrink-0 mr-2 ${getTypeColorAr(appointment.type)}`}>
+            {getTypeLabelAr(appointment.type)}
+          </span>
+        </div>
+
+        {/* Patient meta */}
+        {(appointment.patient_age || appointment.patient_sex) && (
+          <p className="font-cairo text-[12px] text-[#6B7280] mb-3">
+            {[
+              appointment.patient_age ? `${appointment.patient_age} سنة` : null,
+              appointment.patient_sex === 'male' ? 'ذكر' : appointment.patient_sex === 'female' ? 'أنثى' : null,
+            ].filter(Boolean).join(' · ')}
+          </p>
+        )}
+
+        {/* Date + time */}
+        <div className="bg-[#F9FAFB] rounded-xl p-3 mb-3">
+          <p className="font-cairo text-[13px] font-semibold text-[#030712]">{dateStr}</p>
+          <p className="font-cairo text-[12px] text-[#6B7280] mt-0.5">
+            {timeStr} · مدة {appointment.duration_minutes} دقيقة
+          </p>
+        </div>
+
+        {/* Reason/notes */}
+        {appointment.description && (
+          <div className="bg-[#F9FAFB] rounded-xl p-3 mb-4">
+            <p className="font-cairo text-[11px] text-[#9CA3AF] mb-0.5">سبب الزيارة</p>
+            <p className="font-cairo text-[13px] text-[#4B5563]">{appointment.description}</p>
+          </div>
+        )}
+
+        {/* Actions */}
+        {isActionable ? (
+          <div className="flex gap-2 mt-2">
+            {/* Cancel */}
+            <button
+              onClick={() => onCancel(appointment)}
+              disabled={cancelling}
+              className="h-[50px] px-4 rounded-xl border-[0.8px] border-[#FCA5A5] bg-[#FEF2F2] font-cairo text-[13px] font-bold text-[#EF4444] flex items-center justify-center gap-1.5 disabled:opacity-40 active:scale-[0.97] transition-transform"
+            >
+              {cancelling ? (
+                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              )}
+              إلغاء الموعد
+            </button>
+            {/* Start session */}
+            <button
+              onClick={() => onStartSession(appointment)}
+              className="flex-1 h-[50px] rounded-xl bg-[#16A34A] text-white font-cairo text-[14px] font-bold flex items-center justify-center gap-2 active:scale-[0.97] transition-transform"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 3l14 9-14 9V3z" />
+              </svg>
+              بدء الجلسة
+            </button>
+          </div>
+        ) : (
+          <div className="text-center py-2">
+            <span className={`font-cairo text-[13px] font-bold px-3 py-1.5 rounded-full ${
+              appointment.status === 'cancelled'
+                ? 'bg-[#FEF2F2] text-[#EF4444]'
+                : appointment.status === 'completed'
+                ? 'bg-[#F0FDF4] text-[#16A34A]'
+                : 'bg-[#F3F4F6] text-[#6B7280]'
+            }`}>
+              {appointment.status === 'cancelled' ? 'ملغي' : appointment.status === 'completed' ? 'مكتمل' : appointment.status}
+            </span>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -704,8 +881,9 @@ function NewAppointmentModal({ onClose, onCreated, defaultDate }: NewAppointment
 // MAIN SCHEDULE PAGE
 // ============================================================================
 
-export default function SchedulePage() {
+function SchedulePageInner() {
   const router = useRouter()
+  const searchParams = useSearchParams()
 
   // State
   const [view, setView] = useState<'day' | 'week'>('week')
@@ -717,6 +895,18 @@ export default function SchedulePage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Appointment detail sheet
+  const [detailApt, setDetailApt] = useState<Appointment | null>(null)
+
+  // Deep-link: auto-open new appointment modal (from follow-up button at session end)
+  const autoOpenPatientId = searchParams.get('patientId') || undefined
+  const autoOpenType = searchParams.get('type') || undefined
+  useEffect(() => {
+    if (searchParams.get('autoOpen') === '1') {
+      setShowNewAppointment(true)
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  const [cancelling, setCancelling] = useState(false)
 
   // Calculate week dates
   const weekDates = useMemo(() => getWeekDates(selectedDate), [selectedDate])
@@ -792,13 +982,44 @@ export default function SchedulePage() {
     setView('day')
   }
 
-  // Handle appointment click
+  // Handle appointment click — open detail sheet
   const handleAppointmentClick = (apt: Appointment) => {
-    // Navigate to session with this patient
+    setDetailApt(apt)
+  }
+
+  // Start session from detail sheet
+  const handleStartSession = (apt: Appointment) => {
+    setDetailApt(null)
     if (apt.patient_id) {
       router.push(`/doctor/session?patientId=${apt.patient_id}&appointmentId=${apt.id}`)
     } else {
       router.push(`/doctor/session?appointmentId=${apt.id}`)
+    }
+  }
+
+  // Cancel appointment from detail sheet
+  const handleCancelAppointment = async (apt: Appointment) => {
+    setCancelling(true)
+    try {
+      const res = await fetch('/api/doctor/appointments', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ appointmentId: apt.id, status: 'cancelled' }),
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        setError(data.error || 'فشل إلغاء الموعد')
+        return
+      }
+      // Update local state immediately
+      setAppointments((prev) =>
+        prev.map((a) => (a.id === apt.id ? { ...a, status: 'cancelled' as const } : a))
+      )
+      setDetailApt(null)
+    } catch {
+      setError('فشل إلغاء الموعد')
+    } finally {
+      setCancelling(false)
     }
   }
 
@@ -857,7 +1078,15 @@ export default function SchedulePage() {
   }
 
   return (
-    <div className="space-y-6 max-w-md mx-auto px-4 py-4 md:max-w-full md:px-0 md:py-0" dir="rtl">
+    <div className="space-y-6 max-w-md mx-auto px-4 py-4 md:max-w-full md:px-0 md:py-0 relative" dir="rtl">
+      {/* Appointment detail bottom sheet */}
+      <AppointmentDetailSheet
+        appointment={detailApt}
+        onClose={() => setDetailApt(null)}
+        onStartSession={handleStartSession}
+        onCancel={handleCancelAppointment}
+        cancelling={cancelling}
+      />
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 flex-col-reverse">
         <div>
@@ -917,6 +1146,8 @@ export default function SchedulePage() {
             loadData()
           }}
           defaultDate={selectedDate}
+          defaultPatientId={autoOpenPatientId}
+          defaultType={autoOpenType}
         />
       )}
 
@@ -1002,5 +1233,17 @@ export default function SchedulePage() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function SchedulePage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center min-h-[400px]" dir="rtl">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" />
+      </div>
+    }>
+      <SchedulePageInner />
+    </Suspense>
   )
 }

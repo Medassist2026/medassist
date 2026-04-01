@@ -76,10 +76,9 @@ const DATE_CHIPS = (() => {
 })()
 
 const APPOINTMENT_TYPES: { value: AppointmentType; label: string }[] = [
-  { value: 'regular', label: 'كشف عادي' },
+  { value: 'regular', label: 'كشف' },
   { value: 'followup', label: 'متابعة' },
   { value: 'emergency', label: 'طوارئ' },
-  { value: 'consultation', label: 'استشارة' },
 ]
 
 // ============================================================================
@@ -117,6 +116,10 @@ export default function NewAppointmentPage() {
   const [slotsLoading, setSlotsLoading] = useState(false)
   const [submitting, setSubmitting] = useState<'save' | 'save-start' | null>(null)
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
+
+  // ─── Free-form time entry (when no slots available) ───
+  const [customTime, setCustomTime] = useState('') // HH:MM format e.g. "17:30"
+  const [outsideHoursWarning, setOutsideHoursWarning] = useState(false)
 
   // ─── Back confirmation ───
   const [showBackConfirm, setShowBackConfirm] = useState(false)
@@ -187,6 +190,8 @@ export default function NewAppointmentPage() {
     }
     setSlotsLoading(true)
     setSelectedSlot('')
+    setCustomTime('')
+    setOutsideHoursWarning(false)
     fetch(`/api/frontdesk/slots?doctorId=${selectedDoctorId}&date=${selectedDate}`)
       .then((r) => r.json())
       .then((data) => setSlots(data.slots || []))
@@ -236,12 +241,17 @@ export default function NewAppointmentPage() {
   // VALIDATION
   // ============================================================================
 
+  // Resolve the effective start time (from grid slot or free-form)
+  const effectiveStartTime = selectedSlot || (customTime && selectedDate
+    ? new Date(`${selectedDate}T${customTime}:00`).toISOString()
+    : '')
+
   const validate = (): boolean => {
     const errors: Record<string, string> = {}
     if (!selectedPatient) errors.patient = 'يجب اختيار المريض'
     if (!selectedDoctorId) errors.doctor = 'يجب اختيار الطبيب'
     if (!selectedDate) errors.date = 'التاريخ مطلوب'
-    if (!selectedSlot) errors.time = 'الوقت مطلوب'
+    if (!effectiveStartTime) errors.time = 'الوقت مطلوب'
     setFieldErrors(errors)
     return Object.keys(errors).length === 0
   }
@@ -262,15 +272,25 @@ export default function NewAppointmentPage() {
         body: JSON.stringify({
           patientId: selectedPatient!.id,
           doctorId: selectedDoctorId,
-          startTime: selectedSlot,
+          startTime: effectiveStartTime,
           durationMinutes: 30,
           appointmentType,
           notes: notes.trim() || undefined,
+          // On retry after outside-hours warning, bypass hours check
+          skipHoursCheck: outsideHoursWarning ? true : undefined,
         }),
       })
 
       const createData = await createRes.json()
-      if (!createRes.ok) throw new Error(createData.error || 'فشل حجز الموعد')
+      if (!createRes.ok) {
+        // First time outside-hours error: show warning, let user confirm and retry
+        if (createData.outsideHours && !outsideHoursWarning) {
+          setOutsideHoursWarning(true)
+          setSubmitting(null)
+          return
+        }
+        throw new Error(createData.error || 'فشل حجز الموعد')
+      }
 
       // If "Save & Start Session" — also check in
       if (mode === 'save-start' && createData.appointment?.id) {
@@ -295,7 +315,7 @@ export default function NewAppointmentPage() {
 
       // Success toast with appointment details
       const patientName = selectedPatient!.full_name || 'المريض'
-      const time = formatTime(selectedSlot)
+      const time = effectiveStartTime ? formatTime(effectiveStartTime) : ''
       const successMsg =
         mode === 'save-start'
           ? `تم حفظ الموعد وبدء الجلسة ✓\n${patientName} · ${time}`
@@ -332,7 +352,7 @@ export default function NewAppointmentPage() {
   // COMPUTED
   // ============================================================================
 
-  const isFormReady = !!(selectedPatient && selectedDoctorId && selectedDate && selectedSlot)
+  const isFormReady = !!(selectedPatient && selectedDoctorId && selectedDate && effectiveStartTime)
   const availableSlots = slots.filter((s) => !s.is_booked)
 
   // ============================================================================
@@ -612,11 +632,8 @@ export default function NewAppointmentPage() {
               <div className="text-center py-6 bg-[#F3F4F6] rounded-xl">
                 <p className="text-[13px] text-[#9CA3AF]">اختر الطبيب أولاً لعرض المواعيد المتاحة</p>
               </div>
-            ) : slots.length === 0 ? (
-              <div className="text-center py-6 bg-[#F3F4F6] rounded-xl">
-                <p className="text-[13px] text-[#9CA3AF]">لا توجد مواعيد متاحة في هذا اليوم</p>
-              </div>
-            ) : (
+            ) : availableSlots.length > 0 ? (
+              /* Grid of available slots */
               <div className="grid grid-cols-3 gap-2">
                 {slots.map((slot) => {
                   const isBooked = slot.is_booked
@@ -627,6 +644,8 @@ export default function NewAppointmentPage() {
                       onClick={() => {
                         if (!isBooked) {
                           setSelectedSlot(slot.start_time)
+                          setCustomTime('')
+                          setOutsideHoursWarning(false)
                           setFieldErrors((prev) => ({ ...prev, time: '' }))
                         }
                       }}
@@ -643,6 +662,38 @@ export default function NewAppointmentPage() {
                     </button>
                   )
                 })}
+              </div>
+            ) : (
+              /* Free-form time input (no configured slots, or outside hours) */
+              <div>
+                <div className="bg-[#FFFBEB] border-[0.8px] border-[#D97706]/30 rounded-xl px-3 py-2.5 mb-2.5 flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-[#D97706] flex-shrink-0 mt-0.5" />
+                  <p className="font-cairo text-[12px] text-[#92400E] leading-relaxed">
+                    لم يتم تحديد ساعات عمل لهذا اليوم — يمكنك إدخال الوقت يدوياً
+                  </p>
+                </div>
+                <div className="relative">
+                  <input
+                    type="time"
+                    value={customTime}
+                    onChange={(e) => {
+                      const val = e.target.value
+                      setCustomTime(val)
+                      setSelectedSlot('')
+                      setOutsideHoursWarning(false)
+                      setFieldErrors((prev) => ({ ...prev, time: '' }))
+                    }}
+                    className={`w-full h-12 px-3.5 bg-[#F9FAFB] border-[0.8px] rounded-xl text-[15px] font-semibold text-[#030712] outline-none focus:border-[#16A34A] transition-colors ${
+                      fieldErrors.time ? 'border-[#EF4444]' : 'border-[#E5E7EB]'
+                    }`}
+                    dir="ltr"
+                  />
+                </div>
+                {outsideHoursWarning && (
+                  <p className="font-cairo text-[11px] text-[#D97706] mt-1 font-medium">
+                    ⚠ الوقت خارج ساعات العمل المحددة — سيتم حجز الموعد على أي حال
+                  </p>
+                )}
               </div>
             )}
           </div>

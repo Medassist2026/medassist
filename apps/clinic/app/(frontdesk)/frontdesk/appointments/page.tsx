@@ -28,6 +28,9 @@ type Appointment = SharedAppointment
 type StatusFilter = 'all' | 'scheduled' | 'cancelled'
 type PageState = 'loading' | 'loaded' | 'error' | 'empty'
 
+// appointmentId → queue number (set after successful check-in, persists until page refresh)
+type CheckedInMap = Record<string, number>
+
 // ============================================================================
 // HELPERS
 // ============================================================================
@@ -73,11 +76,16 @@ function formatTime(dateStr: string): string {
 
 function getTypeLabel(type: string): string {
   switch (type) {
-    case 'regular': return 'كشف'
-    case 'followup': return 'متابعة'
-    case 'emergency': return 'طوارئ'
-    case 'consultation': return 'استشارة'
-    default: return type
+    case 'regular':
+    case 'consultation':
+    case 'walkin':
+      return 'كشف'
+    case 'followup':
+      return 'متابعة'
+    case 'emergency':
+      return 'طوارئ'
+    default:
+      return 'كشف'
   }
 }
 
@@ -85,7 +93,6 @@ function getTypeColor(type: string): string {
   switch (type) {
     case 'emergency': return 'bg-red-50 text-red-700'
     case 'followup': return 'bg-blue-50 text-blue-700'
-    case 'consultation': return 'bg-purple-50 text-purple-700'
     default: return 'bg-[#F3F4F6] text-[#4B5563]'
   }
 }
@@ -108,15 +115,19 @@ function AppointmentCard({
   onCancel,
   onEdit,
   actionLoading,
+  queueNumber,
 }: {
   appointment: Appointment
   onCheckIn: (appt: Appointment) => void
   onCancel: (appt: Appointment) => void
   onEdit: (appt: Appointment) => void
   actionLoading: string | null
+  queueNumber?: number
 }) {
   const isCancelled = appointment.status === 'cancelled'
-  const isPending = appointment.status === 'scheduled'
+  // isPending: scheduled AND not yet checked into queue this session
+  const isPending = appointment.status === 'scheduled' && !queueNumber
+  const isInQueue = appointment.status === 'scheduled' && !!queueNumber
   const isLoading = actionLoading === appointment.id
   const statusBadge = getStatusBadge(appointment.status)
 
@@ -166,11 +177,21 @@ function AppointmentCard({
 
       {/* Row 3: Status + Actions */}
       <div className="flex items-center justify-between">
-        <span
-          className={`font-cairo text-[11px] font-bold px-2.5 py-1 rounded-full ${statusBadge.bg}`}
-        >
-          {statusBadge.label}
-        </span>
+        {/* Status badge — "في الطابور" overrides "قادم" after check-in */}
+        {isInQueue ? (
+          <span className="font-cairo text-[11px] font-bold px-2.5 py-1 rounded-full bg-[#F0FDF4] text-[#16A34A] flex items-center gap-1">
+            <span className="w-4 h-4 rounded-full bg-[#16A34A] text-white text-[9px] flex items-center justify-center font-black">
+              {queueNumber}
+            </span>
+            في الطابور
+          </span>
+        ) : (
+          <span
+            className={`font-cairo text-[11px] font-bold px-2.5 py-1 rounded-full ${statusBadge.bg}`}
+          >
+            {statusBadge.label}
+          </span>
+        )}
 
         {isPending && (
           <div className="flex items-center gap-1">
@@ -337,6 +358,8 @@ export default function AppointmentsPage() {
   const [cancelTarget, setCancelTarget] = useState<Appointment | null>(null)
   const [cancelLoading, setCancelLoading] = useState(false)
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
+  // Track which appointments have been checked into the queue this session
+  const [checkedInMap, setCheckedInMap] = useState<CheckedInMap>({})
 
   // Pull-to-refresh state
   const [refreshing, setRefreshing] = useState(false)
@@ -400,12 +423,18 @@ export default function AppointmentsPage() {
           appointmentId: appt.id,
         }),
       })
+      const data = await res.json()
       if (!res.ok) {
-        const data = await res.json()
         throw new Error(data.error || 'فشل تسجيل الوصول')
       }
-      showToast(`تم تسجيل وصول ${appt.patient.full_name || 'المريض'} ✓`, 'success')
-      await fetchAppointments(false)
+      // Record queue number for immediate UI feedback
+      const qNum = data.queueItem?.queue_number
+      if (qNum) {
+        setCheckedInMap((prev) => ({ ...prev, [appt.id]: qNum }))
+        showToast(`تم تسجيل وصول ${appt.patient.full_name || 'المريض'} — رقم ${qNum} ✓`, 'success')
+      } else {
+        showToast(`تم تسجيل وصول ${appt.patient.full_name || 'المريض'} ✓`, 'success')
+      }
     } catch (err: any) {
       showToast(err.message || 'فشل تسجيل الوصول', 'error')
     } finally {
@@ -613,6 +642,7 @@ export default function AppointmentsPage() {
                     onCancel={setCancelTarget}
                     onEdit={handleEdit}
                     actionLoading={actionLoading}
+                    queueNumber={checkedInMap[appt.id]}
                   />
                 ))}
               </div>

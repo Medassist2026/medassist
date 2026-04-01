@@ -215,7 +215,7 @@ export async function PATCH(request: NextRequest) {
 
     // Update appointment type
     if (appointmentType) {
-      const validTypes = ['regular', 'followup', 'emergency', 'consultation']
+      const validTypes = ['regular', 'followup', 'emergency']
       if (!validTypes.includes(appointmentType)) {
         return NextResponse.json(
           { error: 'نوع موعد غير صحيح' },

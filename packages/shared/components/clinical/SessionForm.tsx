@@ -1895,6 +1895,10 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
 
   // FIX 6: Show success screen after save
   if (savedNoteId) {
+    const followupUrl = selectedPatient?.id
+      ? `/doctor/schedule?autoOpen=1&patientId=${selectedPatient.id}&type=followup`
+      : '/doctor/schedule?autoOpen=1&type=followup'
+
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 px-6" dir="rtl">
         <div className="w-16 h-16 rounded-full bg-[#F0FDF4] flex items-center justify-center">
@@ -1909,6 +1913,13 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
           className="w-full max-w-xs py-3 bg-[#16A34A] text-white rounded-xl font-cairo font-bold text-[15px] hover:bg-[#15803d] transition-colors"
         >
           عرض وطباعة الروشتة
+        </button>
+        {/* Follow-up booking shortcut */}
+        <button
+          onClick={() => router.push(followupUrl)}
+          className="w-full max-w-xs py-3 border-[0.8px] border-[#BFDBFE] bg-[#EFF6FF] text-[#2563EB] rounded-xl font-cairo font-semibold text-[15px] hover:bg-[#DBEAFE] transition-colors"
+        >
+          حجز موعد متابعة
         </button>
         <button
           onClick={() => router.push('/doctor/dashboard')}

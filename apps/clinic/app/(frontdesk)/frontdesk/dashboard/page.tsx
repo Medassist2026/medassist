@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
@@ -16,6 +16,10 @@ import {
   Clock,
   Stethoscope,
   TrendingUp,
+  Search,
+  X,
+  Loader2,
+  Plus,
 } from 'lucide-react'
 import { DoctorStatusCard } from '@ui-clinic/components/frontdesk/DoctorStatusCard'
 import type { CheckInQueueItem } from '@shared/lib/data/frontdesk'
@@ -108,6 +112,229 @@ function getTypeLabel(type: string) {
 function formatElapsedMinutes(dateStr: string) {
   const diff = Date.now() - new Date(dateStr).getTime()
   return Math.max(0, Math.floor(diff / 60000))
+}
+
+// ============================================================================
+// WALK-IN CHECK-IN BOTTOM SHEET
+// ============================================================================
+
+interface WalkInPatient { id: string; full_name: string | null; phone: string; age: number | null }
+interface WalkInDoctor { id: string; full_name: string | null; specialty: string }
+
+interface WalkInSheetProps {
+  onClose: () => void
+  onSuccess: (queueNumber: number, patientName: string) => void
+}
+
+function WalkInSheet({ onClose, onSuccess }: WalkInSheetProps) {
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<WalkInPatient[]>([])
+  const [searching, setSearching] = useState(false)
+  const [selectedPatient, setSelectedPatient] = useState<WalkInPatient | null>(null)
+  const [doctors, setDoctors] = useState<WalkInDoctor[]>([])
+  const [selectedDoctorId, setSelectedDoctorId] = useState('')
+  const [queueType, setQueueType] = useState<'walkin' | 'emergency'>('walkin')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+  const searchTimer = useRef<NodeJS.Timeout>()
+
+  // Load clinic doctors once
+  useEffect(() => {
+    fetch('/api/doctors/list')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.doctors?.length) {
+          setDoctors(data.doctors)
+          setSelectedDoctorId(data.doctors[0]?.id || '')
+        }
+      })
+      .catch(() => {})
+  }, [])
+
+  // Debounced patient search
+  useEffect(() => {
+    clearTimeout(searchTimer.current)
+    if (!query.trim() || selectedPatient) return
+    if (query.trim().length < 2) { setResults([]); return }
+
+    searchTimer.current = setTimeout(async () => {
+      setSearching(true)
+      try {
+        const res = await fetch(`/api/patients/search?q=${encodeURIComponent(query)}`)
+        if (res.ok) {
+          const data = await res.json()
+          setResults(data.patients || [])
+        }
+      } catch { /* non-critical */ }
+      finally { setSearching(false) }
+    }, 300)
+
+    return () => clearTimeout(searchTimer.current)
+  }, [query, selectedPatient])
+
+  const handleSubmit = async () => {
+    if (!selectedPatient || !selectedDoctorId) return
+    setSubmitting(true)
+    setError('')
+    try {
+      const res = await fetch('/api/frontdesk/checkin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          patientId: selectedPatient.id,
+          doctorId: selectedDoctorId,
+          queueType,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'فشل تسجيل الوصول')
+      onSuccess(data.queueItem?.queue_number || '?', selectedPatient.full_name || 'المريض')
+    } catch (e: any) {
+      setError(e.message || 'حدث خطأ')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-end" onClick={onClose}>
+      <div
+        className="w-full bg-white rounded-t-2xl pt-4 px-4 pb-8 max-w-md mx-auto shadow-xl"
+        onClick={e => e.stopPropagation()}
+        dir="rtl"
+      >
+        {/* Handle + header */}
+        <div className="w-10 h-1 bg-[#E5E7EB] rounded-full mx-auto mb-4" />
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-cairo text-[17px] font-bold text-[#030712]">تسجيل وصول مريض</h3>
+          <button onClick={onClose} className="w-8 h-8 rounded-full bg-[#F3F4F6] flex items-center justify-center">
+            <X className="w-4 h-4 text-[#6B7280]" />
+          </button>
+        </div>
+
+        {/* Patient search */}
+        <div className="mb-3">
+          <label className="font-cairo text-[12px] text-[#6B7280] mb-1 block">المريض</label>
+          {selectedPatient ? (
+            <div className="flex items-center justify-between bg-[#F0FDF4] rounded-xl px-3 py-2.5 border-[0.8px] border-[#16A34A]/30">
+              <div>
+                <p className="font-cairo text-[14px] font-semibold text-[#030712]">{selectedPatient.full_name}</p>
+                <p className="font-cairo text-[12px] text-[#6B7280]">{selectedPatient.phone}</p>
+              </div>
+              <button
+                onClick={() => { setSelectedPatient(null); setQuery(''); setResults([]) }}
+                className="w-8 h-8 rounded-full bg-white flex items-center justify-center"
+              >
+                <X className="w-4 h-4 text-[#9CA3AF]" />
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="relative">
+                <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
+                <input
+                  type="text"
+                  value={query}
+                  onChange={e => setQuery(e.target.value)}
+                  placeholder="الاسم أو رقم الهاتف..."
+                  className="w-full h-11 pr-9 pl-3 rounded-xl border-[0.8px] border-[#E5E7EB] bg-[#F9FAFB] font-cairo text-[14px] outline-none focus:border-[#16A34A]"
+                  autoFocus
+                />
+                {searching && (
+                  <Loader2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF] animate-spin" />
+                )}
+              </div>
+              {results.length > 0 && (
+                <div className="mt-1.5 bg-white rounded-xl border-[0.8px] border-[#E5E7EB] overflow-hidden max-h-[160px] overflow-y-auto">
+                  {results.map(p => (
+                    <button
+                      key={p.id}
+                      onClick={() => { setSelectedPatient(p); setResults([]); setQuery('') }}
+                      className="w-full px-3 py-2.5 text-right hover:bg-[#F9FAFB] border-b-[0.8px] last:border-b-0 border-[#E5E7EB]"
+                    >
+                      <p className="font-cairo text-[13px] font-semibold text-[#030712]">{p.full_name}</p>
+                      <p className="font-cairo text-[11px] text-[#6B7280]">{p.phone}{p.age ? ` · ${p.age} سنة` : ''}</p>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {query.length >= 2 && !searching && results.length === 0 && (
+                <p className="font-cairo text-[12px] text-[#9CA3AF] mt-1.5 text-center">
+                  لا توجد نتائج — <Link href="/frontdesk/patients/register" className="text-[#16A34A] font-semibold">سجل مريض جديد</Link>
+                </p>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Doctor selector */}
+        {doctors.length > 1 && (
+          <div className="mb-3">
+            <label className="font-cairo text-[12px] text-[#6B7280] mb-1 block">الطبيب</label>
+            <div className="flex gap-2 flex-wrap">
+              {doctors.map(d => (
+                <button
+                  key={d.id}
+                  onClick={() => setSelectedDoctorId(d.id)}
+                  className={`h-9 px-3.5 rounded-full font-cairo text-[12px] font-medium transition-colors ${
+                    selectedDoctorId === d.id
+                      ? 'bg-[#16A34A] text-white'
+                      : 'bg-[#F3F4F6] text-[#4B5563]'
+                  }`}
+                >
+                  {(d.full_name || '').replace(/^د\.\s*/, 'د. ')}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Queue type */}
+        <div className="mb-4">
+          <label className="font-cairo text-[12px] text-[#6B7280] mb-1 block">نوع الزيارة</label>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setQueueType('walkin')}
+              className={`flex-1 h-10 rounded-xl font-cairo text-[13px] font-medium transition-colors ${
+                queueType === 'walkin' ? 'bg-[#16A34A] text-white' : 'bg-[#F3F4F6] text-[#4B5563]'
+              }`}
+            >
+              حضور مباشر
+            </button>
+            <button
+              onClick={() => setQueueType('emergency')}
+              className={`flex-1 h-10 rounded-xl font-cairo text-[13px] font-medium transition-colors ${
+                queueType === 'emergency' ? 'bg-[#EF4444] text-white' : 'bg-[#FEF2F2] text-[#EF4444]'
+              }`}
+            >
+              طوارئ
+            </button>
+          </div>
+        </div>
+
+        {/* Error */}
+        {error && (
+          <p className="font-cairo text-[12px] text-[#EF4444] text-center mb-3">{error}</p>
+        )}
+
+        {/* Submit */}
+        <button
+          onClick={handleSubmit}
+          disabled={!selectedPatient || !selectedDoctorId || submitting}
+          className="w-full h-[50px] rounded-xl bg-[#16A34A] text-white font-cairo text-[15px] font-bold flex items-center justify-center gap-2 disabled:opacity-40 active:scale-[0.98] transition-transform"
+        >
+          {submitting ? (
+            <Loader2 className="w-5 h-5 animate-spin" />
+          ) : (
+            <>
+              <UserCheck className="w-5 h-5" />
+              تسجيل الوصول
+            </>
+          )}
+        </button>
+      </div>
+    </div>
+  )
 }
 
 // ============================================================================
@@ -294,6 +521,8 @@ export default function FrontDeskDashboardPage() {
   const [updating, setUpdating] = useState<string | null>(null)
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date())
   const [pendingInviteCount, setPendingInviteCount] = useState(0)
+  const [showWalkIn, setShowWalkIn] = useState(false)
+  const [walkInToast, setWalkInToast] = useState<string | null>(null)
 
   const refreshData = useCallback(async () => {
     try {
@@ -362,8 +591,30 @@ export default function FrontDeskDashboardPage() {
   const totalArrivals = queue.length
   const waitingCount = queue.filter(q => q.status === 'waiting').length
 
+  const handleWalkInSuccess = (queueNumber: number | string, patientName: string) => {
+    setShowWalkIn(false)
+    setWalkInToast(`✓ ${patientName} — رقم ${queueNumber}`)
+    setTimeout(() => setWalkInToast(null), 4000)
+    refreshData()
+  }
+
   return (
     <div dir="rtl">
+      {/* Walk-in sheet */}
+      {showWalkIn && (
+        <WalkInSheet
+          onClose={() => setShowWalkIn(false)}
+          onSuccess={handleWalkInSuccess}
+        />
+      )}
+
+      {/* Walk-in success toast */}
+      {walkInToast && (
+        <div className="fixed top-4 left-4 right-4 z-50 mx-auto max-w-sm px-4 py-2.5 rounded-xl shadow-lg font-cairo text-[13px] font-bold text-center bg-[#F0FDF4] text-[#16A34A] border border-[#16A34A]/20">
+          {walkInToast}
+        </div>
+      )}
+
       {/* Sticky Header */}
       <div className="sticky top-0 z-40 bg-white border-b-[0.8px] border-[#E5E7EB]">
         <div className="flex items-center justify-between px-4 py-3">
@@ -393,6 +644,15 @@ export default function FrontDeskDashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* Walk-in FAB — bottom right, above nav bar */}
+      <button
+        onClick={() => setShowWalkIn(true)}
+        className="fixed bottom-24 left-4 z-30 w-14 h-14 rounded-full bg-[#16A34A] shadow-lg shadow-[#16A34A]/30 flex items-center justify-center active:scale-95 transition-transform"
+        title="تسجيل وصول مريض"
+      >
+        <UserCheck className="w-6 h-6 text-white" strokeWidth={2} />
+      </button>
 
       {/* Content */}
       <div className="px-4 pt-4 pb-6 space-y-5">

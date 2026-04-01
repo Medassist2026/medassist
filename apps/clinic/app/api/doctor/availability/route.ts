@@ -8,14 +8,15 @@ const DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 
 type DayKey = (typeof DAYS)[number]
 
 function defaultAvailability() {
+  const eveningSlot = [{ start: '16:00', end: '22:00' }]
   return {
-    sunday: { enabled: true, slots: [{ start: '09:00', end: '17:00' }] },
-    monday: { enabled: true, slots: [{ start: '09:00', end: '17:00' }] },
-    tuesday: { enabled: true, slots: [{ start: '09:00', end: '17:00' }] },
-    wednesday: { enabled: true, slots: [{ start: '09:00', end: '17:00' }] },
-    thursday: { enabled: true, slots: [{ start: '09:00', end: '17:00' }] },
+    sunday: { enabled: true, slots: eveningSlot },
+    monday: { enabled: true, slots: eveningSlot },
+    tuesday: { enabled: true, slots: eveningSlot },
+    wednesday: { enabled: true, slots: eveningSlot },
+    thursday: { enabled: true, slots: eveningSlot },
     friday: { enabled: false, slots: [] as Array<{ start: string; end: string }> },
-    saturday: { enabled: false, slots: [] as Array<{ start: string; end: string }> }
+    saturday: { enabled: true, slots: eveningSlot },
   }
 }
 

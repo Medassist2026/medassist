@@ -13,6 +13,11 @@ export const reminderTemplates = {
     ar: `MedAssist: مرحبًا ${ctx.patientName}، تذكير بموعدك مع د. ${ctx.doctorName} يوم ${ctx.appointmentDate} الساعة ${ctx.appointmentTime}. ${ctx.clinicName}`,
   }),
 
+  appointment_confirmed: (ctx: ReminderContext) => ({
+    en: `MedAssist: Hi ${ctx.patientName}, your appointment with Dr. ${ctx.doctorName} on ${ctx.appointmentDate} at ${ctx.appointmentTime} has been confirmed. ${ctx.clinicName}`,
+    ar: `MedAssist: مرحبًا ${ctx.patientName}، تم تأكيد موعدك مع د. ${ctx.doctorName} يوم ${ctx.appointmentDate} الساعة ${ctx.appointmentTime}. ${ctx.clinicName}`,
+  }),
+
   followup: (ctx: ReminderContext) => ({
     en: `MedAssist: Hi ${ctx.patientName}, it's time for your follow-up visit with Dr. ${ctx.doctorName}. Please book an appointment. ${ctx.clinicName}`,
     ar: `MedAssist: مرحبًا ${ctx.patientName}، حان موعد زيارة المتابعة مع د. ${ctx.doctorName}. يرجى حجز موعد. ${ctx.clinicName}`,

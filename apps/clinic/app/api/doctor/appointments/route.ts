@@ -5,6 +5,7 @@ import { createClient } from '@shared/lib/supabase/server'
 import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
 import { createAdminClient } from '@shared/lib/supabase/admin'
 import { validateClinicHours } from '@shared/lib/utils/clinic-hours'
+import { sendReminder } from '@shared/lib/sms/reminder-service'
 
 // ============================================================================
 // GET /api/doctor/appointments
@@ -162,7 +163,7 @@ export async function POST(request: NextRequest) {
     const user = await requireApiRole('doctor')
     const body = await request.json()
 
-    const { patientId, startTime, durationMinutes, appointmentType, notes, reason, clinicId } = body
+    const { patientId, startTime, durationMinutes, appointmentType, notes, reason, clinicId, skipHoursCheck } = body
 
     // Validate required fields
     if (!patientId || typeof patientId !== 'string') {
@@ -175,6 +176,20 @@ export async function POST(request: NextRequest) {
     const duration = durationMinutes || 15
     if (typeof duration !== 'number' || duration < 5 || duration > 120) {
       return NextResponse.json({ error: 'Duration must be 5-120 minutes' }, { status: 400 })
+    }
+
+    // Normalize appointment type
+    const typeAliases: Record<string, string> = {
+      'consultation': 'regular',
+      'walkin': 'regular',
+      'walk-in': 'regular',
+      'walk_in': 'regular',
+      'procedure': 'regular',
+    }
+    const normalizedType = typeAliases[appointmentType] || appointmentType || 'regular'
+    const validTypes = ['regular', 'followup', 'emergency']
+    if (!validTypes.includes(normalizedType)) {
+      return NextResponse.json({ error: 'Invalid appointment type' }, { status: 400 })
     }
 
     // Validate start time is not in the past (allow same-day)
@@ -220,13 +235,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Time slot conflicts with an existing appointment' }, { status: 409 })
     }
 
-    // Validate clinic hours — warn if outside working hours
-    const hoursCheck = await validateClinicHours(supabase, user.id, startTime, duration)
-    if (!hoursCheck.isValid) {
-      return NextResponse.json(
-        { error: hoursCheck.errorAr || hoursCheck.error, outsideHours: true },
-        { status: 400 }
-      )
+    // Validate clinic hours — warn if outside working hours (skip if user explicitly confirmed)
+    if (!skipHoursCheck) {
+      const hoursCheck = await validateClinicHours(supabase, user.id, startTime, duration)
+      if (!hoursCheck.isValid) {
+        return NextResponse.json(
+          { error: hoursCheck.errorAr || hoursCheck.error, outsideHours: true },
+          { status: 400 }
+        )
+      }
     }
 
     // Resolve clinic_id: use provided or auto-resolve from doctor's membership
@@ -253,7 +270,7 @@ export async function POST(request: NextRequest) {
         clinic_id: resolvedClinicId,
         start_time: startTime,
         duration_minutes: duration,
-        appointment_type: appointmentType || 'consultation',
+        appointment_type: normalizedType,
         notes: notes || null,
         reason: reason || notes || null,
         status: 'scheduled',
@@ -266,6 +283,60 @@ export async function POST(request: NextRequest) {
       console.error('Appointment creation error:', error)
       return NextResponse.json({ error: 'Failed to create appointment' }, { status: 500 })
     }
+
+    // ── Send appointment_confirmed SMS (fire-and-forget) ──
+    ;(async () => {
+      try {
+        // Fetch patient phone (not in the earlier query)
+        const { data: patientDetails } = await supabase
+          .from('patients')
+          .select('phone')
+          .eq('id', patientId)
+          .maybeSingle()
+
+        if (!patientDetails?.phone) return
+
+        // Fetch doctor full_name
+        const { data: doctorDetails } = await supabase
+          .from('doctors')
+          .select('full_name')
+          .eq('id', user.id)
+          .maybeSingle()
+
+        // Fetch clinic name if we have a clinic
+        let clinicName = ''
+        if (resolvedClinicId) {
+          const { data: clinicDetails } = await supabase
+            .from('clinics')
+            .select('name')
+            .eq('id', resolvedClinicId)
+            .maybeSingle()
+          clinicName = clinicDetails?.name || ''
+        }
+
+        const aptDate = new Date(startTime)
+        const dateStr = aptDate.toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' })
+        const timeStr = aptDate.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })
+
+        await sendReminder({
+          patientId,
+          phoneNumber: patientDetails.phone,
+          messageType: 'appointment_confirmed',
+          appointmentId: data.id,
+          clinicId: resolvedClinicId || undefined,
+          context: {
+            patientName: patient.full_name || 'المريض',
+            doctorName: doctorDetails?.full_name || 'الطبيب',
+            clinicName,
+            appointmentDate: dateStr,
+            appointmentTime: timeStr,
+          },
+          language: 'ar',
+        })
+      } catch (smsErr) {
+        console.error('Appointment confirmed SMS failed (non-blocking):', smsErr)
+      }
+    })()
 
     return NextResponse.json({
       success: true,
@@ -283,5 +354,57 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Appointment creation error:', error)
     return toApiErrorResponse(error, 'Failed to create appointment')
+  }
+}
+
+// ============================================================================
+// PATCH /api/doctor/appointments
+// Cancel an appointment (doctor can only cancel their own appointments)
+// Body: { appointmentId, status: 'cancelled' }
+// ============================================================================
+
+export async function PATCH(request: NextRequest) {
+  try {
+    const user = await requireApiRole('doctor')
+    const body = await request.json()
+    const { appointmentId, status } = body
+
+    if (!appointmentId) {
+      return NextResponse.json({ error: 'Appointment ID is required' }, { status: 400 })
+    }
+    if (status !== 'cancelled') {
+      return NextResponse.json({ error: 'Only cancellation is supported' }, { status: 400 })
+    }
+
+    const supabase = createAdminClient('doctor-appointments')
+
+    // Verify appointment belongs to this doctor
+    const { data: existing } = await supabase
+      .from('appointments')
+      .select('id, status, patient_id, start_time')
+      .eq('id', appointmentId)
+      .eq('doctor_id', user.id)
+      .maybeSingle()
+
+    if (!existing) {
+      return NextResponse.json({ error: 'Appointment not found' }, { status: 404 })
+    }
+    if (existing.status === 'cancelled') {
+      return NextResponse.json({ error: 'Appointment is already cancelled' }, { status: 400 })
+    }
+
+    const { error: updateError } = await supabase
+      .from('appointments')
+      .update({ status: 'cancelled' })
+      .eq('id', appointmentId)
+
+    if (updateError) {
+      return NextResponse.json({ error: 'Failed to cancel appointment' }, { status: 500 })
+    }
+
+    return NextResponse.json({ success: true })
+  } catch (error) {
+    console.error('Appointment cancellation error:', error)
+    return toApiErrorResponse(error, 'Failed to cancel appointment')
   }
 }

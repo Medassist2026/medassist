@@ -6,5 +6,11 @@
   "env": {
     "DEV_BYPASS_OTP": "true",
     "NEXT_PUBLIC_OTP_BYPASS_HINT": "true"
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/appointment-reminders",
+      "schedule": "0 7 * * *"
+    }
+  ]
 }

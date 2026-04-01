@@ -102,6 +102,15 @@ const nextConfig = {
     }
     return config
   },
+  async redirects() {
+    return [
+      {
+        source: '/doctor/appointments/new',
+        destination: '/doctor/schedule',
+        permanent: false,
+      },
+    ]
+  },
 }
 
 module.exports = withPWA(nextConfig)

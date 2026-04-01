@@ -265,6 +265,9 @@ export function DashboardContent({
     a => a.status !== 'cancelled' && a.status !== 'no_show'
   )
 
+  // Show empty state only when queue is loaded (waitingCount !== undefined) and both queue + appointments are empty
+  const showEmptyState = activeAppointments.length === 0 && waitingCount === 0
+
   return (
     <>
       {/* ── Patient Quick Drawer ── */}
@@ -296,9 +299,7 @@ export function DashboardContent({
         />
 
         {/* Scheduled appointments */}
-        {activeAppointments.length === 0 ? (
-          <DashboardEmptyState />
-        ) : (
+        {activeAppointments.length > 0 && (
           <div>
             <SectionLabel
               icon={<Clock className="w-[13px] h-[13px] text-[#94A3B8]" strokeWidth={1.67} />}
@@ -330,6 +331,9 @@ export function DashboardContent({
             <div className="h-8" />
           </div>
         )}
+
+        {/* Empty state — only when queue is loaded and both queue + appointments are empty */}
+        {showEmptyState && <DashboardEmptyState />}
       </div>
     </>
   )
