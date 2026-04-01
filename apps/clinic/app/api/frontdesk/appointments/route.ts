@@ -65,18 +65,21 @@ export async function GET(request: Request) {
       query = query.eq('doctor_id', doctorId)
     }
 
+    // Cairo is UTC+3. Appending +03:00 ensures Postgres interprets dates as Cairo midnight.
     if (date) {
-      const dayStart = `${date}T00:00:00`
-      const dayEnd = `${date}T23:59:59`
+      const dayStart = `${date}T00:00:00+03:00`
+      const dayEnd = `${date}T23:59:59+03:00`
       query = query.gte('start_time', dayStart).lte('start_time', dayEnd)
     } else if (startDate && endDate) {
-      const rangeStart = `${startDate}T00:00:00`
-      const rangeEnd = `${endDate}T23:59:59`
+      const rangeStart = `${startDate}T00:00:00+03:00`
+      const rangeEnd = `${endDate}T23:59:59+03:00`
       query = query.gte('start_time', rangeStart).lte('start_time', rangeEnd)
     } else {
-      const today = new Date().toISOString().split('T')[0]
-      const dayStart = `${today}T00:00:00`
-      const dayEnd = `${today}T23:59:59`
+      // Default: today in Cairo time
+      const nowCairo = new Date(Date.now() + 3 * 60 * 60 * 1000)
+      const today = nowCairo.toISOString().split('T')[0]
+      const dayStart = `${today}T00:00:00+03:00`
+      const dayEnd = `${today}T23:59:59+03:00`
       query = query.gte('start_time', dayStart).lte('start_time', dayEnd)
     }
 

@@ -13,7 +13,7 @@ export async function POST(request: Request) {
   try {
     const user = await requireApiRole('doctor')
 
-    const { patientId, noteData, keystrokeCount, durationSeconds, syncToPatient, sendPrescriptionSMS: sendSMS, clinicId: bodyClinicId } = await request.json()
+    const { patientId, queueId, noteData, keystrokeCount, durationSeconds, syncToPatient, sendPrescriptionSMS: sendSMS, clinicId: bodyClinicId } = await request.json()
 
     // Validation
     if (!patientId || !noteData) {
@@ -72,6 +72,38 @@ export async function POST(request: Request) {
       }
     }
     
+    // ── Close the queue loop (Bug 2/3/4 fix) ────────────────────────────────
+    // If this session was started from the walk-in queue, mark the queue item
+    // as completed and sync any linked appointment to 'completed' as well.
+    if (queueId) {
+      ;(async () => {
+        try {
+          const admin = createAdminClient('session-queue-completion')
+          const now = new Date().toISOString()
+
+          // 1. Mark queue item completed
+          const { data: queueItem } = await admin
+            .from('check_in_queue')
+            .update({ status: 'completed', completed_at: now })
+            .eq('id', queueId)
+            .eq('doctor_id', user.id) // scope to this doctor for safety
+            .select('appointment_id')
+            .maybeSingle()
+
+          // 2. If queue item had a linked appointment, mark it completed too
+          if (queueItem?.appointment_id) {
+            await admin
+              .from('appointments')
+              .update({ status: 'completed' })
+              .eq('id', queueItem.appointment_id)
+          }
+        } catch (queueErr) {
+          // Never block the session save response
+          console.error('[queue-completion] Failed to update queue/appointment status:', queueErr)
+        }
+      })()
+    }
+
     // Audit log
     logAuditEvent({
       clinicId: clinicId || undefined,

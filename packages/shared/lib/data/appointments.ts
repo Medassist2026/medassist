@@ -29,11 +29,13 @@ export async function getTodayAppointments(
 ): Promise<Appointment[]> {
   const supabase = await createClient()
 
-  // Calculate today's date range
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const tomorrow = new Date(today)
-  tomorrow.setDate(tomorrow.getDate() + 1)
+  // Calculate today's date range in Cairo time (UTC+3).
+  // Using +03:00 suffix ensures Postgres interprets these as Cairo midnight/end-of-day
+  // regardless of the server's local timezone — critical for consistent display.
+  const nowCairo = new Date(Date.now() + 3 * 60 * 60 * 1000)
+  const dateStr = nowCairo.toISOString().split('T')[0]
+  const todayStart = `${dateStr}T00:00:00+03:00`
+  const todayEnd = `${dateStr}T23:59:59+03:00`
 
   let query = supabase
     .from('appointments')
@@ -50,8 +52,8 @@ export async function getTodayAppointments(
     `)
     .eq('doctor_id', doctorId)
     .eq('status', 'scheduled')
-    .gte('start_time', today.toISOString())
-    .lt('start_time', tomorrow.toISOString())
+    .gte('start_time', todayStart)
+    .lte('start_time', todayEnd)
     .order('start_time', { ascending: true })
 
   // When clinicId is provided, show appointments for that clinic OR unscoped (null clinic_id)

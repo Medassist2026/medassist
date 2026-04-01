@@ -155,12 +155,16 @@ async function hydrateQueueDoctors<T extends { doctor_id: string; doctor?: any }
  * Get today's queue for all doctors or specific doctor
  */
 export async function getTodayQueue(doctorId?: string | string[]): Promise<CheckInQueueItem[]> {
-  const supabase = await createClient()
+  // Use admin client so RLS on patients/doctors tables never blocks the join.
+  // The queue API is already role-gated at the HTTP layer (requireApiRole).
+  const adminSupabase = createAdminClient('queue-with-patient-names')
 
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
+  // Use Cairo midnight (UTC+3) so the "today" boundary is correct for Egypt
+  const nowCairo = new Date(Date.now() + 3 * 60 * 60 * 1000)
+  const dateStr = nowCairo.toISOString().split('T')[0]
+  const cairoMidnight = `${dateStr}T00:00:00+03:00`
 
-  let query = supabase
+  let query = adminSupabase
     .from('check_in_queue')
     .select(`
       *,
@@ -175,7 +179,7 @@ export async function getTodayQueue(doctorId?: string | string[]): Promise<Check
         specialty
       )
     `)
-    .gte('created_at', today.toISOString())
+    .gte('created_at', cairoMidnight)
     .in('status', ['waiting', 'in_progress'])
     .order('queue_number', { ascending: true })
     .limit(200)
@@ -185,9 +189,9 @@ export async function getTodayQueue(doctorId?: string | string[]): Promise<Check
   } else if (doctorId) {
     query = query.eq('doctor_id', doctorId)
   }
-  
+
   const { data, error } = await query
-  
+
   if (error) throw new Error(error.message)
 
   const normalized = await hydrateQueueDoctors((data || []) as any[])

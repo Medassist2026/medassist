@@ -16,6 +16,7 @@ import {
   Stethoscope,
   ChevronLeft,
   ChevronRight,
+  UserX,
 } from 'lucide-react'
 import type { Appointment as SharedAppointment } from '@shared/lib/data/frontdesk'
 
@@ -25,7 +26,7 @@ import type { Appointment as SharedAppointment } from '@shared/lib/data/frontdes
 
 type Appointment = SharedAppointment
 
-type StatusFilter = 'all' | 'scheduled' | 'cancelled'
+type StatusFilter = 'all' | 'scheduled' | 'cancelled' | 'no_show'
 type PageState = 'loading' | 'loaded' | 'error' | 'empty'
 
 // appointmentId → queue number (set after successful check-in, persists until page refresh)
@@ -101,6 +102,8 @@ function getStatusBadge(status: string): { label: string; bg: string } {
   switch (status) {
     case 'scheduled': return { label: 'قادم', bg: 'bg-[#FFFBEB] text-[#D97706]' }
     case 'cancelled': return { label: 'ملغي', bg: 'bg-[#FEF2F2] text-[#EF4444]' }
+    case 'no_show': return { label: 'لم يحضر', bg: 'bg-[#F5F3FF] text-[#7C3AED]' }
+    case 'completed': return { label: 'مكتمل', bg: 'bg-[#F0FDF4] text-[#16A34A]' }
     default: return { label: status, bg: 'bg-[#F3F4F6] text-[#6B7280]' }
   }
 }
@@ -114,6 +117,7 @@ function AppointmentCard({
   onCheckIn,
   onCancel,
   onEdit,
+  onNoShow,
   actionLoading,
   queueNumber,
 }: {
@@ -121,10 +125,14 @@ function AppointmentCard({
   onCheckIn: (appt: Appointment) => void
   onCancel: (appt: Appointment) => void
   onEdit: (appt: Appointment) => void
+  onNoShow: (appt: Appointment) => void
   actionLoading: string | null
   queueNumber?: number
 }) {
   const isCancelled = appointment.status === 'cancelled'
+  const isNoShow = appointment.status === 'no_show'
+  const isCompleted = appointment.status === 'completed'
+  const isDone = isCancelled || isNoShow || isCompleted
   // isPending: scheduled AND not yet checked into queue this session
   const isPending = appointment.status === 'scheduled' && !queueNumber
   const isInQueue = appointment.status === 'scheduled' && !!queueNumber
@@ -134,7 +142,7 @@ function AppointmentCard({
   return (
     <div
       className={`bg-white rounded-[12px] border-[0.8px] border-[#E5E7EB] p-3.5 transition-all ${
-        isCancelled ? 'opacity-60' : ''
+        isDone ? 'opacity-60' : ''
       }`}
     >
       {/* Row 1: Patient Name + Time */}
@@ -217,6 +225,16 @@ function AppointmentCard({
               title="تعديل الموعد"
             >
               <Pencil className="w-5 h-5 text-[#2563EB]" />
+            </button>
+
+            {/* No-show button — 44px touch target */}
+            <button
+              onClick={() => onNoShow(appointment)}
+              disabled={isLoading}
+              className="w-11 h-11 rounded-xl bg-[#F5F3FF] flex items-center justify-center active:scale-95 transition-transform disabled:opacity-40"
+              title="لم يحضر"
+            >
+              <UserX className="w-5 h-5 text-[#7C3AED]" />
             </button>
 
             {/* Cancel button — 44px touch target */}
@@ -469,6 +487,25 @@ export default function AppointmentsPage() {
     router.push(`/frontdesk/appointments/${appt.id}/edit`)
   }
 
+  const handleNoShow = async (appt: Appointment) => {
+    setActionLoading(appt.id)
+    try {
+      const res = await fetch('/api/frontdesk/appointments', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ appointmentId: appt.id, status: 'no_show' }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'فشل تسجيل الغياب')
+      showToast(`سُجّل غياب ${appt.patient.full_name || 'المريض'} ✓`, 'success')
+      await fetchAppointments(false)
+    } catch (err: any) {
+      showToast(err.message || 'فشل تسجيل الغياب', 'error')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
   // ─── FILTERED LIST ───
   const filteredAppointments = appointments.filter((appt) => {
     if (statusFilter === 'all') return true
@@ -477,6 +514,7 @@ export default function AppointmentsPage() {
 
   const scheduledCount = appointments.filter((a) => a.status === 'scheduled').length
   const cancelledCount = appointments.filter((a) => a.status === 'cancelled').length
+  const noShowCount = appointments.filter((a) => a.status === 'no_show').length
 
   // ============================================================================
   // RENDER
@@ -549,6 +587,18 @@ export default function AppointmentsPage() {
           >
             ملغي ({cancelledCount})
           </button>
+          {noShowCount > 0 && (
+            <button
+              onClick={() => setStatusFilter('no_show')}
+              className={`h-9 px-3 rounded-full font-cairo text-[12px] font-medium transition-colors ${
+                statusFilter === 'no_show'
+                  ? 'bg-[#7C3AED] text-white'
+                  : 'bg-white border-[0.8px] border-[#E5E7EB] text-[#7C3AED]'
+              }`}
+            >
+              لم يحضر ({noShowCount})
+            </button>
+          )}
         </div>
       </div>
 
@@ -641,6 +691,7 @@ export default function AppointmentsPage() {
                     onCheckIn={handleCheckIn}
                     onCancel={setCancelTarget}
                     onEdit={handleEdit}
+                    onNoShow={handleNoShow}
                     actionLoading={actionLoading}
                     queueNumber={checkedInMap[appt.id]}
                   />

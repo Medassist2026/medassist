@@ -10,6 +10,7 @@ function SessionPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const preselectedPatientId = searchParams.get('patientId') || undefined
+  const queueId = searchParams.get('queueId') || undefined
 
   return (
     <div dir="rtl" className="pb-4">
@@ -27,7 +28,7 @@ function SessionPageContent() {
       </div>
 
       {/* ===== SESSION FORM ===== */}
-      <SessionForm preselectedPatientId={preselectedPatientId} />
+      <SessionForm preselectedPatientId={preselectedPatientId} queueId={queueId} />
     </div>
   )
 }

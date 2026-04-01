@@ -63,6 +63,9 @@ export default function CheckInPage() {
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'transfer' | 'insurance'>('cash')
   const [skipPayment, setSkipPayment] = useState(false)
+  // Insurance-specific fields (shown when paymentMethod === 'insurance')
+  const [insuranceCompany, setInsuranceCompany] = useState('')
+  const [insurancePolicyNumber, setInsurancePolicyNumber] = useState('')
 
   useEffect(() => {
     loadDoctorsWithStats()
@@ -162,6 +165,11 @@ export default function CheckInPage() {
       const pAmount = Number(paymentAmount)
       if (!wasOffline && !skipPayment && pAmount > 0) {
         try {
+          // Build insurance notes string if applicable
+          const insuranceNotes = paymentMethod === 'insurance' && (insuranceCompany || insurancePolicyNumber)
+            ? `تأمين: ${[insuranceCompany, insurancePolicyNumber].filter(Boolean).join(' — ')}`
+            : undefined
+
           const payRes = await fetch('/api/frontdesk/payments/create', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -170,6 +178,7 @@ export default function CheckInPage() {
               doctorId: selectedDoctor,
               amount: pAmount,
               paymentMethod,
+              notes: insuranceNotes,
             }),
           })
           if (payRes.ok) paymentRecorded = true
@@ -224,6 +233,8 @@ export default function CheckInPage() {
     setPaymentMethod('cash')
     setSkipPayment(false)
     setShowPayment(true)
+    setInsuranceCompany('')
+    setInsurancePolicyNumber('')
   }
 
   // ── Success Screen ──
@@ -265,6 +276,28 @@ export default function CheckInPage() {
             <button onClick={resetForm} className="w-full h-[48px] bg-[#16A34A] hover:bg-[#15803D] text-white rounded-[12px] font-cairo text-[15px] font-bold transition-colors">
               تسجيل وصول مريض آخر
             </button>
+            {success.paymentRecorded && success.paymentAmount && (
+              <button
+                onClick={() => {
+                  const doc = doctors.find(d => d.id === selectedDoctor)
+                  const p = new URLSearchParams({
+                    patientName: success.patientName,
+                    doctorName: success.doctorName,
+                    amount: String(success.paymentAmount),
+                    method: paymentMethod,
+                    date: new Date().toISOString(),
+                    invoiceNum: `${Date.now().toString().slice(-6)}`,
+                    ...(insuranceCompany || insurancePolicyNumber
+                      ? { insuranceInfo: [insuranceCompany, insurancePolicyNumber].filter(Boolean).join(' — ') }
+                      : {}),
+                  })
+                  router.push(`/frontdesk/receipt?${p.toString()}`)
+                }}
+                className="w-full h-[44px] bg-[#F5F3FF] text-[#7C3AED] rounded-[12px] font-cairo text-[14px] font-medium border border-[#DDD6FE]"
+              >
+                🧾 طباعة إيصال
+              </button>
+            )}
             <button onClick={() => router.push('/frontdesk/dashboard')} className="w-full h-[44px] bg-[#F3F4F6] text-[#4B5563] rounded-[12px] font-cairo text-[14px] font-medium">
               العودة للرئيسية
             </button>
@@ -457,6 +490,27 @@ export default function CheckInPage() {
                       ))}
                     </div>
                   </div>
+
+                  {/* Insurance fields — shown only when insurance payment is selected */}
+                  {paymentMethod === 'insurance' && (
+                    <div className="mt-3 space-y-2 border-t border-[#EDE9FE] pt-3">
+                      <label className="font-cairo text-[12px] text-[#7C3AED] font-medium block">بيانات التأمين</label>
+                      <input
+                        type="text"
+                        value={insuranceCompany}
+                        onChange={(e) => setInsuranceCompany(e.target.value)}
+                        placeholder="شركة التأمين (مثال: بوبا، ميدنت)"
+                        className="w-full h-10 px-3 rounded-[8px] border-[0.8px] border-[#DDD6FE] font-cairo text-[13px] text-[#030712] placeholder:text-[#C4B5FD] focus:outline-none focus:border-[#7C3AED] bg-white"
+                      />
+                      <input
+                        type="text"
+                        value={insurancePolicyNumber}
+                        onChange={(e) => setInsurancePolicyNumber(e.target.value)}
+                        placeholder="رقم البوليصة / رقم العضوية"
+                        className="w-full h-10 px-3 rounded-[8px] border-[0.8px] border-[#DDD6FE] font-cairo text-[13px] text-[#030712] placeholder:text-[#C4B5FD] focus:outline-none focus:border-[#7C3AED] bg-white"
+                      />
+                    </div>
+                  )}
                 </>
               )}
             </div>

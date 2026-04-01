@@ -29,6 +29,12 @@ const DIAGNOSIS_PRESETS = [
   { code: 'J30.9',  description: 'التهاب الأنف التحسسي' },
   { code: 'M54.5',  description: 'ألم أسفل الظهر' },
   { code: 'N39.0',  description: 'التهاب المسالك البولية' },
+  // Common in Egypt: thyroid disease, GERD, anaemia, anxiety, osteoarthritis
+  { code: 'E03.9',  description: 'قصور الغدة الدرقية' },
+  { code: 'K21.0',  description: 'ارتداد حمض المعدة (حرقة)' },
+  { code: 'D50.9',  description: 'فقر الدم بنقص الحديد' },
+  { code: 'F41.1',  description: 'اضطراب القلق المعمم' },
+  { code: 'M17.11', description: 'هشاشة مفصل الركبة' },
 ]
 
 export default function DiagnosisInput({

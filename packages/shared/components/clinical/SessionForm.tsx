@@ -54,6 +54,7 @@ export interface SessionFormData {
 
 interface SessionFormProps {
   preselectedPatientId?: string
+  queueId?: string
 }
 
 // ============================================================================
@@ -109,7 +110,7 @@ function Toast({ message, visible, onDone }: { message: string; visible: boolean
 // SESSION FORM COMPONENT
 // ============================================================================
 
-export function SessionForm({ preselectedPatientId }: SessionFormProps) {
+export function SessionForm({ preselectedPatientId, queueId }: SessionFormProps) {
   const router = useRouter()
 
   // ===== EGYPTIAN PHONE VALIDATION =====
@@ -903,6 +904,7 @@ export function SessionForm({ preselectedPatientId }: SessionFormProps) {
       const durationSeconds = Math.floor((Date.now() - sessionStartTime) / 1000)
       const sessionData = {
         patientId: selectedPatient.id,
+        queueId: queueId || undefined,
         durationSeconds,
         keystrokeCount: keystrokeCountRef.current,
         sendPrescriptionSMS: sendPrescriptionSMS && medications.length > 0,

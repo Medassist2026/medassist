@@ -6,7 +6,7 @@ import { DashboardHeader } from '@ui-clinic/components/doctor/DashboardHeader'
 import { DashboardEmptyState } from '@ui-clinic/components/doctor/DashboardEmptyState'
 import { PatientQueueCard, type VisitType } from '@ui-clinic/components/doctor/PatientQueueCard'
 import { PatientQuickDrawer } from '@ui-clinic/components/doctor/PatientQuickDrawer'
-import { Clock, RefreshCw } from 'lucide-react'
+import { Clock, RefreshCw, Timer } from 'lucide-react'
 
 interface Appointment {
   id: string
@@ -62,7 +62,7 @@ interface QueuePatient {
 interface QueueSectionProps {
   onQueueUpdate?: (count: number) => void
   onViewFile?: (patientId: string, patientName: string, extra?: { visitType?: 'new' | 'followup' | 'emergency'; chiefComplaint?: string; appointmentTime?: string }) => void
-  onStartSession?: (patientId: string, appointmentId?: string) => void
+  onStartSession?: (patientId: string, appointmentId?: string, queueId?: string) => void
 }
 
 function QueueSection({ onQueueUpdate, onViewFile, onStartSession }: QueueSectionProps) {
@@ -137,6 +137,11 @@ function QueueSection({ onQueueUpdate, onViewFile, onStartSession }: QueueSectio
           const patientName = item.patient?.full_name || 'مريض'
           const queueType: VisitType = item.queue_type === 'emergency' ? 'emergency' : 'new'
 
+          // Calculate waiting time in minutes
+          const waitMinutes = Math.floor((Date.now() - new Date(item.checked_in_at).getTime()) / 60000)
+          const waitLabel = waitMinutes < 1 ? 'الآن' : waitMinutes < 60 ? `${waitMinutes} د` : `${Math.floor(waitMinutes / 60)}س ${waitMinutes % 60}د`
+          const waitColor = waitMinutes >= 30 ? 'text-[#EF4444]' : waitMinutes >= 15 ? 'text-[#D97706]' : 'text-[#64748B]'
+
           return (
             <div
               key={item.id}
@@ -169,11 +174,18 @@ function QueueSection({ onQueueUpdate, onViewFile, onStartSession }: QueueSectio
                       )}
                     </div>
                   </div>
-                  <span className={`shrink-0 font-cairo text-[11px] font-semibold px-2.5 py-0.5 rounded-[4px] ${
-                    isActive ? 'bg-[#EFF6FF] text-[#1D4ED8]' : 'bg-[#F0FDF4] text-[#15803D]'
-                  }`}>
-                    {isActive ? 'مع الطبيب' : 'انتظار'}
-                  </span>
+                  <div className="flex flex-col items-end gap-1">
+                    <span className={`shrink-0 font-cairo text-[11px] font-semibold px-2.5 py-0.5 rounded-[4px] ${
+                      isActive ? 'bg-[#EFF6FF] text-[#1D4ED8]' : 'bg-[#F0FDF4] text-[#15803D]'
+                    }`}>
+                      {isActive ? 'مع الطبيب' : 'انتظار'}
+                    </span>
+                    {/* Waiting time indicator */}
+                    <span className={`flex items-center gap-0.5 font-cairo text-[10px] font-medium ${waitColor}`}>
+                      <Timer className="w-[9px] h-[9px]" strokeWidth={2} />
+                      {waitLabel}
+                    </span>
+                  </div>
                 </div>
 
                 <div className="flex gap-2 mt-3">
@@ -184,7 +196,7 @@ function QueueSection({ onQueueUpdate, onViewFile, onStartSession }: QueueSectio
                     عرض الملف
                   </button>
                   <button
-                    onClick={() => onStartSession?.(item.patient_id)}
+                    onClick={() => onStartSession?.(item.patient_id, undefined, item.id)}
                     className={`flex-1 h-[38px] rounded-[8px] font-cairo text-[12px] font-semibold text-white transition-all active:scale-[0.98] ${
                       isActive ? 'bg-[#3B82F6] hover:bg-[#2563EB]' : 'bg-[#16A34A] hover:bg-[#15803D]'
                     }`}
@@ -257,8 +269,11 @@ export function DashboardContent({
 
   const closeDrawer = useCallback(() => setDrawer(null), [])
 
-  const handleStartSession = useCallback((patientId: string, appointmentId?: string) => {
-    router.push(`/doctor/session?patientId=${patientId}${appointmentId ? `&appointmentId=${appointmentId}` : ''}`)
+  const handleStartSession = useCallback((patientId: string, appointmentId?: string, queueId?: string) => {
+    const params = new URLSearchParams({ patientId })
+    if (appointmentId) params.set('appointmentId', appointmentId)
+    if (queueId) params.set('queueId', queueId)
+    router.push(`/doctor/session?${params.toString()}`)
   }, [router])
 
   const activeAppointments = appointments.filter(
