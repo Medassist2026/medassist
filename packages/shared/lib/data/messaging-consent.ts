@@ -102,45 +102,62 @@ export async function getOrCreatePatientConversation(params: {
 
 export async function ensureMessagingConsent(doctorId: string, patientId: string): Promise<void> {
   const supabase = await createClient()
+  const admin = createAdminClient('messaging-consent-check')
 
-  const { data: relationship, error: relationshipError } = await supabase
+  // ── Tier 1: strict explicit consent (full consent grant system) ──────────
+  const { data: relationship } = await supabase
     .from('doctor_patient_relationships')
     .select('access_level, consent_state, access_type, status')
     .eq('doctor_id', doctorId)
     .eq('patient_id', patientId)
     .maybeSingle()
 
-  if (relationshipError) {
-    throw new MessagingConsentError(relationshipError.message, 500)
+  const strictConsented =
+    (relationship?.access_level === 'verified_consented' &&
+      relationship?.consent_state === 'granted') ||
+    relationship?.access_type === 'verified'
+
+  if (strictConsented) {
+    // Also check consent grant exists (but don't block if missing — legacy data)
+    const { data: consentGrant } = await supabase
+      .from('patient_consent_grants')
+      .select('id')
+      .eq('doctor_id', doctorId)
+      .eq('patient_id', patientId)
+      .eq('consent_type', 'messaging')
+      .eq('consent_state', 'granted')
+      .is('revoked_at', null)
+      .maybeSingle()
+    if (consentGrant?.id) return
   }
 
-  const consented =
-    relationship?.access_level === 'verified_consented' &&
-    relationship?.consent_state === 'granted'
-
-  const legacyConsented = relationship?.access_type === 'verified'
-
-  if (!consented && !legacyConsented) {
-    throw new MessagingConsentError('Messaging requires verified patient consent', 403)
-  }
-
-  const { data: consentGrant, error: consentError } = await supabase
-    .from('patient_consent_grants')
+  // ── Tier 2: visit-based implicit consent ─────────────────────────────────
+  // If the doctor has treated the patient (any appointment or walk-in),
+  // messaging is allowed. Consent is implied by the clinical relationship.
+  const { data: appointment } = await admin
+    .from('appointments')
     .select('id')
     .eq('doctor_id', doctorId)
     .eq('patient_id', patientId)
-    .eq('consent_type', 'messaging')
-    .eq('consent_state', 'granted')
-    .is('revoked_at', null)
+    .limit(1)
     .maybeSingle()
 
-  if (consentError) {
-    throw new MessagingConsentError(consentError.message, 500)
-  }
+  if (appointment?.id) return
 
-  if (!consentGrant?.id) {
-    throw new MessagingConsentError('Messaging consent grant is missing or revoked', 403)
-  }
+  const { data: queueEntry } = await admin
+    .from('check_in_queue')
+    .select('id')
+    .eq('doctor_id', doctorId)
+    .eq('patient_id', patientId)
+    .limit(1)
+    .maybeSingle()
+
+  if (queueEntry?.id) return
+
+  throw new MessagingConsentError(
+    'يمكن التواصل مع المريض فقط بعد الزيارة الأولى',
+    403
+  )
 }
 
 export async function getOrCreateConsentedConversation(params: {
@@ -148,50 +165,48 @@ export async function getOrCreateConsentedConversation(params: {
   patientId: string
 }): Promise<string> {
   const supabase = await createClient()
+  const admin = createAdminClient('doctor-conversation-create')
   const { doctorId, patientId } = params
 
   await ensureMessagingConsent(doctorId, patientId)
 
-  const { data: existing, error: existingError } = await supabase
+  const { data: existing } = await supabase
     .from('conversations')
     .select('id')
     .eq('doctor_id', doctorId)
     .eq('patient_id', patientId)
     .maybeSingle()
 
-  if (existingError) {
-    throw new MessagingConsentError(existingError.message, 500)
-  }
+  if (existing?.id) return existing.id
 
-  if (existing?.id) {
-    return existing.id
-  }
-
-  const { data: latestVisit, error: latestVisitError } = await supabase
+  // Find any appointment (any status) to link the conversation to
+  const { data: latestAppt } = await admin
     .from('appointments')
     .select('id')
     .eq('doctor_id', doctorId)
     .eq('patient_id', patientId)
-    .eq('status', 'completed')
     .order('start_time', { ascending: false })
     .limit(1)
     .maybeSingle()
 
-  if (latestVisitError) {
-    throw new MessagingConsentError(latestVisitError.message, 500)
-  }
+  // Also check queue if no appointment found
+  const { data: queueEntry } = !latestAppt?.id
+    ? await admin
+        .from('check_in_queue')
+        .select('appointment_id')
+        .eq('doctor_id', doctorId)
+        .eq('patient_id', patientId)
+        .limit(1)
+        .maybeSingle()
+    : { data: null }
 
-  if (!latestVisit?.id) {
-    throw new MessagingConsentError('Messaging requires at least one completed visit', 403)
-  }
-
-  const { data: created, error: createError } = await supabase
+  const { data: created, error: createError } = await admin
     .from('conversations')
     .insert({
       doctor_id: doctorId,
       patient_id: patientId,
       status: 'active',
-      created_from_appointment_id: latestVisit.id,
+      created_from_appointment_id: latestAppt?.id || queueEntry?.appointment_id || null,
       last_message_at: new Date().toISOString()
     })
     .select('id')

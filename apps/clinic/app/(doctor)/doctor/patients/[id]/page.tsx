@@ -14,6 +14,7 @@ import {
   FileText,
   Activity,
   ChevronRight,
+  MessageCircle,
 } from 'lucide-react'
 
 // ============================================================================
@@ -426,13 +427,24 @@ export default function PatientDetailsPage() {
           </div>
 
           {/* Start session */}
-          <button
-            onClick={() => router.push(`/doctor/session?patientId=${patient.id}`)}
-            className="shrink-0 flex items-center gap-1.5 h-[38px] px-4 bg-[#16A34A] text-white rounded-[10px] font-cairo text-[13px] font-semibold hover:bg-[#15803D] transition-colors"
-          >
-            <Play className="w-[13px] h-[13px] fill-white stroke-none" />
-            بدء الجلسة
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Message patient shortcut */}
+            <button
+              onClick={() => router.push(`/doctor/messages?patientId=${patient.id}&patientName=${encodeURIComponent(patient.name)}&patientPhone=${encodeURIComponent(patient.phone || '')}`)}
+              className="flex items-center gap-1.5 h-[38px] px-3 bg-white border border-[#E2E8F0] text-[#16A34A] rounded-[10px] font-cairo text-[13px] font-semibold hover:bg-[#F0FDF4] transition-colors"
+              title="مراسلة المريض"
+            >
+              <MessageCircle className="w-[15px] h-[15px]" strokeWidth={2} />
+              <span className="hidden sm:inline">رسالة</span>
+            </button>
+            <button
+              onClick={() => router.push(`/doctor/session?patientId=${patient.id}`)}
+              className="flex items-center gap-1.5 h-[38px] px-4 bg-[#16A34A] text-white rounded-[10px] font-cairo text-[13px] font-semibold hover:bg-[#15803D] transition-colors"
+            >
+              <Play className="w-[13px] h-[13px] fill-white stroke-none" />
+              بدء الجلسة
+            </button>
+          </div>
         </div>
 
         {/* Allergy strip — always visible in header if allergies exist */}

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { ChevronRight, Send, MessageCircle, Paperclip, X, Image, FileText } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 
@@ -539,6 +539,7 @@ const MAX_ATTACHMENT_SIZE = 5 * 1024 * 1024 // 5 MB
 
 export default function MessagesPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
@@ -574,6 +575,20 @@ export default function MessagesPage() {
     const interval = setInterval(loadConversations, 60_000)
     return () => clearInterval(interval)
   }, [loadConversations])
+
+  // Auto-open chat if navigated here with ?patientId= (from patient profile)
+  useEffect(() => {
+    const patientId = searchParams.get('patientId')
+    const patientName = searchParams.get('patientName')
+    const patientPhone = searchParams.get('patientPhone')
+    if (patientId && patientName && !selectedPatient) {
+      setSelectedPatient({
+        id: patientId,
+        full_name: patientName,
+        phone: patientPhone || ''
+      })
+    }
+  }, [searchParams, selectedPatient])
 
   // ── Load messages + poll every 20s when chat is open ─────────────────────
 
