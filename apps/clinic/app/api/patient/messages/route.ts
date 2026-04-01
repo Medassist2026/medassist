@@ -4,7 +4,9 @@ import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
 import { createClient } from '@shared/lib/supabase/server'
 import {
   ensureMessagingConsent,
+  ensurePatientVisitedDoctor,
   getOrCreateConsentedConversation,
+  getOrCreatePatientConversation,
   MessagingConsentError
 } from '@shared/lib/data/messaging-consent'
 import { NextResponse } from 'next/server'
@@ -20,7 +22,8 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Doctor ID required' }, { status: 400 })
     }
 
-    await ensureMessagingConsent(doctorId, user.id)
+    // Use relaxed visit-based check: patient can message any doctor they've visited
+    await ensurePatientVisitedDoctor(doctorId, user.id)
 
     const { data: conversation, error: conversationError } = await supabase
       .from('conversations')
@@ -87,7 +90,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Message content required' }, { status: 400 })
     }
 
-    const conversationId = await getOrCreateConsentedConversation({
+    // Patient-initiated: use visit-based conversation creation (no strict consent grant required)
+    const conversationId = await getOrCreatePatientConversation({
       doctorId: body.doctor_id,
       patientId: user.id
     })

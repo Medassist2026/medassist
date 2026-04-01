@@ -2,12 +2,14 @@ export const dynamic = 'force-dynamic'
 
 import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
 import { createClient } from '@shared/lib/supabase/server'
+import { createAdminClient } from '@shared/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 
 export async function GET() {
   try {
     const user = await requireApiRole('patient')
     const supabase = await createClient()
+    const adminSupabase = createAdminClient('patient-conversations-with-doctors')
 
     const { data: conversationRows, error: conversationError } = await supabase
       .from('conversations')
@@ -24,7 +26,8 @@ export async function GET() {
     const doctorIds = Array.from(new Set(conversationRows.map((c: any) => c.doctor_id)))
     const conversationIds = conversationRows.map((c: any) => c.id)
 
-    const { data: doctors, error: doctorError } = await supabase
+    // Use admin client so RLS doesn't block the doctors table join
+    const { data: doctors, error: doctorError } = await adminSupabase
       .from('doctors')
       .select('id, full_name, specialty')
       .in('id', doctorIds)

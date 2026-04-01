@@ -37,4 +37,9 @@ export const reminderTemplates = {
     en: ctx.message,
     ar: ctx.message,
   }),
+
+  app_invitation: (ctx: ReminderContext) => ({
+    en: `MedAssist: Hi ${ctx.patientName}, welcome to ${ctx.clinicName}! Track your prescriptions, lab results and follow up with Dr. ${ctx.doctorName} directly via MedAssist. Download now: https://medassist-clinic.vercel.app`,
+    ar: `MedAssist: مرحبًا ${ctx.patientName}، شكرًا لزيارتك ${ctx.clinicName}! تابع وصفاتك ونتائج التحاليل وتواصل مع د. ${ctx.doctorName} عبر تطبيق MedAssist. حمّل التطبيق الآن: https://medassist-clinic.vercel.app`,
+  }),
 }

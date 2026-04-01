@@ -2,12 +2,15 @@ export const dynamic = 'force-dynamic'
 
 import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
 import { createClient } from '@shared/lib/supabase/server'
+import { createAdminClient } from '@shared/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 
 export async function GET() {
   try {
     const user = await requireApiRole('doctor')
     const supabase = await createClient()
+    // Admin client bypasses RLS on the patients table so full_name is returned
+    const adminSupabase = createAdminClient('conversations-with-patient-names')
 
     const { data: conversations, error: conversationError } = await supabase
       .from('conversations')
@@ -18,13 +21,14 @@ export async function GET() {
     if (conversationError) throw conversationError
 
     if (!conversations || conversations.length === 0) {
-      return NextResponse.json({ success: true, conversations: [] })
+      return NextResponse.json({ success: true, conversations: [], total_unread: 0 })
     }
 
     const patientIds = Array.from(new Set(conversations.map((c: any) => c.patient_id)))
     const conversationIds = conversations.map((c: any) => c.id)
 
-    const { data: patients, error: patientError } = await supabase
+    // Use admin client so RLS on patients table doesn't block the join
+    const { data: patients, error: patientError } = await adminSupabase
       .from('patients')
       .select('id, full_name, phone')
       .in('id', patientIds)
@@ -67,7 +71,8 @@ export async function GET() {
       }
     })
 
-    return NextResponse.json({ success: true, conversations: payload })
+    const total_unread = conversations.reduce((sum: number, c: any) => sum + (c.doctor_unread_count || 0), 0)
+    return NextResponse.json({ success: true, conversations: payload, total_unread })
   } catch (error: any) {
     console.error('Get conversations error:', error)
     return toApiErrorResponse(error, 'Failed to fetch conversations')

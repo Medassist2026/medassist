@@ -2,6 +2,7 @@
 
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
+import { useState, useEffect } from 'react'
 import {
   LayoutDashboard,
   Users,
@@ -54,6 +55,25 @@ interface DesktopSidebarProps {
 export function DesktopSidebar({ role, userName, clinicName }: DesktopSidebarProps) {
   const pathname = usePathname()
   const navItems = role === 'doctor' ? doctorNav : frontdeskNav
+  const [unreadCount, setUnreadCount] = useState(0)
+
+  useEffect(() => {
+    if (role !== 'doctor') return
+    let cancelled = false
+
+    async function fetchUnread() {
+      try {
+        const res = await fetch('/api/doctor/messages/unread-count')
+        if (!res.ok || cancelled) return
+        const data = await res.json()
+        if (!cancelled) setUnreadCount(data.total_unread || 0)
+      } catch { /* silent */ }
+    }
+
+    fetchUnread()
+    const interval = setInterval(fetchUnread, 30_000)
+    return () => { cancelled = true; clearInterval(interval) }
+  }, [role])
 
   return (
     <aside
@@ -90,7 +110,12 @@ export function DesktopSidebar({ role, userName, clinicName }: DesktopSidebarPro
                   }`}
                 >
                   <Icon className="w-[20px] h-[20px] flex-shrink-0" strokeWidth={1.8} />
-                  <span>{item.label}</span>
+                  <span className="flex-1">{item.label}</span>
+                  {item.href === '/doctor/messages' && unreadCount > 0 && !isActive && (
+                    <span className="min-w-[20px] h-[20px] bg-[#EF4444] text-white font-cairo text-[10px] font-bold rounded-full flex items-center justify-center px-1">
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </span>
+                  )}
                 </Link>
               </li>
             )

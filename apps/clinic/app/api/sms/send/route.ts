@@ -8,7 +8,7 @@ import { ReminderContext } from '@shared/lib/sms/reminder-templates'
 interface SendSMSBody {
   patientId: string
   phoneNumber: string
-  messageType: 'appointment_reminder' | 'followup' | 'lab_ready' | 'custom'
+  messageType: 'appointment_reminder' | 'followup' | 'lab_ready' | 'custom' | 'app_invitation' | 'appointment_confirmed' | 'appointment_cancelled'
   context: ReminderContext
   appointmentId?: string
   clinicId?: string
@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate message type
-    const validMessageTypes = ['appointment_reminder', 'followup', 'lab_ready', 'custom']
+    const validMessageTypes = ['appointment_reminder', 'followup', 'lab_ready', 'custom', 'app_invitation']
     if (!validMessageTypes.includes(body.messageType)) {
       return NextResponse.json(
         { error: `Invalid message type. Must be one of: ${validMessageTypes.join(', ')}` },

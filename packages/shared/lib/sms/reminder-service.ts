@@ -3,7 +3,7 @@ import { reminderTemplates, ReminderContext } from './reminder-templates'
 import { createAdminClient } from '@shared/lib/supabase/admin'
 import { auditLog } from '@shared/lib/audit/logger'
 
-type MessageType = 'appointment_reminder' | 'appointment_confirmed' | 'appointment_cancelled' | 'followup' | 'lab_ready' | 'custom'
+type MessageType = 'appointment_reminder' | 'appointment_confirmed' | 'appointment_cancelled' | 'followup' | 'lab_ready' | 'custom' | 'app_invitation'
 
 interface SendReminderParams {
   patientId: string
