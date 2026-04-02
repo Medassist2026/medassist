@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { ChevronRight, Send, MessageCircle, Paperclip, X, Image, FileText, Check, CheckCheck, Clock } from 'lucide-react'
+import { ChevronRight, Send, MessageCircle, Paperclip, X, Image, FileText, Check, CheckCheck, Clock, User } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 
 // ============================================================================
@@ -59,16 +59,17 @@ function decodeMessage(content: string): { text: string; attachment: Message['at
 }
 
 // ============================================================================
-// AVATAR COLORS — consistent color per patient initial
+// AVATAR — consistent color per patient, icon instead of initials
+// (Egyptians don't use name abbreviations/initials)
 // ============================================================================
 
 const AVATAR_COLORS = [
-  { bg: 'bg-[#DCFCE7]', text: 'text-[#16A34A]' },
-  { bg: 'bg-[#DBEAFE]', text: 'text-[#2563EB]' },
-  { bg: 'bg-[#FEF9C3]', text: 'text-[#A16207]' },
-  { bg: 'bg-[#FCE7F3]', text: 'text-[#BE185D]' },
-  { bg: 'bg-[#E0E7FF]', text: 'text-[#4338CA]' },
-  { bg: 'bg-[#FED7AA]', text: 'text-[#C2410C]' },
+  { bg: 'bg-[#DCFCE7]', icon: 'text-[#16A34A]' },
+  { bg: 'bg-[#DBEAFE]', icon: 'text-[#2563EB]' },
+  { bg: 'bg-[#FEF9C3]', icon: 'text-[#A16207]' },
+  { bg: 'bg-[#FCE7F3]', icon: 'text-[#BE185D]' },
+  { bg: 'bg-[#E0E7FF]', icon: 'text-[#4338CA]' },
+  { bg: 'bg-[#FED7AA]', icon: 'text-[#C2410C]' },
 ]
 
 function getAvatarColor(name: string) {
@@ -76,8 +77,16 @@ function getAvatarColor(name: string) {
   return AVATAR_COLORS[code % AVATAR_COLORS.length]
 }
 
-function getInitials(name: string) {
-  return name.split(' ').map(n => n[0]).join('').slice(0, 2)
+/** Renders a colored circle with a User icon — no initials */
+function PatientAvatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' }) {
+  const color = getAvatarColor(name)
+  const dim   = size === 'sm' ? 'w-10 h-10' : 'w-12 h-12'
+  const icon  = size === 'sm' ? 'w-4 h-4'   : 'w-5 h-5'
+  return (
+    <div className={`${dim} rounded-full flex items-center justify-center flex-shrink-0 ${color.bg}`}>
+      <User className={`${icon} ${color.icon}`} strokeWidth={2} />
+    </div>
+  )
 }
 
 // ============================================================================
@@ -195,7 +204,6 @@ function ConversationList({
   return (
     <div className="divide-y divide-[#F3F4F6]">
       {conversations.map((conv) => {
-        const color = getAvatarColor(conv.patient.full_name)
         // Decode last message for preview (hide attachment JSON)
         const { text: previewText } = decodeMessage(conv.last_message)
         const displayPreview = previewText || '📎 مرفق'
@@ -206,11 +214,7 @@ function ConversationList({
             onClick={() => onSelect(conv.patient)}
             className="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-[#F9FAFB] transition-colors text-right"
           >
-            <div className={`w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0 relative ${color.bg}`}>
-              <span className={`font-cairo text-[14px] font-bold ${color.text}`}>
-                {getInitials(conv.patient.full_name)}
-              </span>
-            </div>
+            <PatientAvatar name={conv.patient.full_name} size="md" />
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between gap-2">
                 <h3 className={`font-cairo text-[14px] truncate ${conv.unread_count > 0 ? 'font-bold text-[#030712]' : 'font-medium text-[#030712]'}`}>
@@ -362,26 +366,55 @@ function PatientProfileCard({ patient }: { patient: Patient }) {
     </div>
   )
 
+  // Build the always-visible clinical summary line (complaint + Rx)
+  const complaintSummary = data.lastComplaints.slice(0, 2).join(' · ')
+  const rxSummary        = data.activeMeds.slice(0, 3).join('، ')
+  const hasSummaryLine   = complaintSummary || rxSummary
+
   return (
     <div className="mx-3 mt-2 border border-[#E5E7EB] rounded-[12px] overflow-hidden bg-white shadow-[0_1px_3px_rgba(0,0,0,0.06)]">
-      {/* ── Header row — always visible ── */}
+
+      {/* ── Always-visible area ── */}
       <div
-        className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-[#F9FAFB] transition-colors"
+        className="flex items-start gap-2 px-3 py-2 cursor-pointer hover:bg-[#F9FAFB] transition-colors"
         onClick={() => setExpanded(v => !v)}
       >
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 space-y-1">
+          {/* Row 1: demographics */}
           {collapsedRow}
+
+          {/* Row 2: last complaint + Rx — visible without expanding */}
+          {hasSummaryLine && (
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-cairo text-[11px] text-[#4B5563]">
+              {complaintSummary && (
+                <span>
+                  <span className="text-[#9CA3AF]">الشكوى: </span>
+                  {complaintSummary}
+                </span>
+              )}
+              {complaintSummary && rxSummary && (
+                <span className="text-[#D1D5DB]">·</span>
+              )}
+              {rxSummary && (
+                <span>
+                  <span className="text-[#9CA3AF]">Rx: </span>
+                  <span className="text-[#166534] font-medium">{rxSummary}</span>
+                </span>
+              )}
+            </div>
+          )}
         </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
+
+        <div className="flex items-center gap-2 flex-shrink-0 pt-0.5">
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); router.push(`/doctor/patients/${patient.id}`) }}
-            className="font-cairo text-[11px] text-[#16A34A] hover:underline"
+            className="font-cairo text-[11px] text-[#16A34A] hover:underline whitespace-nowrap"
           >
             الملف الكامل ←
           </button>
           <svg
-            className={`w-4 h-4 text-[#9CA3AF] transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}
+            className={`w-4 h-4 text-[#9CA3AF] transition-transform duration-200 flex-shrink-0 ${expanded ? 'rotate-180' : ''}`}
             fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
@@ -389,25 +422,20 @@ function PatientProfileCard({ patient }: { patient: Patient }) {
         </div>
       </div>
 
-      {/* ── Expanded panel ── */}
+      {/* ── Expanded panel: full clinical detail ── */}
       {expanded && (
         <div className="border-t border-[#F3F4F6] px-3 py-2.5 space-y-2 bg-[#FAFAFA]">
 
-          {/* Last visit */}
-          {(visitDateLabel || data.lastComplaints.length > 0 || data.lastDiagnoses.length > 0) && (
+          {/* Last visit date + diagnoses */}
+          {(visitDateLabel || data.lastDiagnoses.length > 0) && (
             <div className="flex gap-2">
               <span className="font-cairo text-[11px] text-[#6B7280] flex-shrink-0 pt-0.5">آخر زيارة</span>
               <div className="flex-1 min-w-0">
                 {visitDateLabel && (
                   <span className="font-cairo text-[11px] text-[#374151] font-medium">{visitDateLabel}</span>
                 )}
-                {data.lastComplaints.length > 0 && (
-                  <p className="font-cairo text-[11px] text-[#4B5563] mt-0.5">
-                    الشكوى: {data.lastComplaints.slice(0, 2).join(' · ')}
-                  </p>
-                )}
                 {data.lastDiagnoses.length > 0 && (
-                  <p className="font-cairo text-[11px] text-[#4B5563]">
+                  <p className="font-cairo text-[11px] text-[#4B5563] mt-0.5">
                     التشخيص: {data.lastDiagnoses.slice(0, 2).join(' · ')}
                   </p>
                 )}
@@ -415,7 +443,7 @@ function PatientProfileCard({ patient }: { patient: Patient }) {
             </div>
           )}
 
-          {/* Active medications */}
+          {/* Active medications (chips) */}
           {data.activeMeds.length > 0 && (
             <div className="flex gap-2 items-start">
               <span className="font-cairo text-[11px] text-[#6B7280] flex-shrink-0 pt-0.5">الأدوية</span>
@@ -514,7 +542,6 @@ function ChatView({
 }) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const color = getAvatarColor(patient.full_name)
   const [showQuickReplies, setShowQuickReplies] = useState(false)
 
   useEffect(() => {
@@ -531,11 +558,7 @@ function ChatView({
         >
           <ChevronRight className="w-[20px] h-[20px] text-[#030712]" />
         </button>
-        <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${color.bg}`}>
-          <span className={`font-cairo text-[13px] font-bold ${color.text}`}>
-            {getInitials(patient.full_name)}
-          </span>
-        </div>
+        <PatientAvatar name={patient.full_name} size="sm" />
         <div className="flex-1 min-w-0">
           <h3 className="font-cairo text-[15px] font-semibold text-[#030712] truncate">{patient.full_name}</h3>
           <p className="font-cairo text-[12px] text-[#9CA3AF]" dir="ltr">{patient.phone}</p>
@@ -696,15 +719,18 @@ function ChatView({
             </svg>
           </button>
 
-          {/* Attachment button */}
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="w-[44px] h-[44px] rounded-full flex items-center justify-center flex-shrink-0 border-[0.8px] border-[#E5E7EB] bg-[#F9FAFB] text-[#6B7280] hover:border-[#16A34A] transition-colors"
-            title="إرفاق صورة أو ملف"
-          >
-            <Paperclip className="w-5 h-5" />
-          </button>
+          {/* Attachment button + 5MB hint */}
+          <div className="flex flex-col items-center gap-0.5 flex-shrink-0">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="w-[44px] h-[44px] rounded-full flex items-center justify-center border-[0.8px] border-[#E5E7EB] bg-[#F9FAFB] text-[#6B7280] hover:border-[#16A34A] transition-colors"
+              title="إرفاق صورة أو ملف PDF — الحد الأقصى 5MB"
+            >
+              <Paperclip className="w-5 h-5" />
+            </button>
+            <span className="font-cairo text-[9px] text-[#9CA3AF] leading-none">5MB</span>
+          </div>
           <input
             ref={fileInputRef}
             type="file"
