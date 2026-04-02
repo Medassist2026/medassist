@@ -13,7 +13,7 @@ export async function POST(request: Request) {
   try {
     const user = await requireApiRole('doctor')
 
-    const { patientId, queueId, noteData, keystrokeCount, durationSeconds, syncToPatient, sendPrescriptionSMS: sendSMS, clinicId: bodyClinicId } = await request.json()
+    const { patientId, queueId, appointmentId, noteData, keystrokeCount, durationSeconds, syncToPatient, sendPrescriptionSMS: sendSMS, clinicId: bodyClinicId } = await request.json()
 
     // Validation
     if (!patientId || !noteData) {
@@ -54,6 +54,7 @@ export async function POST(request: Request) {
     const note = await createClinicalNote({
       doctorId: user.id,
       patientId,
+      appointmentId: appointmentId || undefined,
       clinicId: clinicId || undefined,
       noteData,
       keystrokeCount: keystrokeCount || 0,
@@ -100,6 +101,25 @@ export async function POST(request: Request) {
         } catch (queueErr) {
           // Never block the session save response
           console.error('[queue-completion] Failed to update queue/appointment status:', queueErr)
+        }
+      })()
+    }
+
+    // ── Close the scheduled appointment loop ─────────────────────────────────
+    // If this session was started from an appointment card (not a queue check-in),
+    // mark that appointment as completed.  The queueId handler above covers
+    // queue-linked appointments, so we only act here when queueId is absent.
+    if (appointmentId && !queueId) {
+      ;(async () => {
+        try {
+          const admin = createAdminClient('session-appointment-completion')
+          await admin
+            .from('appointments')
+            .update({ status: 'completed' })
+            .eq('id', appointmentId)
+            .eq('doctor_id', user.id) // scope to this doctor for safety
+        } catch {
+          // Never block the session save response
         }
       })()
     }
@@ -182,7 +202,6 @@ export async function POST(request: Request) {
     })
     
   } catch (error: any) {
-    console.error('Save clinical note error:', error)
     return toApiErrorResponse(error, 'Failed to save note')
   }
 }

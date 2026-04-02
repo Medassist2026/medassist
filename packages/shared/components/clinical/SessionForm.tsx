@@ -55,6 +55,9 @@ export interface SessionFormData {
 interface SessionFormProps {
   preselectedPatientId?: string
   queueId?: string
+  /** Passed when session is started from a scheduled appointment card.
+   *  Signals the API to mark this appointment as completed after save. */
+  appointmentId?: string
 }
 
 // ============================================================================
@@ -110,7 +113,7 @@ function Toast({ message, visible, onDone }: { message: string; visible: boolean
 // SESSION FORM COMPONENT
 // ============================================================================
 
-export function SessionForm({ preselectedPatientId, queueId }: SessionFormProps) {
+export function SessionForm({ preselectedPatientId, queueId, appointmentId }: SessionFormProps) {
   const router = useRouter()
 
   // ===== EGYPTIAN PHONE VALIDATION =====
@@ -914,6 +917,7 @@ export function SessionForm({ preselectedPatientId, queueId }: SessionFormProps)
       const sessionData = {
         patientId: selectedPatient.id,
         queueId: queueId || undefined,
+        appointmentId: appointmentId || undefined,
         durationSeconds,
         keystrokeCount: keystrokeCountRef.current,
         sendPrescriptionSMS: sendPrescriptionSMS && medications.length > 0,
