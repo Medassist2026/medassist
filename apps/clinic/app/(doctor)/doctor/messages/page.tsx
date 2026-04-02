@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { ChevronRight, Send, MessageCircle, Paperclip, X, Image, FileText, Check, CheckCheck, Clock, User } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
@@ -776,7 +776,7 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 const MAX_ATTACHMENT_SIZE = 5 * 1024 * 1024 // 5 MB
 
-export default function MessagesPage() {
+function MessagesPageInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [conversations, setConversations] = useState<Conversation[]>([])
@@ -886,8 +886,7 @@ export default function MessagesPage() {
       if (error) throw error
       const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path)
       return { url: urlData.publicUrl, name: file.name, mime: file.type }
-    } catch (err) {
-      console.error('Upload failed:', err)
+    } catch {
       return null
     }
   }
@@ -1026,5 +1025,17 @@ export default function MessagesPage() {
         )}
       </div>
     </div>
+  )
+}
+
+export default function MessagesPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center min-h-screen" dir="rtl">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#16A34A]" />
+      </div>
+    }>
+      <MessagesPageInner />
+    </Suspense>
   )
 }
