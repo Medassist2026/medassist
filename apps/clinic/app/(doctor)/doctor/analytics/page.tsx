@@ -254,7 +254,7 @@ export default function DoctorAnalyticsPage() {
               <SummaryCard
                 icon={Users}
                 label="زيارات اليوم"
-                value={String(income.summary.visitsToday)}
+                value={income.summary.visitsToday.toLocaleString('ar-EG')}
                 iconColor="text-[#2563EB]"
                 iconBg="bg-[#EFF6FF]"
               />
@@ -268,7 +268,7 @@ export default function DoctorAnalyticsPage() {
               <SummaryCard
                 icon={Calendar}
                 label="زيارات الشهر"
-                value={String(income.summary.visitsThisMonth)}
+                value={income.summary.visitsThisMonth.toLocaleString('ar-EG')}
                 iconColor="text-[#7C3AED]"
                 iconBg="bg-[#F5F3FF]"
               />
@@ -331,7 +331,7 @@ export default function DoctorAnalyticsPage() {
                 valueKey={chart === 'income' ? 'income' : 'visits'}
                 color={chart === 'income' ? '#16A34A' : '#2563EB'}
                 formatLabel={labelFn}
-                formatValue={chart === 'income' ? (v) => v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(v) : undefined}
+                formatValue={(v) => v.toLocaleString('ar-EG')}
               />
 
               {/* Chart legend */}
