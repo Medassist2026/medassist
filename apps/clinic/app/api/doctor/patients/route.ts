@@ -141,7 +141,7 @@ export async function GET() {
         const stats = statsByPatient[patient.id]
         return {
           id: patient.id,
-          name: patient.full_name || 'Unknown Patient',
+          name: patient.full_name || 'مريض',
           phone: patient.phone,
           gender: patient.sex ? patient.sex.toLowerCase() : undefined,
           relationship_status: row.relationship_status,
@@ -179,7 +179,6 @@ export async function GET() {
 
     return NextResponse.json({ success: true, patients })
   } catch (error: any) {
-    console.error('Get doctor patients error:', error)
     return toApiErrorResponse(error, 'Failed to fetch patients')
   }
 }

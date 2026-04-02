@@ -61,6 +61,7 @@ function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatientModalProps) {
     notes: ''
   })
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const [modalError, setModalError] = useState('')
 
   // Reset on close
   useEffect(() => {
@@ -72,22 +73,22 @@ function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatientModalProps) {
         name: '', phone: '', email: '', date_of_birth: '', gender: '', national_id: '', notes: ''
       })
       setErrors({})
+      setModalError('')
     }
   }, [isOpen])
 
   // Search patients
   const handleSearch = async () => {
     if (!searchQuery.trim()) return
-
+    setModalError('')
     setSearching(true)
     try {
       const res = await fetch(`/api/doctor/patients/search?q=${encodeURIComponent(searchQuery)}`)
-      if (res.ok) {
-        const data = await res.json()
-        setSearchResults(data.patients || [])
-      }
-    } catch (error) {
-      console.error('Search failed:', error)
+      if (!res.ok) throw new Error()
+      const data = await res.json()
+      setSearchResults(data.patients || [])
+    } catch {
+      setModalError('فشل البحث — تحقق من الاتصال وأعد المحاولة')
     } finally {
       setSearching(false)
     }
@@ -95,18 +96,18 @@ function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatientModalProps) {
 
   // Add existing patient to my patients
   const handleAddExisting = async (patient: Patient) => {
+    setModalError('')
     try {
       const res = await fetch('/api/doctor/patients/add', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ patient_id: patient.id })
       })
-      if (res.ok) {
-        onSuccess(patient)
-        onClose()
-      }
-    } catch (error) {
-      console.error('Failed to add patient:', error)
+      if (!res.ok) throw new Error()
+      onSuccess(patient)
+      onClose()
+    } catch {
+      setModalError('فشلت إضافة المريض — حاول مرة أخرى')
     }
   }
 
@@ -125,6 +126,7 @@ function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatientModalProps) {
       return
     }
 
+    setModalError('')
     setCreating(true)
     try {
       const res = await fetch('/api/doctor/patients/create', {
@@ -132,13 +134,12 @@ function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatientModalProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form)
       })
-      if (res.ok) {
-        const data = await res.json()
-        onSuccess(data.patient)
-        onClose()
-      }
-    } catch (error) {
-      console.error('Failed to create patient:', error)
+      if (!res.ok) throw new Error()
+      const data = await res.json()
+      onSuccess(data.patient)
+      onClose()
+    } catch {
+      setModalError('فشل إنشاء المريض — تحقق من البيانات وأعد المحاولة')
     } finally {
       setCreating(false)
     }
@@ -160,6 +161,14 @@ function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatientModalProps) {
             </svg>
           </button>
         </div>
+
+        {/* Modal error banner */}
+        {modalError && (
+          <div className="mx-4 mt-3 p-3 bg-red-50 border border-red-200 rounded-xl flex items-center justify-between gap-2" dir="rtl">
+            <p className="font-cairo text-[13px] text-red-700">{modalError}</p>
+            <button onClick={() => setModalError('')} className="text-red-400 hover:text-red-600 flex-shrink-0 text-[16px] leading-none">×</button>
+          </div>
+        )}
 
         {/* Mode Tabs */}
         <div className="p-4 border-b">
@@ -402,7 +411,7 @@ function PatientCard({ patient, onStartSession, onViewDetails }: PatientCardProp
           <div className="text-sm text-gray-500 mt-0.5">
             <span dir="ltr">{patient.phone}</span>
             {age && ` • ${age} سنة`}
-            {patient.gender && ` • ${patient.gender}`}
+            {patient.gender && ` • ${patient.gender === 'male' ? 'ذكر' : patient.gender === 'female' ? 'أنثى' : patient.gender}`}
           </div>
 
           {/* Conditions */}
@@ -465,27 +474,28 @@ export default function MyPatientsPage() {
   const router = useRouter()
   const [patients, setPatients] = useState<Patient[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
   const [showAddModal, setShowAddModal] = useState(false)
   const [filter, setFilter] = useState<'all' | 'active' | 'walkin'>('all')
   const [searchQuery, setSearchQuery] = useState('')
 
   // Load patients
-  useEffect(() => {
-    const loadPatients = async () => {
-      try {
-        const res = await fetch('/api/doctor/patients')
-        if (res.ok) {
-          const data = await res.json()
-          setPatients(data.patients || [])
-        }
-      } catch (error) {
-        console.error('Failed to load patients:', error)
-      } finally {
-        setLoading(false)
-      }
+  const loadPatients = async () => {
+    setLoading(true)
+    setLoadError('')
+    try {
+      const res = await fetch('/api/doctor/patients')
+      if (!res.ok) throw new Error('فشل تحميل قائمة المرضى')
+      const data = await res.json()
+      setPatients(data.patients || [])
+    } catch {
+      setLoadError('تعذر تحميل المرضى — تحقق من الاتصال وأعد المحاولة')
+    } finally {
+      setLoading(false)
     }
-    loadPatients()
-  }, [])
+  }
+
+  useEffect(() => { loadPatients() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Filter patients
   const filteredPatients = patients.filter(p => {
@@ -521,6 +531,23 @@ export default function MyPatientsPage() {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+      </div>
+    )
+  }
+
+  if (loadError) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px] px-4" dir="rtl">
+        <div className="text-center max-w-sm w-full bg-red-50 border border-red-200 rounded-2xl p-6">
+          <p className="font-cairo text-[15px] font-semibold text-red-800 mb-1">خطأ في تحميل البيانات</p>
+          <p className="font-cairo text-[13px] text-red-600 mb-4">{loadError}</p>
+          <button
+            onClick={loadPatients}
+            className="px-5 py-2 bg-red-600 text-white rounded-xl font-cairo text-[13px] font-medium hover:bg-red-700 transition-colors"
+          >
+            إعادة المحاولة
+          </button>
+        </div>
       </div>
     )
   }
