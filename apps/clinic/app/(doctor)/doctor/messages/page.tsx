@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { ChevronRight, Send, MessageCircle, Paperclip, X, Image, FileText } from 'lucide-react'
+import { ChevronRight, Send, MessageCircle, Paperclip, X, Image, FileText, Check, CheckCheck, Clock } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 
 // ============================================================================
@@ -21,6 +21,8 @@ interface Message {
   content: string
   created_at: string
   is_read: boolean
+  sending?: boolean   // optimistic: true while awaiting server confirmation
+  failed?: boolean    // optimistic: true if send failed
   attachment?: { url: string; name: string; type: 'image' | 'file' } | null
 }
 
@@ -102,6 +104,23 @@ function formatTime(dateStr: string) {
 
 function formatMessageTime(dateStr: string) {
   return new Date(dateStr).toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit' })
+}
+
+// Returns a human-readable date label for chat separators
+function getDateLabel(dateStr: string): string {
+  const date = new Date(dateStr)
+  const now = new Date()
+  const isToday = date.toDateString() === now.toDateString()
+  if (isToday) return 'اليوم'
+  const yesterday = new Date(now)
+  yesterday.setDate(now.getDate() - 1)
+  if (date.toDateString() === yesterday.toDateString()) return 'أمس'
+  return date.toLocaleDateString('ar-EG', { weekday: 'long', month: 'long', day: 'numeric' })
+}
+
+// Returns YYYY-MM-DD for grouping messages by date
+function toDateKey(dateStr: string): string {
+  return new Date(dateStr).toLocaleDateString('en-CA') // produces YYYY-MM-DD
 }
 
 // ============================================================================
@@ -384,25 +403,50 @@ function ChatView({
       <PatientContextBanner patientId={patient.id} />
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 bg-[#F9FAFB]">
+      <div className="flex-1 overflow-y-auto px-4 py-4 bg-[#F9FAFB]">
         {messages.length === 0 ? (
           <div className="text-center py-12">
             <p className="font-cairo text-[13px] text-[#9CA3AF]">لا توجد رسائل بعد</p>
           </div>
-        ) : (
-          messages.map((msg) => {
+        ) : (() => {
+          const items: React.ReactNode[] = []
+          let lastDateKey = ''
+
+          messages.forEach((msg) => {
+            const dateKey = msg.sending ? toDateKey(new Date().toISOString()) : toDateKey(msg.created_at)
+
+            // ── Date separator ──────────────────────────────────────
+            if (dateKey !== lastDateKey) {
+              lastDateKey = dateKey
+              const label = msg.sending
+                ? 'اليوم'
+                : getDateLabel(msg.created_at)
+              items.push(
+                <div key={`sep-${dateKey}`} className="flex items-center gap-3 my-3">
+                  <div className="flex-1 h-px bg-[#E5E7EB]" />
+                  <span className="font-cairo text-[11px] text-[#9CA3AF] px-2 py-0.5 bg-[#F3F4F6] rounded-full flex-shrink-0">
+                    {label}
+                  </span>
+                  <div className="flex-1 h-px bg-[#E5E7EB]" />
+                </div>
+              )
+            }
+
+            // ── Message bubble ──────────────────────────────────────
             const { text, attachment } = decodeMessage(msg.content)
-            return (
+            const isDoctor = msg.sender_type === 'doctor'
+
+            items.push(
               <div
                 key={msg.id}
-                className={`flex ${msg.sender_type === 'doctor' ? 'justify-start' : 'justify-end'}`}
+                className={`flex mb-2 ${isDoctor ? 'justify-start' : 'justify-end'} ${msg.sending ? 'opacity-70' : ''}`}
               >
                 <div
                   className={`max-w-[75%] rounded-[16px] px-4 py-2.5 ${
-                    msg.sender_type === 'doctor'
+                    isDoctor
                       ? 'bg-[#16A34A] text-white rounded-br-[4px]'
                       : 'bg-white text-[#030712] border border-[#E5E7EB] rounded-bl-[4px]'
-                  }`}
+                  } ${msg.failed ? 'bg-[#FEE2E2] border-[#FCA5A5]' : ''}`}
                 >
                   {attachment && (
                     <AttachmentBubble attachment={attachment} caption={text} />
@@ -410,17 +454,37 @@ function ChatView({
                   {!attachment && text && (
                     <p className="font-cairo text-[14px] leading-[22px]">{text}</p>
                   )}
-                  <p className={`font-cairo text-[11px] mt-1 ${msg.sender_type === 'doctor' ? 'text-white/60' : 'text-[#9CA3AF]'}`}>
-                    {formatMessageTime(msg.created_at)}
-                    {msg.sender_type === 'doctor' && msg.is_read && (
-                      <span className="mr-1 opacity-80">✓✓</span>
+                  {/* Timestamp + status tick */}
+                  <div className={`flex items-center gap-1 mt-1 ${isDoctor ? 'justify-end' : 'justify-start'}`}>
+                    <span className={`font-cairo text-[11px] ${isDoctor ? 'text-white/60' : 'text-[#9CA3AF]'}`}>
+                      {msg.sending
+                        ? formatMessageTime(new Date().toISOString())
+                        : formatMessageTime(msg.created_at)}
+                    </span>
+                    {/* Read-status icons — doctor messages only */}
+                    {isDoctor && (
+                      msg.failed ? (
+                        <span className="text-[#EF4444]" title="فشل الإرسال">
+                          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                          </svg>
+                        </span>
+                      ) : msg.sending ? (
+                        <Clock className="w-3 h-3 text-white/50" />
+                      ) : msg.is_read ? (
+                        <CheckCheck className="w-3.5 h-3.5 text-white/90" />
+                      ) : (
+                        <Check className="w-3.5 h-3.5 text-white/50" />
+                      )
                     )}
-                  </p>
+                  </div>
                 </div>
               </div>
             )
           })
-        )}
+
+          return items
+        })()}
         <div ref={messagesEndRef} />
       </div>
 
@@ -653,7 +717,7 @@ export default function MessagesPage() {
     }
   }
 
-  // ── Send message ──────────────────────────────────────────────────────────
+  // ── Send message (with optimistic UI) ────────────────────────────────────
 
   const sendMessage = async () => {
     if ((!newMessage.trim() && !pendingAttachment) || !selectedPatient) return
@@ -661,11 +725,30 @@ export default function MessagesPage() {
     setSending(true)
     setSendError('')
 
-    try {
-      let content = newMessage.trim()
+    // Build the content string (may include attachment JSON)
+    let content = newMessage.trim()
+    const attachmentSnapshot = pendingAttachment
 
-      if (pendingAttachment) {
-        const uploaded = await uploadAttachment(pendingAttachment.file)
+    // Clear input immediately so the user can type the next message
+    setNewMessage('')
+
+    // ── Optimistic bubble ─────────────────────────────────────────────────
+    const optimisticId = `optimistic-${Date.now()}`
+    const optimisticMsg: Message = {
+      id: optimisticId,
+      sender_type: 'doctor',
+      content: attachmentSnapshot
+        ? encodeAttachment(attachmentSnapshot.previewUrl || '', attachmentSnapshot.file.name, attachmentSnapshot.file.type, content)
+        : content,
+      created_at: new Date().toISOString(),
+      is_read: false,
+      sending: true,
+    }
+    setMessages(prev => [...prev, optimisticMsg])
+
+    try {
+      if (attachmentSnapshot) {
+        const uploaded = await uploadAttachment(attachmentSnapshot.file)
         if (!uploaded) throw new Error('فشل رفع الملف — حاول مرة أخرى')
         content = encodeAttachment(uploaded.url, uploaded.name, uploaded.mime, content)
         clearAttachment()
@@ -677,11 +760,24 @@ export default function MessagesPage() {
         body: JSON.stringify({ patient_id: selectedPatient.id, content })
       })
 
-      if (!response.ok) throw new Error('فشل إرسال الرسالة')
-      setNewMessage('')
-      loadMessages(selectedPatient.id)
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}))
+        throw new Error(errData.error || 'فشل إرسال الرسالة')
+      }
+
+      const data = await response.json()
+      // Replace optimistic message with the real one from server
+      setMessages(prev => prev.map(m =>
+        m.id === optimisticId
+          ? { ...data.message, sending: false }
+          : m
+      ))
       loadConversations()
     } catch (error: any) {
+      // Mark optimistic message as failed
+      setMessages(prev => prev.map(m =>
+        m.id === optimisticId ? { ...m, sending: false, failed: true } : m
+      ))
       setSendError(error.message || 'فشل إرسال الرسالة. حاول مرة أخرى')
     } finally {
       setSending(false)
