@@ -1,3 +1,4 @@
+import { createAdminClient } from '@shared/lib/supabase/admin'
 import { createClient } from '@shared/lib/supabase/server'
 
 export interface Appointment {
@@ -27,7 +28,7 @@ export async function getTodayAppointments(
   doctorId: string,
   clinicId?: string | null
 ): Promise<Appointment[]> {
-  const supabase = await createClient()
+  const supabase = createAdminClient('get-today-appointments')
 
   // Calculate today's date range in Cairo time (UTC+3).
   // Using +03:00 suffix ensures Postgres interprets these as Cairo midnight/end-of-day
@@ -74,7 +75,7 @@ export async function getTodayAppointments(
  * Get appointment by ID
  */
 export async function getAppointment(appointmentId: string): Promise<Appointment | null> {
-  const supabase = await createClient()
+  const supabase = createAdminClient('get-appointment')
   
   const { data, error } = await supabase
     .from('appointments')

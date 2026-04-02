@@ -49,7 +49,6 @@ export default async function DoctorDashboardPage() {
       unreadCount = 0
     }
   } catch (err: any) {
-    console.error('Dashboard load error:', err)
     loadError = err.message
   }
 

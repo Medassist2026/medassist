@@ -98,6 +98,22 @@ function isSameDay(d1: Date, d2: Date): boolean {
 }
 
 /**
+ * Returns a Date whose year/month/day reflects Cairo local time (UTC+3).
+ * Using new Date() alone returns UTC which is 3 hours behind — this causes
+ * "today" to appear as yesterday until 03:00 Cairo time.
+ */
+function getCairoToday(): Date {
+  const nowCairo = new Date(Date.now() + 3 * 60 * 60 * 1000)
+  return new Date(nowCairo.getUTCFullYear(), nowCairo.getUTCMonth(), nowCairo.getUTCDate())
+}
+
+/** Returns today's date string as YYYY-MM-DD in Cairo time */
+function getCairoTodayStr(): string {
+  const nowCairo = new Date(Date.now() + 3 * 60 * 60 * 1000)
+  return nowCairo.toISOString().split('T')[0]
+}
+
+/**
  * Detect overlapping appointments — returns a Set of appointment IDs that overlap
  */
 function detectOverlaps(appointments: Appointment[]): Set<string> {
@@ -444,7 +460,7 @@ interface WeekViewProps {
 }
 
 function WeekView({ weekDates, appointments, availability, onAppointmentClick, onDayClick }: WeekViewProps) {
-  const today = new Date()
+  const today = getCairoToday()
 
   return (
     <div className="bg-white rounded-xl shadow-soft border border-gray-100 overflow-hidden" dir="rtl">
@@ -551,7 +567,7 @@ function NewAppointmentModal({ onClose, onCreated, defaultDate, defaultPatientId
   const [patients, setPatients] = useState<any[]>([])
   const [selectedPatient, setSelectedPatient] = useState<any>(null)
   const [searching, setSearching] = useState(false)
-  const [date, setDate] = useState(defaultDate ? defaultDate.toISOString().split('T')[0] : new Date().toISOString().split('T')[0])
+  const [date, setDate] = useState(defaultDate ? defaultDate.toISOString().split('T')[0] : getCairoTodayStr())
   const [time, setTime] = useState('16:00')
   const [duration, setDuration] = useState(15)
   const [appointmentType, setAppointmentType] = useState(defaultType || 'regular')
@@ -688,7 +704,7 @@ function NewAppointmentModal({ onClose, onCreated, defaultDate, defaultPatientId
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">التاريخ</label>
-              <input type="date" value={date} onChange={(e) => { setDate(e.target.value); setOutsideHoursWarning(false) }} min={new Date().toISOString().split('T')[0]} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none" />
+              <input type="date" value={date} onChange={(e) => { setDate(e.target.value); setOutsideHoursWarning(false) }} min={getCairoTodayStr()} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none" />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">الوقت</label>
@@ -887,7 +903,7 @@ function SchedulePageInner() {
 
   // State
   const [view, setView] = useState<'day' | 'week'>('week')
-  const [selectedDate, setSelectedDate] = useState(new Date())
+  const [selectedDate, setSelectedDate] = useState(getCairoToday())
   const [appointments, setAppointments] = useState<Appointment[]>([])
   const [availability, setAvailability] = useState<WeeklyAvailability>(DEFAULT_AVAILABILITY)
   const [showWorkingHoursEditor, setShowWorkingHoursEditor] = useState(false)
@@ -949,7 +965,7 @@ function SchedulePageInner() {
   }, [loadData])
 
   // Navigation
-  const goToToday = () => setSelectedDate(new Date())
+  const goToToday = () => setSelectedDate(getCairoToday())
 
   const goToPrevious = () => {
     const newDate = new Date(selectedDate)

@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { ar } from '@shared/lib/i18n/ar'
 import { AssistantManager } from '@ui-clinic/components/doctor/AssistantManager'
-import { Pencil, X, Check, Building2 } from 'lucide-react'
+import { Pencil, X, Check, Building2, User } from 'lucide-react'
 
 const SPECIALTY_AR: Record<string, string> = {
   'general': 'طب عام',
@@ -385,8 +385,8 @@ export default function ClinicSettingsPage() {
           <div className="space-y-2">
             {clinic.doctors.map((doc: any) => (
               <div key={doc.userId} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
-                <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-sm flex-shrink-0">
-                  {(doc.name || '?')[0]}
+                <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
+                  <User className="w-4 h-4 text-blue-700" strokeWidth={2} />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium text-gray-900 truncate">

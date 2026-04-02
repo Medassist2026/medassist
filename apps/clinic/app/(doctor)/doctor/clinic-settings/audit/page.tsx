@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import { ChevronRight } from 'lucide-react'
 
 interface AuditEvent {
   id: string
@@ -70,8 +71,12 @@ export default function AuditLogPage() {
   return (
     <div className="space-y-6 max-w-md mx-auto px-4 py-4" dir="rtl">
       <div>
-        <Link href="/doctor/clinic-settings" className="text-sm text-primary-600 hover:text-primary-700 mb-2 inline-block">
-          ← العودة لإعدادات العيادة
+        <Link
+          href="/doctor/clinic-settings"
+          className="inline-flex items-center gap-1.5 text-sm text-primary-600 hover:text-primary-700 mb-2"
+        >
+          <ChevronRight className="w-4 h-4" />
+          العودة لإعدادات العيادة
         </Link>
         <h1 className="text-2xl font-bold text-gray-900">سجل المراجعة</h1>
         <p className="text-gray-600 mt-1">تتبع جميع الإجراءات في عيادتك</p>

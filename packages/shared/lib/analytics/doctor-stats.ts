@@ -60,6 +60,39 @@ export interface WeeklyComparison {
   durationDelta:  number   // seconds, negative = faster (good)
 }
 
+// ── Income types ─────────────────────────────────────────────────────────────
+
+export interface IncomeSummary {
+  /** Total income collected today (Egyptian date, clinic timezone) */
+  today:          number
+  /** Total income collected in the current calendar month */
+  thisMonth:      number
+  /** Number of completed (paid) visits today */
+  visitsToday:    number
+  /** Number of completed (paid) visits this month */
+  visitsThisMonth: number
+}
+
+export interface IncomeDayPoint {
+  date:     string   // YYYY-MM-DD
+  income:   number   // EGP
+  visits:   number
+}
+
+export interface IncomeMonthPoint {
+  month:    string   // YYYY-MM
+  income:   number
+  visits:   number
+}
+
+export interface DoctorIncomeStats {
+  summary:    IncomeSummary
+  byDay:      IncomeDayPoint[]    // last 30 days
+  byMonth:    IncomeMonthPoint[]  // last 12 months
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export interface DoctorStatsResult {
   period:         StatsPeriod
   generatedAt:    string
@@ -68,6 +101,7 @@ export interface DoctorStatsResult {
   topComplaints:  ComplaintFrequency[]
   topMedications: MedicationFrequency[]
   weeklyComparison: WeeklyComparison
+  income:         DoctorIncomeStats
 }
 
 // ============================================================================
@@ -324,6 +358,102 @@ function computeWeeklyComparison(events: any[], notes: any[]): WeeklyComparison 
 }
 
 // ============================================================================
+// INCOME FUNCTIONS
+// ============================================================================
+
+/**
+ * Fetch payments for the doctor — scoped strictly to doctor's own ID.
+ * Used only for income analytics; never cross-doctor.
+ */
+async function fetchDoctorPayments(doctorId: string, startDate: string | null) {
+  const admin = createAdminClient('doctor-income-stats')
+  let q = admin
+    .from('payments')
+    .select('amount, payment_status, created_at')
+    .eq('doctor_id', doctorId)
+    .order('created_at', { ascending: true })
+
+  if (startDate) q = q.gte('created_at', startDate)
+
+  const { data, error } = await q
+  if (error) throw new Error(`payments query failed: ${error.message}`)
+  return data || []
+}
+
+function computeIncomeStats(payments: any[]): DoctorIncomeStats {
+  const now = new Date()
+
+  // Today boundaries (local midnight)
+  const todayStart = new Date(now)
+  todayStart.setHours(0, 0, 0, 0)
+  const todayEnd = new Date(now)
+  todayEnd.setHours(23, 59, 59, 999)
+
+  // This month boundaries
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+  const monthEnd   = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999)
+
+  // Summary
+  let incomeToday = 0; let visitsToday = 0
+  let incomeThisMonth = 0; let visitsThisMonth = 0
+
+  // Aggregation maps
+  const byDayMap   = new Map<string, { income: number; visits: number }>()
+  const byMonthMap = new Map<string, { income: number; visits: number }>()
+
+  for (const p of payments) {
+    const amount = Number(p.amount || 0)
+    const d = new Date(p.created_at)
+    const dayKey   = p.created_at.slice(0, 10)       // YYYY-MM-DD
+    const monthKey = p.created_at.slice(0, 7)         // YYYY-MM
+
+    // Only count paid payments
+    if (p.payment_status !== 'paid' && p.payment_status !== null) continue
+
+    // Today / this-month summaries
+    if (d >= todayStart && d <= todayEnd) {
+      incomeToday += amount
+      visitsToday++
+    }
+    if (d >= monthStart && d <= monthEnd) {
+      incomeThisMonth += amount
+      visitsThisMonth++
+    }
+
+    // By-day bucket
+    const dayEntry = byDayMap.get(dayKey) || { income: 0, visits: 0 }
+    dayEntry.income += amount
+    dayEntry.visits++
+    byDayMap.set(dayKey, dayEntry)
+
+    // By-month bucket
+    const monthEntry = byMonthMap.get(monthKey) || { income: 0, visits: 0 }
+    monthEntry.income += amount
+    monthEntry.visits++
+    byMonthMap.set(monthKey, monthEntry)
+  }
+
+  const byDay: IncomeDayPoint[] = [...byDayMap.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, v]) => ({ date, income: Math.round(v.income), visits: v.visits }))
+
+  const byMonth: IncomeMonthPoint[] = [...byMonthMap.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([month, v]) => ({ month, income: Math.round(v.income), visits: v.visits }))
+
+  return {
+    summary: {
+      today:          Math.round(incomeToday),
+      thisMonth:      Math.round(incomeThisMonth),
+      visitsToday,
+      visitsThisMonth,
+    },
+    byDay,
+    byMonth,
+  }
+}
+
+// ============================================================================
 // MAIN EXPORT
 // ============================================================================
 
@@ -336,11 +466,16 @@ export async function getDoctorStats(
   period: StatsPeriod = '30d',
 ): Promise<DoctorStatsResult> {
   const startDate = periodToStartDate(period)
+  // For income we always fetch last 12 months to power the by-month chart
+  const twelveMonthsAgo = new Date()
+  twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12)
+  const incomeStartDate = twelveMonthsAgo.toISOString()
 
-  // Fetch both data sources in parallel
-  const [events, notes] = await Promise.all([
+  // Fetch all data sources in parallel
+  const [events, notes, payments] = await Promise.all([
     fetchSessionEvents(doctorId, startDate),
     fetchClinicalNotes(doctorId, startDate),
+    fetchDoctorPayments(doctorId, incomeStartDate),
   ])
 
   const summary          = computeSummary(events, notes)
@@ -348,6 +483,7 @@ export async function getDoctorStats(
   const topComplaints    = computeTopComplaints(notes, summary.totalSessions)
   const topMedications   = computeTopMedications(notes, summary.totalSessions)
   const weeklyComparison = computeWeeklyComparison(events, notes)
+  const income           = computeIncomeStats(payments)
 
   return {
     period,
@@ -357,5 +493,6 @@ export async function getDoctorStats(
     topComplaints,
     topMedications,
     weeklyComparison,
+    income,
   }
 }

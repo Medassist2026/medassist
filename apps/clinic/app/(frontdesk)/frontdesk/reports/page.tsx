@@ -11,7 +11,7 @@ import type { CheckInQueueItem, Payment as SharedPayment } from '@shared/lib/dat
 // ============================================================================
 
 type QueueItem = CheckInQueueItem
-type Payment = Pick<SharedPayment, 'id' | 'amount' | 'payment_method' | 'doctor_id'>
+type Payment = Pick<SharedPayment, 'id' | 'amount' | 'payment_method'>
 
 type TabFilter = 'today' | 'yesterday' | 'week'
 
@@ -69,20 +69,6 @@ export default function ReportsPage() {
         return sum + (new Date(q.called_at!).getTime() - new Date(q.checked_in_at).getTime()) / 60000
       }, 0) / completedWithTimes.length)
     : 0
-
-  // Doctor breakdown
-  const doctorMap = new Map<string, { name: string; patients: number; revenue: number }>()
-  for (const item of queue) {
-    const name = item.doctor?.full_name || 'طبيب'
-    const existing = doctorMap.get(item.doctor_id) || { name, patients: 0, revenue: 0 }
-    existing.patients++
-    doctorMap.set(item.doctor_id, existing)
-  }
-  for (const p of payments) {
-    const existing = doctorMap.get(p.doctor_id)
-    if (existing) existing.revenue += Number(p.amount || 0)
-  }
-  const doctorBreakdown = Array.from(doctorMap.values()).sort((a, b) => b.patients - a.patients)
 
   const tabs: { key: TabFilter; label: string }[] = [
     { key: 'today', label: 'اليوم' },
@@ -173,28 +159,6 @@ export default function ReportsPage() {
                 </p>
               )}
             </div>
-
-            {/* Doctor Breakdown */}
-            {doctorBreakdown.length > 0 && (
-              <div>
-                <h2 className="font-cairo text-[14px] font-semibold text-[#4B5563] mb-2">تفاصيل الأطباء</h2>
-                <div className="space-y-2">
-                  {doctorBreakdown.map((doc, i) => (
-                    <div key={i} className="bg-white rounded-[12px] border-[0.8px] border-[#E5E7EB] p-3.5 flex items-center justify-between">
-                      <div>
-                        <p className="font-cairo text-[14px] font-medium text-[#030712]">
-                          د. {doc.name.replace(/^د\.\s*/, '')}
-                        </p>
-                        <p className="font-cairo text-[12px] text-[#6B7280]">{doc.patients} مريض</p>
-                      </div>
-                      <p className="font-cairo text-[14px] font-bold text-[#030712]">
-                        {doc.revenue.toLocaleString('ar-EG')} ج.م
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
 
             {/* Settings Section */}
             <div className="pt-2">

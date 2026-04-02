@@ -148,6 +148,8 @@ export async function GET(request: NextRequest) {
         total,
         hasMore: from + list.length < total,
       },
+      // Doctor name list — used only for the filter dropdown on the payments list page.
+      // This contains no revenue data; per-doctor revenue aggregation is not exposed.
       doctors: docIds.map(id => ({ id, full_name: doctorsMap[id] || 'طبيب' }))
     })
 

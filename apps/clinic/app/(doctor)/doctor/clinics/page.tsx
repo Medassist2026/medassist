@@ -381,11 +381,13 @@ function LeaveConfirmDialog({
   onConfirm,
   onCancel,
   leaving,
+  error,
 }: {
   clinic: ClinicData
   onConfirm: () => void
   onCancel:  () => void
   leaving:   boolean
+  error:     string | null
 }) {
   return (
     <>
@@ -407,6 +409,11 @@ function LeaveConfirmDialog({
           <p className="font-cairo text-[12px] text-[#9CA3AF] text-center mb-4">
             يمكنك الانضمام مجدداً برمز الدعوة إذا احتجت.
           </p>
+          {error && (
+            <div className="bg-[#FEF2F2] border border-[#FECACA] rounded-[8px] px-3 py-2 mb-3">
+              <p className="font-cairo text-[13px] text-[#DC2626] text-center">{error}</p>
+            </div>
+          )}
           <div className="flex gap-3">
             <button
               onClick={onConfirm}
@@ -444,6 +451,7 @@ export default function ClinicsPage() {
   const [switching, setSwitching] = useState(false)
   const [leaveTarget, setLeaveTarget] = useState<ClinicData | null>(null)
   const [leaving,     setLeaving]     = useState(false)
+  const [leaveError,  setLeaveError]  = useState<string | null>(null)
 
   useEffect(() => {
     async function load() {
@@ -495,6 +503,7 @@ export default function ClinicsPage() {
   const handleLeaveClinic = async () => {
     if (!leaveTarget) return
     setLeaving(true)
+    setLeaveError(null)
     try {
       const res = await fetch('/api/clinic/leave', {
         method: 'DELETE',
@@ -503,13 +512,13 @@ export default function ClinicsPage() {
       })
       if (!res.ok) {
         const data = await res.json()
-        alert(data.error || 'فشل في مغادرة العيادة')
+        setLeaveError(data.error || 'فشل في مغادرة العيادة')
         return
       }
       setClinics(prev => prev.filter(c => c.id !== leaveTarget.id))
       setLeaveTarget(null)
     } catch {
-      alert('حدث خطأ. حاول مرة أخرى')
+      setLeaveError('حدث خطأ. حاول مرة أخرى')
     } finally {
       setLeaving(false)
     }
@@ -594,8 +603,9 @@ export default function ClinicsPage() {
         <LeaveConfirmDialog
           clinic={leaveTarget}
           onConfirm={handleLeaveClinic}
-          onCancel={() => setLeaveTarget(null)}
+          onCancel={() => { setLeaveTarget(null); setLeaveError(null) }}
           leaving={leaving}
+          error={leaveError}
         />
       )}
 

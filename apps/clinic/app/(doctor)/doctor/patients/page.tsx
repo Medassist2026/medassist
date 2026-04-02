@@ -226,7 +226,7 @@ function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatientModalProps) {
                     >
                       <div>
                         <div className="font-medium">{patient.name}</div>
-                        <div className="text-sm text-gray-500">{patient.phone}</div>
+                        <div className="text-sm text-gray-500" dir="ltr">{patient.phone}</div>
                       </div>
                       <button
                         onClick={() => handleAddExisting(patient)}
@@ -400,7 +400,7 @@ function PatientCard({ patient, onStartSession, onViewDetails }: PatientCardProp
           </div>
 
           <div className="text-sm text-gray-500 mt-0.5">
-            {patient.phone}
+            <span dir="ltr">{patient.phone}</span>
             {age && ` • ${age} سنة`}
             {patient.gender && ` • ${patient.gender}`}
           </div>

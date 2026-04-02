@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { ChevronRight, ChevronDown, User, Stethoscope, Phone, Mail, Building2, Hash, Users, FileText, Banknote } from 'lucide-react'
+import Link from 'next/link'
+import { ChevronRight, ChevronDown, ChevronLeft, User, Stethoscope, Phone, Mail, Building2, Hash, Users, FileText, Banknote, TrendingUp } from 'lucide-react'
 
 // ============================================================================
 // TYPES
@@ -220,11 +221,9 @@ export default function ProfilePage() {
             <div className="space-y-4">
             {/* Profile Header Card */}
             <div className="bg-white rounded-[16px] border-[0.8px] border-[#E5E7EB] p-5 flex items-center gap-4">
-              {/* Avatar */}
+              {/* Avatar — no initials: Egyptian users don't use name abbreviations */}
               <div className="w-16 h-16 rounded-full bg-[#DCFCE7] flex items-center justify-center flex-shrink-0">
-                <span className="font-cairo text-[24px] font-bold text-[#16A34A]">
-                  {data.doctor.fullName?.charAt(0) || 'د'}
-                </span>
+                <User className="w-8 h-8 text-[#16A34A]" strokeWidth={1.5} />
               </div>
 
               <div className="flex-1 min-w-0">
@@ -361,6 +360,22 @@ export default function ProfilePage() {
                   </div>
                 </div>
               )}
+              {/* Analytics Link */}
+              <Link
+                href="/doctor/analytics"
+                className="flex items-center justify-between bg-white rounded-[12px] border-[0.8px] border-[#E5E7EB] p-4 hover:bg-[#F9FAFB] transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-[8px] bg-[#F0FDF4] flex items-center justify-center">
+                    <TrendingUp className="w-4 h-4 text-[#16A34A]" />
+                  </div>
+                  <div>
+                    <p className="font-cairo text-[14px] font-medium text-[#030712]">الإحصائيات التفصيلية</p>
+                    <p className="font-cairo text-[11px] text-[#9CA3AF]">الإيرادات والزيارات يومياً وشهرياً</p>
+                  </div>
+                </div>
+                <ChevronLeft className="w-4 h-4 text-[#9CA3AF]" />
+              </Link>
             </div>{/* end right column */}
           </div>
         )}

@@ -492,9 +492,17 @@ export function SessionForm({ preselectedPatientId, queueId }: SessionFormProps)
     async function loadPatient() {
       try {
         const res = await fetch(`/api/doctor/patients/${preselectedPatientId}`)
+        if (!res.ok && !cancelled) {
+          setError('لم يُعثر على المريض — تحقق من الرابط أو عُد للوحة التحكم')
+          return
+        }
         if (res.ok && !cancelled) {
           const data = await res.json()
           const patient = data.patient
+          if (!patient && !cancelled) {
+            setError('لم يُعثر على المريض — تحقق من الرابط أو عُد للوحة التحكم')
+            return
+          }
           if (patient) {
             const p: PatientData = {
               id: patient.id,
@@ -525,7 +533,7 @@ export function SessionForm({ preselectedPatientId, queueId }: SessionFormProps)
             setStep(2)
           }
         }
-      } catch { /* Patient not found */ }
+      } catch { if (!cancelled) setError('تعذر تحميل بيانات المريض — تحقق من الاتصال أو عُد للوحة التحكم') }
     }
 
     loadPatient()
@@ -869,8 +877,9 @@ export function SessionForm({ preselectedPatientId, queueId }: SessionFormProps)
   ]
 
   const setFollowUpFromChip = (days: number) => {
-    const d = new Date()
-    d.setDate(d.getDate() + days)
+    // Use Cairo time (UTC+3) so follow-up date is correct even after 9 PM Egypt time
+    const nowCairo = new Date(Date.now() + 3 * 60 * 60 * 1000)
+    const d = new Date(Date.UTC(nowCairo.getUTCFullYear(), nowCairo.getUTCMonth(), nowCairo.getUTCDate() + days))
     setFollowUpDate(d.toISOString().split('T')[0])
   }
 
