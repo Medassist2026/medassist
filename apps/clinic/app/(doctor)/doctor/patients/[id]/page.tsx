@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import {
-  ArrowRight,
   Play,
   AlertTriangle,
   Phone,
@@ -367,20 +366,41 @@ export default function PatientDetailsPage() {
   const router  = useRouter()
   const patientId = params?.id as string
 
-  const [data, setData]         = useState<ApiResponse | null>(null)
-  const [loading, setLoading]   = useState(true)
+  const [data, setData]           = useState<ApiResponse | null>(null)
+  const [loading, setLoading]     = useState(true)
+  const [error, setError]         = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<TabId>('overview')
 
-  useEffect(() => {
+  const loadPatient = () => {
+    setLoading(true)
+    setError(null)
     fetch(`/api/doctor/patients/${patientId}`)
-      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
       .then(setData)
-      .catch(() => {})
+      .catch(() => setError('فشل في تحميل بيانات المريض'))
       .finally(() => setLoading(false))
-  }, [patientId])
+  }
+
+  useEffect(() => {
+    loadPatient()
+  }, [patientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Show skeleton immediately — no full-page spinner
   if (loading) return <PageSkeleton />
+
+  if (error) {
+    return (
+      <div dir="rtl" className="flex flex-col items-center justify-center min-h-screen gap-4 px-6">
+        <p className="font-cairo text-[14px] text-[#EF4444]">{error}</p>
+        <button
+          onClick={loadPatient}
+          className="font-cairo text-[13px] font-semibold text-white bg-[#16A34A] px-4 py-2 rounded-[10px] hover:bg-[#15803D] transition-colors"
+        >
+          إعادة المحاولة
+        </button>
+      </div>
+    )
+  }
 
   if (!data?.patient) {
     return (
