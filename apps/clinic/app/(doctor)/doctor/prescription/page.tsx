@@ -1,11 +1,11 @@
 'use client'
 
 import { useSearchParams } from 'next/navigation'
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, Suspense } from 'react'
 import { useRouter } from 'next/navigation'
 import PrescriptionPrint from '@shared/components/clinical/PrescriptionPrint'
 import { ar } from '@shared/lib/i18n/ar'
-import { FileText, ArrowRight } from 'lucide-react'
+import { FileText, ChevronLeft } from 'lucide-react'
 import { DEFAULT_TEMPLATES, type PrescriptionTemplate } from '@shared/components/clinical/TemplateModal'
 import { MedicationChips, type MedicationEntry } from '@shared/components/clinical/MedicationChips'
 
@@ -269,10 +269,10 @@ function EditTemplateDrawer({
 }
 
 // ============================================================================
-// MAIN PAGE
+// MAIN PAGE CONTENT (wrapped in Suspense below — required for useSearchParams)
 // ============================================================================
 
-export default function PrescriptionPage() {
+function PrescriptionPageContent() {
   const searchParams = useSearchParams()
   const router       = useRouter()
   const noteId       = searchParams.get('noteId')
@@ -292,6 +292,7 @@ export default function PrescriptionPage() {
   const [showCreateDrawer, setShowCreateDrawer] = useState(false)
   const [editingTemplate, setEditingTemplate]   = useState<CustomTemplate | null>(null)
   const [templateSearch, setTemplateSearch]     = useState('')
+  const [deletingTemplateId, setDeletingTemplateId] = useState<string | null>(null)
 
   // ── Load functions ──────────────────────────────────────────────────────
 
@@ -514,7 +515,7 @@ export default function PrescriptionPage() {
               onClick={() => router.push('/doctor/session')}
               className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#16A34A] text-white rounded-xl text-[14px] font-cairo font-medium hover:bg-[#15803D] transition-colors"
             >
-              <ArrowRight className="w-4 h-4" />
+              <ChevronLeft className="w-4 h-4" />
               ابدأ جلسة جديدة
             </button>
           </div>
@@ -721,24 +722,43 @@ export default function PrescriptionPage() {
                     <div className="flex items-start justify-between gap-2">
                       <span className="font-cairo font-bold text-[14px] text-[#030712]">{tpl.name}</span>
                       <div className="flex items-center gap-2 flex-shrink-0 mt-0.5">
-                        <button
-                          onClick={() => setEditingTemplate(tpl)}
-                          className="text-[#9CA3AF] hover:text-[#16A34A] transition-colors"
-                          title="تعديل"
-                        >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                          </svg>
-                        </button>
-                        <button
-                          onClick={() => handleDeleteTemplate(tpl.id)}
-                          className="text-[#9CA3AF] hover:text-[#DC2626] transition-colors"
-                          title="حذف"
-                        >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
-                        </button>
+                        {deletingTemplateId === tpl.id ? (
+                          <>
+                            <button
+                              onClick={() => { handleDeleteTemplate(tpl.id); setDeletingTemplateId(null) }}
+                              className="px-2 py-0.5 bg-[#DC2626] text-white rounded-[6px] font-cairo text-[12px] font-semibold"
+                            >
+                              حذف
+                            </button>
+                            <button
+                              onClick={() => setDeletingTemplateId(null)}
+                              className="px-2 py-0.5 border border-[#E5E7EB] text-[#6B7280] rounded-[6px] font-cairo text-[12px]"
+                            >
+                              إلغاء
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => setEditingTemplate(tpl)}
+                              className="text-[#9CA3AF] hover:text-[#16A34A] transition-colors"
+                              title="تعديل"
+                            >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={() => setDeletingTemplateId(tpl.id)}
+                              className="text-[#9CA3AF] hover:text-[#DC2626] transition-colors"
+                              title="حذف"
+                            >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                            </button>
+                          </>
+                        )}
                       </div>
                     </div>
                     <MedChipRow meds={tpl.medications} />
@@ -833,6 +853,21 @@ export default function PrescriptionPage() {
         />
       )}
     </div>
+  )
+}
+
+export default function PrescriptionPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center min-h-screen" dir="rtl">
+        <div className="text-center">
+          <div className="animate-spin w-10 h-10 border-4 border-[#16A34A] border-t-transparent rounded-full mx-auto mb-3" />
+          <p className="font-cairo text-sm text-gray-500">{ar.loading}</p>
+        </div>
+      </div>
+    }>
+      <PrescriptionPageContent />
+    </Suspense>
   )
 }
 
