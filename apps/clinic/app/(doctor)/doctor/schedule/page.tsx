@@ -787,6 +787,8 @@ function AppointmentDetailSheet({
   onCancel,
   cancelling,
 }: AppointmentDetailSheetProps) {
+  const [confirmingCancel, setConfirmingCancel] = useState(false)
+
   if (!appointment) return null
 
   const aptDate = new Date(appointment.start_time)
@@ -846,34 +848,55 @@ function AppointmentDetailSheet({
         {/* Actions */}
         {isActionable ? (
           <div className="flex gap-2 mt-2">
-            {/* Cancel */}
-            <button
-              onClick={() => onCancel(appointment)}
-              disabled={cancelling}
-              className="h-[50px] px-4 rounded-xl border-[0.8px] border-[#FCA5A5] bg-[#FEF2F2] font-cairo text-[13px] font-bold text-[#EF4444] flex items-center justify-center gap-1.5 disabled:opacity-40 active:scale-[0.97] transition-transform"
-            >
-              {cancelling ? (
-                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-              ) : (
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              )}
-              إلغاء الموعد
-            </button>
-            {/* Start session */}
-            <button
-              onClick={() => onStartSession(appointment)}
-              className="flex-1 h-[50px] rounded-xl bg-[#16A34A] text-white font-cairo text-[14px] font-bold flex items-center justify-center gap-2 active:scale-[0.97] transition-transform"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 3l14 9-14 9V3z" />
-              </svg>
-              بدء الجلسة
-            </button>
+            {confirmingCancel ? (
+              /* Second tap: confirm or go back */
+              <>
+                <button
+                  onClick={() => { onCancel(appointment); setConfirmingCancel(false) }}
+                  disabled={cancelling}
+                  className="h-[50px] px-4 rounded-xl border-[0.8px] border-[#FCA5A5] bg-[#FEF2F2] font-cairo text-[13px] font-bold text-[#EF4444] flex items-center justify-center gap-1.5 disabled:opacity-40 active:scale-[0.97] transition-transform"
+                >
+                  {cancelling ? (
+                    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                  ) : null}
+                  تأكيد الإلغاء
+                </button>
+                <button
+                  onClick={() => setConfirmingCancel(false)}
+                  disabled={cancelling}
+                  className="flex-1 h-[50px] rounded-xl border-[0.8px] border-[#D1D5DB] bg-[#F9FAFB] font-cairo text-[13px] font-bold text-[#374151] flex items-center justify-center disabled:opacity-40 active:scale-[0.97] transition-transform"
+                >
+                  رجوع
+                </button>
+              </>
+            ) : (
+              /* First tap: show cancel + start session */
+              <>
+                <button
+                  onClick={() => setConfirmingCancel(true)}
+                  disabled={cancelling}
+                  className="h-[50px] px-4 rounded-xl border-[0.8px] border-[#FCA5A5] bg-[#FEF2F2] font-cairo text-[13px] font-bold text-[#EF4444] flex items-center justify-center gap-1.5 disabled:opacity-40 active:scale-[0.97] transition-transform"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                  إلغاء الموعد
+                </button>
+                {/* Start session */}
+                <button
+                  onClick={() => onStartSession(appointment)}
+                  className="flex-1 h-[50px] rounded-xl bg-[#16A34A] text-white font-cairo text-[14px] font-bold flex items-center justify-center gap-2 active:scale-[0.97] transition-transform"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 3l14 9-14 9V3z" />
+                  </svg>
+                  بدء الجلسة
+                </button>
+              </>
+            )}
           </div>
         ) : (
           <div className="text-center py-2">
@@ -953,7 +976,7 @@ function SchedulePageInner() {
         setAppointments(data.appointments || [])
       }
     } catch (err) {
-      console.error('Failed to load schedule data:', err)
+      void err
       setError('فشل في تحميل الجدول')
     } finally {
       setLoading(false)
@@ -1058,7 +1081,7 @@ function SchedulePageInner() {
       setAvailability(newAvailability)
       setShowWorkingHoursEditor(false)
     } catch (err) {
-      console.error('Failed to save working hours:', err)
+      void err
       setError('فشل في حفظ ساعات العمل')
     } finally {
       setSaving(false)
