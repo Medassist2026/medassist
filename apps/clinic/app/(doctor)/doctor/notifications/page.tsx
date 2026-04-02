@@ -94,28 +94,46 @@ export default function NotificationsPage() {
 
   // Mark all as read
   const markAllRead = async () => {
+    // Optimistic update first
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })))
+    setUnreadCount(0)
     try {
-      await fetch('/api/doctor/notifications', {
+      const res = await fetch('/api/doctor/notifications', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ markAllRead: true }),
       })
-      setNotifications(prev => prev.map(n => ({ ...n, read: true })))
-      setUnreadCount(0)
-    } catch { /* ignore */ }
+      if (!res.ok) throw new Error()
+    } catch {
+      // Revert on failure and show error
+      setLoadError('فشل تحديث الإشعارات، حاول مرة أخرى')
+      await loadNotifications()
+    }
   }
 
-  // Format relative time in Arabic
+  // Format relative time in Arabic with correct plural forms
   const formatTime = (dateStr: string) => {
     const diff = Date.now() - new Date(dateStr).getTime()
     const minutes = Math.floor(diff / 60000)
     if (minutes < 1) return 'الآن'
-    if (minutes < 60) return `منذ ${minutes} دقيقة`
+    if (minutes < 60) {
+      if (minutes === 1) return 'منذ دقيقة'
+      if (minutes === 2) return 'منذ دقيقتين'
+      if (minutes <= 10) return `منذ ${minutes} دقائق`
+      return `منذ ${minutes} دقيقة`
+    }
     const hours = Math.floor(minutes / 60)
-    if (hours < 24) return `منذ ${hours} ساعة`
+    if (hours < 24) {
+      if (hours === 1) return 'منذ ساعة'
+      if (hours === 2) return 'منذ ساعتين'
+      if (hours <= 10) return `منذ ${hours} ساعات`
+      return `منذ ${hours} ساعة`
+    }
     const days = Math.floor(hours / 24)
     if (days === 1) return 'أمس'
-    return `منذ ${days} أيام`
+    if (days === 2) return 'منذ يومين'
+    if (days <= 10) return `منذ ${days} أيام`
+    return `منذ ${days} يوماً`
   }
 
   // Group notifications by date: Today / Yesterday / Earlier

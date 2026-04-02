@@ -444,44 +444,50 @@ function LeaveConfirmDialog({
 
 export default function ClinicsPage() {
   const router = useRouter()
-  const [clinics, setClinics] = useState<ClinicData[]>([])
-  const [loading, setLoading] = useState(true)
+  const [clinics, setClinics]       = useState<ClinicData[]>([])
+  const [loading, setLoading]       = useState(true)
+  const [loadError, setLoadError]   = useState<string | null>(null)
   const [showAddModal,  setShowAddModal]  = useState(false)
   const [showJoinModal, setShowJoinModal] = useState(false)
-  const [switching, setSwitching] = useState(false)
+  const [switching, setSwitching]   = useState(false)
+  const [switchError, setSwitchError] = useState<string | null>(null)
   const [leaveTarget, setLeaveTarget] = useState<ClinicData | null>(null)
   const [leaving,     setLeaving]     = useState(false)
   const [leaveError,  setLeaveError]  = useState<string | null>(null)
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const res = await fetch('/api/clinic')
-        if (res.ok) {
-          const data = await res.json()
-          if (data.success && data.allClinics) {
-            const enriched: ClinicData[] = data.allClinics.map((c: any) => ({
-              id: c.id,
-              name: c.name,
-              uniqueId: c.uniqueId,
-              role: c.role,
-              isActive: c.id === data.clinic?.id,
-              doctorCount: c.id === data.clinic?.id ? data.doctorCount : undefined,
-              staffCount:  c.id === data.clinic?.id ? data.staffCount  : undefined,
-            }))
-            setClinics(enriched)
-          }
-        }
-      } catch {
-        // graceful fail
+  const loadClinics = async () => {
+    setLoading(true)
+    setLoadError(null)
+    try {
+      const res = await fetch('/api/clinic')
+      if (!res.ok) throw new Error()
+      const data = await res.json()
+      if (data.success && data.allClinics) {
+        const enriched: ClinicData[] = data.allClinics.map((c: any) => ({
+          id: c.id,
+          name: c.name,
+          uniqueId: c.uniqueId,
+          role: c.role,
+          isActive: c.id === data.clinic?.id,
+          doctorCount: c.id === data.clinic?.id ? data.doctorCount : undefined,
+          staffCount:  c.id === data.clinic?.id ? data.staffCount  : undefined,
+        }))
+        setClinics(enriched)
       }
+    } catch {
+      setLoadError('فشل في تحميل العيادات')
+    } finally {
       setLoading(false)
     }
-    load()
-  }, [])
+  }
+
+  useEffect(() => {
+    loadClinics()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSwitch = async (clinicId: string) => {
     setSwitching(true)
+    setSwitchError(null)
     try {
       const res = await fetch('/api/clinic/switch', {
         method: 'POST',
@@ -491,9 +497,15 @@ export default function ClinicsPage() {
       if (res.ok) {
         setClinics(prev => prev.map(c => ({ ...c, isActive: c.id === clinicId })))
         setTimeout(() => { router.push('/doctor/dashboard'); router.refresh() }, 300)
+      } else {
+        const data = await res.json().catch(() => ({}))
+        setSwitchError(data.error || 'فشل في تبديل العيادة')
       }
-    } catch { /* ignore */ }
-    setSwitching(false)
+    } catch {
+      setSwitchError('فشل في تبديل العيادة، حاول مرة أخرى')
+    } finally {
+      setSwitching(false)
+    }
   }
 
   const handleClinicCreated = (newClinic: ClinicData) => {
@@ -551,10 +563,30 @@ export default function ClinicsPage() {
 
         {/* Content */}
         <div className="px-4 pb-24">
+          {/* Switch error toast */}
+          {switchError && (
+            <div className="mb-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
+              <p className="font-cairo text-[13px] text-red-700">{switchError}</p>
+              <button onClick={() => setSwitchError(null)} className="text-red-400 hover:text-red-600 flex-shrink-0">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
           {loading ? (
             <div className="text-center py-16">
               <div className="w-10 h-10 border-2 border-[#16A34A] border-t-transparent rounded-full animate-spin mx-auto mb-3" />
               <p className="font-cairo text-[14px] text-[#6B7280]">جاري التحميل...</p>
+            </div>
+          ) : loadError ? (
+            <div className="text-center py-16 px-4">
+              <Building2 className="w-12 h-12 text-red-300 mx-auto mb-4" />
+              <p className="font-cairo text-[14px] text-red-600 mb-4">{loadError}</p>
+              <button
+                onClick={loadClinics}
+                className="font-cairo text-[14px] font-semibold text-white bg-[#16A34A] px-5 py-2 rounded-[10px] hover:bg-[#15803D] transition-colors"
+              >
+                إعادة المحاولة
+              </button>
             </div>
           ) : clinics.length === 0 ? (
             <div className="text-center py-16">
