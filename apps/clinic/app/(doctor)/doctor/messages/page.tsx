@@ -261,65 +261,214 @@ const QUICK_REPLIES = [
 ]
 
 // ============================================================================
-// PATIENT CONTEXT BANNER
+// PATIENT PROFILE CARD — collapsible summary panel inside chat
 // ============================================================================
 
-interface PatientContext {
+interface PatientCardData {
+  // from /api/doctor/patients/:id
+  age: number | null
+  sex: string | null
+  bloodType: string | null
+  // from /api/clinical/patient-summary
+  totalVisits: number
   lastVisitDate: string | null
-  chiefComplaint: string | null
-  medications: string[]
+  lastComplaints: string[]
+  lastDiagnoses: string[]
+  activeMeds: string[]
   allergies: string[]
+  chronicDiseases: string[]
+  followUpDate: string | null
 }
 
-function PatientContextBanner({ patientId }: { patientId: string }) {
-  const [ctx, setCtx] = useState<PatientContext | null>(null)
+const SEX_AR: Record<string, string> = { male: 'ذكر', female: 'أنثى', m: 'ذكر', f: 'أنثى' }
+
+function PatientProfileCard({ patient }: { patient: Patient }) {
+  const router = useRouter()
+  const [data, setData]       = useState<PatientCardData | null>(null)
+  const [expanded, setExpanded] = useState(false)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     let cancelled = false
     async function load() {
       try {
-        const res = await fetch(`/api/doctor/patients/${patientId}`)
-        if (!res.ok || cancelled) return
-        const data = await res.json()
-        const patient = data.patient
-        if (!patient || cancelled) return
+        const [profileRes, summaryRes] = await Promise.all([
+          fetch(`/api/doctor/patients/${patient.id}`),
+          fetch(`/api/clinical/patient-summary?patientId=${patient.id}`),
+        ])
 
-        let lastNote: any = null
-        try {
-          const notesRes = await fetch(`/api/clinical/patient-notes?patientId=${patientId}&limit=1`)
-          if (notesRes.ok) {
-            const notesData = await notesRes.json()
-            lastNote = notesData.notes?.[0] || null
-          }
-        } catch { /* no notes */ }
-
+        const profile = profileRes.ok ? (await profileRes.json()) : null
+        const summary = summaryRes.ok ? (await summaryRes.json()) : null
         if (cancelled) return
-        setCtx({
-          lastVisitDate: lastNote?.created_at || patient.last_visit_date || null,
-          chiefComplaint: lastNote?.chief_complaint?.[0] || null,
-          medications: (lastNote?.medications || []).map((m: any) => m.name).slice(0, 3),
-          allergies: patient.allergies || [],
+
+        const p = profile?.patient ?? {}
+        const lv = summary?.lastVisit ?? null
+
+        setData({
+          age:           p.age ?? null,
+          sex:           p.sex ?? null,
+          bloodType:     p.blood_type || null,
+          totalVisits:   summary?.totalVisits ?? 0,
+          lastVisitDate: lv?.date ?? null,
+          lastComplaints: lv?.complaints ?? [],
+          lastDiagnoses:  lv?.diagnoses  ?? [],
+          activeMeds:    (lv?.medications ?? []).map((m: any) => m.name).filter(Boolean).slice(0, 4),
+          allergies:     summary?.allergies       ?? p.allergies       ?? [],
+          chronicDiseases: summary?.chronicDiseases ?? p.chronic_conditions ?? [],
+          followUpDate:  summary?.pendingFollowUp?.date ?? null,
         })
-      } catch { /* silent */ }
+      } catch { /* silent */ } finally {
+        if (!cancelled) setLoading(false)
+      }
     }
     load()
     return () => { cancelled = true }
-  }, [patientId])
+  }, [patient.id])
 
-  if (!ctx || (!ctx.lastVisitDate && !ctx.chiefComplaint && ctx.medications.length === 0)) return null
+  if (loading) return (
+    <div className="mx-3 mt-2 px-3 py-1.5 bg-[#F9FAFB] border border-[#E5E7EB] rounded-[10px] animate-pulse">
+      <div className="h-3 w-48 bg-[#E5E7EB] rounded" />
+    </div>
+  )
 
-  const visitDate = ctx.lastVisitDate
-    ? new Date(ctx.lastVisitDate).toLocaleDateString('ar-EG', { month: 'short', day: 'numeric' })
+  if (!data) return null
+
+  const sexLabel       = data.sex ? (SEX_AR[data.sex.toLowerCase()] ?? data.sex) : null
+  const visitDateLabel = data.lastVisitDate
+    ? new Date(data.lastVisitDate).toLocaleDateString('ar-EG', { month: 'short', day: 'numeric' })
+    : null
+  const followLabel    = data.followUpDate
+    ? new Date(data.followUpDate).toLocaleDateString('ar-EG', { month: 'short', day: 'numeric' })
     : null
 
+  // ── Collapsed pill ──────────────────────────────────────────────────────────
+  const collapsedRow = (
+    <div className="flex items-center gap-2 flex-wrap">
+      {data.age     && <span className="font-semibold">{data.age} سنة</span>}
+      {sexLabel     && <span className="text-[#6B7280]">· {sexLabel}</span>}
+      {data.bloodType && (
+        <span className="px-1.5 py-0.5 bg-[#FEE2E2] text-[#DC2626] rounded text-[10px] font-bold">
+          {data.bloodType}
+        </span>
+      )}
+      {data.totalVisits > 0 && (
+        <span className="text-[#6B7280]">· {data.totalVisits} زيارة</span>
+      )}
+      {data.allergies.length > 0 && (
+        <span className="px-1.5 py-0.5 bg-[#FEF3C7] text-[#92400E] rounded text-[10px] font-semibold">
+          ⚠ حساسية
+        </span>
+      )}
+    </div>
+  )
+
   return (
-    <div className="mx-3 mt-2 px-3 py-2 bg-[#EFF6FF] border border-[#BFDBFE] rounded-[10px]">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-cairo text-[11px] text-[#1E40AF]">
-        {visitDate && <span>آخر زيارة: {visitDate}</span>}
-        {ctx.chiefComplaint && <span>| {ctx.chiefComplaint}</span>}
-        {ctx.medications.length > 0 && <span>| Rx: {ctx.medications.join('، ')}</span>}
-        {ctx.allergies.length > 0 && <span className="text-[#DC2626]">| حساسية: {ctx.allergies.join('، ')}</span>}
+    <div className="mx-3 mt-2 border border-[#E5E7EB] rounded-[12px] overflow-hidden bg-white shadow-[0_1px_3px_rgba(0,0,0,0.06)]">
+      {/* ── Header row — always visible ── */}
+      <div
+        className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-[#F9FAFB] transition-colors"
+        onClick={() => setExpanded(v => !v)}
+      >
+        <div className="flex-1 min-w-0">
+          {collapsedRow}
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); router.push(`/doctor/patients/${patient.id}`) }}
+            className="font-cairo text-[11px] text-[#16A34A] hover:underline"
+          >
+            الملف الكامل ←
+          </button>
+          <svg
+            className={`w-4 h-4 text-[#9CA3AF] transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </div>
       </div>
+
+      {/* ── Expanded panel ── */}
+      {expanded && (
+        <div className="border-t border-[#F3F4F6] px-3 py-2.5 space-y-2 bg-[#FAFAFA]">
+
+          {/* Last visit */}
+          {(visitDateLabel || data.lastComplaints.length > 0 || data.lastDiagnoses.length > 0) && (
+            <div className="flex gap-2">
+              <span className="font-cairo text-[11px] text-[#6B7280] flex-shrink-0 pt-0.5">آخر زيارة</span>
+              <div className="flex-1 min-w-0">
+                {visitDateLabel && (
+                  <span className="font-cairo text-[11px] text-[#374151] font-medium">{visitDateLabel}</span>
+                )}
+                {data.lastComplaints.length > 0 && (
+                  <p className="font-cairo text-[11px] text-[#4B5563] mt-0.5">
+                    الشكوى: {data.lastComplaints.slice(0, 2).join(' · ')}
+                  </p>
+                )}
+                {data.lastDiagnoses.length > 0 && (
+                  <p className="font-cairo text-[11px] text-[#4B5563]">
+                    التشخيص: {data.lastDiagnoses.slice(0, 2).join(' · ')}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Active medications */}
+          {data.activeMeds.length > 0 && (
+            <div className="flex gap-2 items-start">
+              <span className="font-cairo text-[11px] text-[#6B7280] flex-shrink-0 pt-0.5">الأدوية</span>
+              <div className="flex flex-wrap gap-1">
+                {data.activeMeds.map(m => (
+                  <span key={m} className="px-2 py-0.5 bg-[#DCFCE7] text-[#166534] font-cairo text-[11px] rounded-full">
+                    {m}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Chronic diseases */}
+          {data.chronicDiseases.length > 0 && (
+            <div className="flex gap-2 items-start">
+              <span className="font-cairo text-[11px] text-[#6B7280] flex-shrink-0 pt-0.5">أمراض مزمنة</span>
+              <div className="flex flex-wrap gap-1">
+                {data.chronicDiseases.map(d => (
+                  <span key={d} className="px-2 py-0.5 bg-[#EFF6FF] text-[#1D4ED8] font-cairo text-[11px] rounded-full">
+                    {d}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Allergies */}
+          {data.allergies.length > 0 && (
+            <div className="flex gap-2 items-start">
+              <span className="font-cairo text-[11px] text-[#6B7280] flex-shrink-0 pt-0.5">حساسية</span>
+              <div className="flex flex-wrap gap-1">
+                {data.allergies.map(a => (
+                  <span key={a} className="px-2 py-0.5 bg-[#FEE2E2] text-[#DC2626] font-cairo text-[11px] font-medium rounded-full">
+                    ⚠ {a}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Upcoming follow-up */}
+          {followLabel && (
+            <div className="flex gap-2 items-center">
+              <span className="font-cairo text-[11px] text-[#6B7280] flex-shrink-0">متابعة</span>
+              <span className="px-2 py-0.5 bg-[#FEF9C3] text-[#92400E] font-cairo text-[11px] font-medium rounded-full">
+                📅 {followLabel}
+              </span>
+            </div>
+          )}
+
+        </div>
+      )}
     </div>
   )
 }
@@ -400,7 +549,7 @@ function ChatView({
         )}
       </div>
 
-      <PatientContextBanner patientId={patient.id} />
+      <PatientProfileCard patient={patient} />
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-4 bg-[#F9FAFB]">
