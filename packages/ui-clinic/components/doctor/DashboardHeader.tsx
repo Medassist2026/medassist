@@ -51,7 +51,7 @@ export function DashboardHeader({
   const hasMultipleClinics = (allClinics?.length ?? 0) > 1
   const [switching, setSwitching] = useState(false)
 
-  const displayWaiting = waitingCount ?? Math.max(0, expectedCount)
+  const displayWaiting = waitingCount ?? 0
 
   const handleClinicSwitch = async (newClinicId: string) => {
     setClinicDropdownOpen(false)
@@ -64,8 +64,8 @@ export function DashboardHeader({
         body: JSON.stringify({ clinicId: newClinicId }),
       })
       if (res.ok) router.refresh()
-    } catch (error) {
-      console.error('Failed to switch clinic:', error)
+    } catch {
+      // clinic switch failed silently — user can retry
     } finally {
       setSwitching(false)
     }

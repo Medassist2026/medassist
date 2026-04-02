@@ -23,7 +23,6 @@ export async function GET() {
 
     return NextResponse.json({ success: true, queue })
   } catch (error: any) {
-    console.error('Doctor queue fetch error:', error)
     return toApiErrorResponse(error, 'Failed to fetch queue')
   }
 }
