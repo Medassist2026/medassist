@@ -110,6 +110,7 @@ export default function StaffManagementPage() {
   const [members, setMembers] = useState<StaffMember[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [inviteCodeError, setInviteCodeError] = useState(false)
   const [inviteCode, setInviteCode] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
 
@@ -128,10 +129,12 @@ export default function StaffManagementPage() {
   async function loadStaff() {
     try {
       const res = await fetch('/api/clinic/staff')
+      if (!res.ok) throw new Error('فشل في تحميل بيانات الفريق')
       const data = await res.json()
       if (data.success) setMembers(data.members || [])
-    } catch {
-      setError('فشل في تحميل بيانات الفريق')
+      else throw new Error('فشل في تحميل بيانات الفريق')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'فشل في تحميل بيانات الفريق')
     } finally {
       setLoading(false)
     }
@@ -140,9 +143,13 @@ export default function StaffManagementPage() {
   async function loadInviteCode() {
     try {
       const res = await fetch('/api/clinic/invite-code')
+      if (!res.ok) { setInviteCodeError(true); return }
       const data = await res.json()
       if (data.inviteCode) setInviteCode(data.inviteCode)
-    } catch { /* ignore */ }
+      else setInviteCodeError(true)
+    } catch {
+      setInviteCodeError(true)
+    }
   }
 
   const copyCode = () => {
@@ -167,9 +174,12 @@ export default function StaffManagementPage() {
       if (res.ok) {
         setShowAssignModal(false)
         loadStaff()
+      } else {
+        const data = await res.json().catch(() => ({}))
+        setError(data.error || 'فشل في إنشاء التعيين')
       }
     } catch {
-      setError('فشل في إنشاء التعيين')
+      setError('فشل في إنشاء التعيين، تحقق من الاتصال')
     } finally {
       setSaving(false)
     }
@@ -188,8 +198,8 @@ export default function StaffManagementPage() {
       }
       setMemberToRemove(null)
       loadStaff()
-    } catch (err: any) {
-      setError(err.message || 'فشل في إزالة العضو')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'فشل في إزالة العضو')
     }
   }
 
@@ -219,8 +229,21 @@ export default function StaffManagementPage() {
 
         <div className="px-4 pb-24 space-y-4">
           {error && (
-            <div className="p-3 bg-[#FEF2F2] border-[0.8px] border-[#FECACA] rounded-[12px] font-cairo text-[13px] text-[#DC2626] text-center">
-              {error}
+            <div className="flex items-start gap-3 p-3 bg-[#FEF2F2] border-[0.8px] border-[#FECACA] rounded-[12px]">
+              <p className="flex-1 font-cairo text-[13px] text-[#DC2626]">{error}</p>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <button
+                  onClick={() => { setError(null); setLoading(true); loadStaff() }}
+                  className="font-cairo text-[12px] text-[#DC2626] underline hover:no-underline"
+                >
+                  إعادة المحاولة
+                </button>
+                <button onClick={() => setError(null)} className="text-[#DC2626] hover:text-[#B91C1C]">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
             </div>
           )}
 
@@ -233,24 +256,37 @@ export default function StaffManagementPage() {
               شارك هذا الكود مع المساعد للانضمام للعيادة
             </p>
 
-            <div className="flex items-center gap-3">
-              <div className="flex-1 h-[48px] bg-[#F9FAFB] border-[0.8px] border-[#E5E7EB] rounded-[10px] flex items-center justify-center">
-                <span className="font-cairo text-[20px] font-bold text-[#030712] tracking-widest">
-                  {inviteCode || '------'}
-                </span>
+            {inviteCodeError ? (
+              <div className="flex items-center gap-3">
+                <p className="flex-1 font-cairo text-[12px] text-[#DC2626]">تعذر تحميل كود الدعوة</p>
+                <button
+                  onClick={() => { setInviteCodeError(false); loadInviteCode() }}
+                  className="px-3 h-[36px] bg-[#F3F4F6] hover:bg-[#E5E7EB] text-[#4B5563] font-cairo text-[12px] font-medium rounded-[10px] transition-colors"
+                >
+                  إعادة المحاولة
+                </button>
               </div>
-              <button
-                onClick={copyCode}
-                className={`h-[48px] px-4 rounded-[10px] flex items-center gap-2 font-cairo text-[13px] font-medium transition-colors ${
-                  copied
-                    ? 'bg-[#DCFCE7] text-[#16A34A]'
-                    : 'bg-[#16A34A] hover:bg-[#15803D] text-white'
-                }`}
-              >
-                {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                {copied ? 'تم النسخ' : 'نسخ'}
-              </button>
-            </div>
+            ) : (
+              <div className="flex items-center gap-3">
+                <div className="flex-1 h-[48px] bg-[#F9FAFB] border-[0.8px] border-[#E5E7EB] rounded-[10px] flex items-center justify-center">
+                  <span className="font-cairo text-[20px] font-bold text-[#030712] tracking-widest">
+                    {inviteCode || '------'}
+                  </span>
+                </div>
+                <button
+                  onClick={copyCode}
+                  disabled={!inviteCode}
+                  className={`h-[48px] px-4 rounded-[10px] flex items-center gap-2 font-cairo text-[13px] font-medium transition-colors disabled:opacity-50 ${
+                    copied
+                      ? 'bg-[#DCFCE7] text-[#16A34A]'
+                      : 'bg-[#16A34A] hover:bg-[#15803D] text-white'
+                  }`}
+                >
+                  {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                  {copied ? 'تم النسخ' : 'نسخ'}
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Members List */}
