@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 
 type VisibilityMode = 'DOCTOR_SCOPED_OWNER' | 'CLINIC_WIDE'
@@ -10,21 +10,32 @@ export default function ClinicVisibilitySettingsPage() {
   const [currentMode, setCurrentMode] = useState<VisibilityMode>('DOCTOR_SCOPED_OWNER')
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [message, setMessage] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [message, setMessage] = useState<{ text: string; isError: boolean } | null>(null)
+  const messageTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     loadSettings()
+    return () => { if (messageTimer.current) clearTimeout(messageTimer.current) }
   }, [])
 
+  function showMessage(text: string, isError: boolean) {
+    setMessage({ text, isError })
+    if (messageTimer.current) clearTimeout(messageTimer.current)
+    if (!isError) {
+      messageTimer.current = setTimeout(() => setMessage(null), 3000)
+    }
+  }
+
   async function loadSettings() {
+    setLoadError(null)
     try {
       const res = await fetch('/api/clinic/settings')
-      if (res.ok) {
-        const data = await res.json()
-        setCurrentMode(data.clinic?.default_visibility || 'DOCTOR_SCOPED_OWNER')
-      }
+      if (!res.ok) throw new Error('فشل في تحميل إعدادات الخصوصية')
+      const data = await res.json()
+      setCurrentMode(data.clinic?.default_visibility || 'DOCTOR_SCOPED_OWNER')
     } catch {
-      // Default mode
+      setLoadError('فشل في تحميل إعدادات الخصوصية، يتم عرض الإعداد الافتراضي')
     } finally {
       setLoading(false)
     }
@@ -41,10 +52,13 @@ export default function ClinicVisibilitySettingsPage() {
       })
       if (res.ok) {
         setCurrentMode(mode)
-        setMessage('تم تحديث إعداد الخصوصية')
+        showMessage('تم تحديث إعداد الخصوصية', false)
+      } else {
+        const data = await res.json().catch(() => ({}))
+        showMessage(data.error || 'فشل في التحديث، حاول مرة أخرى', true)
       }
     } catch {
-      setMessage('فشل في التحديث')
+      showMessage('فشل في التحديث، تحقق من الاتصال', true)
     } finally {
       setSaving(false)
     }
@@ -76,13 +90,21 @@ export default function ClinicVisibilitySettingsPage() {
         </p>
       </div>
 
+      {loadError && (
+        <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
+          <span className="flex-1">{loadError}</span>
+          <button onClick={() => setLoadError(null)} className="text-amber-500 hover:text-amber-700 flex-shrink-0">✕</button>
+        </div>
+      )}
+
       {message && (
-        <div className={`p-3 rounded-xl text-sm text-center ${
-          message.includes('فشل')
+        <div className={`flex items-center gap-2 p-3 rounded-xl text-sm ${
+          message.isError
             ? 'bg-red-50 border border-red-200 text-red-700'
             : 'bg-green-50 border border-green-200 text-green-700'
         }`}>
-          {message}
+          <span className="flex-1 text-center">{message.text}</span>
+          <button onClick={() => setMessage(null)} className="flex-shrink-0 opacity-60 hover:opacity-100">✕</button>
         </div>
       )}
 

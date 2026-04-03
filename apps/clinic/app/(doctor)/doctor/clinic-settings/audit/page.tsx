@@ -10,7 +10,7 @@ interface AuditEvent {
   entity_type: string
   entity_id: string | null
   actor_user_id: string
-  metadata: Record<string, any> | null
+  metadata: Record<string, unknown> | null
   created_at: string
   users?: { phone: string; email: string | null } | null
 }
@@ -49,20 +49,22 @@ export default function AuditLogPage() {
 
   async function loadAuditLog() {
     setLoading(true)
+    setError(null)
     try {
       const params = new URLSearchParams({ limit: '50' })
       if (actionFilter) params.set('action', actionFilter)
 
       const res = await fetch(`/api/clinic/audit-log?${params}`)
+      if (!res.ok) throw new Error('فشل في تحميل سجل المراجعة')
       const data = await res.json()
 
       if (data.success) {
         setEvents(data.events || [])
       } else {
-        setError(data.error || 'فشل في التحميل')
+        throw new Error(data.error || 'فشل في تحميل سجل المراجعة')
       }
-    } catch {
-      setError('فشل في التحميل')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'فشل في التحميل')
     } finally {
       setLoading(false)
     }
@@ -83,8 +85,17 @@ export default function AuditLogPage() {
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-red-700 text-sm">
-          {error}
+        <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-lg p-3 text-red-700 text-sm">
+          <span className="flex-1">{error}</span>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button
+              onClick={() => loadAuditLog()}
+              className="text-red-700 underline hover:no-underline text-xs"
+            >
+              إعادة المحاولة
+            </button>
+            <button onClick={() => setError(null)} className="text-red-400 hover:text-red-700">✕</button>
+          </div>
         </div>
       )}
 
@@ -130,11 +141,12 @@ export default function AuditLogPage() {
                       <td className="px-4 py-3 whitespace-nowrap text-gray-500">
                         {new Date(event.created_at).toLocaleString('ar-EG', {
                           month: 'short', day: 'numeric',
-                          hour: '2-digit', minute: '2-digit'
+                          hour: '2-digit', minute: '2-digit',
+                          timeZone: 'Africa/Cairo',
                         })}
                       </td>
                       <td className="px-4 py-3 text-gray-900">
-                        {(event.users as any)?.phone || event.actor_user_id.slice(0, 8)}
+                        {event.users?.phone || event.actor_user_id.slice(0, 8)}
                       </td>
                       <td className="px-4 py-3">
                         <span className={`font-medium ${actionConfig.color}`}>
