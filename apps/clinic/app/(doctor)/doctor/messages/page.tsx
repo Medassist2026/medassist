@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { ChevronRight, Send, MessageCircle, Paperclip, X, Image, FileText, Check, CheckCheck, Clock, User } from 'lucide-react'
-import { createClient } from '@supabase/supabase-js'
+import { createClient as createSupabaseBrowserClient } from '@shared/lib/supabase/client'
 
 // ============================================================================
 // TYPES
@@ -772,8 +772,6 @@ function ChatView({
 // MAIN PAGE
 // ============================================================================
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 const MAX_ATTACHMENT_SIZE = 5 * 1024 * 1024 // 5 MB
 
 function MessagesPageInner() {
@@ -879,7 +877,7 @@ function MessagesPageInner() {
 
   const uploadAttachment = async (file: File): Promise<{ url: string; name: string; mime: string } | null> => {
     try {
-      const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+      const sb = createSupabaseBrowserClient()
       const ext = file.name.split('.').pop() || 'bin'
       const path = `messages/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
       const { error } = await sb.storage.from('attachments').upload(path, file, { contentType: file.type })
