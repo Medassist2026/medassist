@@ -57,6 +57,7 @@ interface ClinicData {
 export default function ClinicSettingsPage() {
   const [loading, setLoading] = useState(true)
   const [switching, setSwitching] = useState(false)
+  const [switchError, setSwitchError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [clinic, setClinic] = useState<ClinicData | null>(null)
   const [dropdownOpen, setDropdownOpen] = useState(false)
@@ -143,15 +144,23 @@ export default function ClinicSettingsPage() {
   const handleSwitchClinic = async (clinicId: string) => {
     if (clinicId === clinic?.clinicId) { setDropdownOpen(false); return }
     setSwitching(true)
+    setSwitchError(null)
     setDropdownOpen(false)
     try {
-      await fetch('/api/clinic/switch', {
+      const res = await fetch('/api/clinic/switch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ clinicId }),
       })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setSwitchError(data.error || 'فشل تبديل العيادة، حاول مرة أخرى')
+        return
+      }
       setLoading(true)
       await loadClinicData()
+    } catch {
+      setSwitchError('فشل تبديل العيادة، تحقق من الاتصال')
     } finally {
       setSwitching(false)
     }
@@ -170,7 +179,13 @@ export default function ClinicSettingsPage() {
       <div className="max-w-md mx-auto p-4" dir="rtl">
         <div className="bg-red-50 border border-red-200 rounded-2xl p-6 text-center">
           <h1 className="text-lg font-bold text-red-900 mb-2">خطأ</h1>
-          <p className="text-sm text-red-700">{error}</p>
+          <p className="text-sm text-red-700 mb-4">{error}</p>
+          <button
+            onClick={() => { setError(null); setLoading(true); loadClinicData() }}
+            className="px-4 py-2 bg-[#16A34A] hover:bg-[#15803D] text-white font-cairo text-[13px] font-semibold rounded-[10px] transition-colors"
+          >
+            إعادة المحاولة
+          </button>
         </div>
       </div>
     )
@@ -199,6 +214,19 @@ export default function ClinicSettingsPage() {
 
   return (
     <div className="max-w-md mx-auto px-4 py-4 space-y-4 lg:max-w-2xl lg:px-0 lg:py-6" dir="rtl">
+
+      {/* Switch error banner */}
+      {switchError && (
+        <div className="flex items-start gap-3 bg-[#FEF2F2] border border-[#FECACA] rounded-2xl p-4">
+          <svg className="w-5 h-5 text-[#DC2626] flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <p className="flex-1 font-cairo text-[13px] text-[#DC2626]">{switchError}</p>
+          <button onClick={() => setSwitchError(null)} className="text-[#DC2626] hover:text-[#B91C1C] flex-shrink-0">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Non-owner banner */}
       {!isOwner && (

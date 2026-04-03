@@ -72,7 +72,9 @@ function CustomTemplateCard({
   const [editing, setEditing]         = useState(false)
   const [name, setName]               = useState(template.name)
   const [saving, setSaving]           = useState(false)
+  const [renameError, setRenameError] = useState<string | null>(null)
   const [deleting, setDeleting]       = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -85,6 +87,7 @@ function CustomTemplateCard({
     const trimmed = name.trim()
     if (!trimmed || trimmed === template.name) { setEditing(false); setName(template.name); return }
     setSaving(true)
+    setRenameError(null)
     try {
       const res = await fetch(`/api/clinical/templates?id=${template.id}`, {
         method: 'PUT',
@@ -97,7 +100,12 @@ function CustomTemplateCard({
       } else {
         setName(template.name)
         setEditing(false)
+        setRenameError('فشل تغيير الاسم، حاول مرة أخرى')
       }
+    } catch {
+      setName(template.name)
+      setEditing(false)
+      setRenameError('فشل تغيير الاسم، تحقق من الاتصال')
     } finally {
       setSaving(false)
     }
@@ -105,12 +113,20 @@ function CustomTemplateCard({
 
   const handleDelete = async () => {
     setDeleting(true)
+    setDeleteError(null)
     try {
-      await fetch(`/api/clinical/templates?id=${template.id}`, { method: 'DELETE' })
-      onDelete(template.id)
+      const res = await fetch(`/api/clinical/templates?id=${template.id}`, { method: 'DELETE' })
+      if (res.ok) {
+        onDelete(template.id)
+      } else {
+        setDeleteError('فشل الحذف، حاول مرة أخرى')
+        setConfirmDelete(false)
+      }
+    } catch {
+      setDeleteError('فشل الحذف، تحقق من الاتصال')
+      setConfirmDelete(false)
     } finally {
       setDeleting(false)
-      setConfirmDelete(false)
     }
   }
 
@@ -155,10 +171,17 @@ function CustomTemplateCard({
             {template.usage_count ? ` · استُخدم ${template.usage_count} مرة` : ''}
           </p>
 
+          {renameError && (
+            <p className="font-cairo text-[11px] text-[#DC2626] mt-1">{renameError}</p>
+          )}
+
           <MedChipRow meds={template.medications} />
         </div>
 
         {/* Delete — shows inline confirm on first tap */}
+        {deleteError && (
+          <p className="font-cairo text-[11px] text-[#DC2626] shrink-0 max-w-[100px] text-center">{deleteError}</p>
+        )}
         {confirmDelete ? (
           <div className="flex items-center gap-1.5 shrink-0">
             <button
@@ -265,24 +288,34 @@ export default function TemplatesSettingsPage() {
   const [customTemplates, setCustomTemplates] = useState<(PrescriptionTemplate & { usage_count?: number })[]>([])
   const [hiddenIds, setHiddenIds]             = useState<string[]>([])
   const [loading, setLoading]                 = useState(true)
+  const [loadError, setLoadError]             = useState<string | null>(null)
+
+  const loadTemplates = async () => {
+    setLoading(true)
+    setLoadError(null)
+    try {
+      const res = await fetch('/api/clinical/templates')
+      if (!res.ok) throw new Error('فشل تحميل القوالب')
+      const data = await res.json()
+      setCustomTemplates(
+        (data.templates || []).map((t: any) => ({
+          id:          t.id,
+          name:        t.name,
+          medications: t.medications || [],
+          usage_count: t.usage_count || 0,
+        }))
+      )
+    } catch {
+      setLoadError('فشل تحميل القوالب، تحقق من الاتصال')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   // Load custom templates + hidden IDs from localStorage
   useEffect(() => {
     setHiddenIds(readHiddenIds())
-    fetch('/api/clinical/templates')
-      .then(r => r.ok ? r.json() : { templates: [] })
-      .then(data => {
-        setCustomTemplates(
-          (data.templates || []).map((t: any) => ({
-            id:          t.id,
-            name:        t.name,
-            medications: t.medications || [],
-            usage_count: t.usage_count || 0,
-          }))
-        )
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false))
+    loadTemplates()
   }, [])
 
   // Custom template handlers
@@ -340,6 +373,16 @@ export default function TemplatesSettingsPage() {
         {loading ? (
           <div className="flex justify-center py-8">
             <div className="w-6 h-6 border-2 border-[#16A34A] border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : loadError ? (
+          <div className="bg-white rounded-2xl border border-[#FECACA] p-6 text-center">
+            <p className="font-cairo text-[13px] text-[#DC2626] mb-3">{loadError}</p>
+            <button
+              onClick={loadTemplates}
+              className="px-4 py-2 bg-[#16A34A] hover:bg-[#15803D] text-white font-cairo text-[12px] font-semibold rounded-[10px] transition-colors"
+            >
+              إعادة المحاولة
+            </button>
           </div>
         ) : customTemplates.length === 0 ? (
           <div className="bg-white rounded-2xl border border-dashed border-gray-200 p-8 text-center">
