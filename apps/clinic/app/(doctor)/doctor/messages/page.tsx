@@ -883,10 +883,17 @@ function MessagesPageInner() {
       const ext = file.name.split('.').pop() || 'bin'
       const path = `messages/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
       const { error } = await sb.storage.from('attachments').upload(path, file, { contentType: file.type })
-      if (error) throw error
+      if (error) {
+        // Surface storage errors so they can be diagnosed (RLS, bucket config, size limits)
+        const msg = error.message || String(error)
+        setSendError(`فشل رفع الملف: ${msg}`)
+        return null
+      }
       const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path)
       return { url: urlData.publicUrl, name: file.name, mime: file.type }
-    } catch {
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'خطأ غير متوقع'
+      setSendError(`فشل رفع الملف: ${msg}`)
       return null
     }
   }
@@ -923,7 +930,7 @@ function MessagesPageInner() {
     try {
       if (attachmentSnapshot) {
         const uploaded = await uploadAttachment(attachmentSnapshot.file)
-        if (!uploaded) throw new Error('فشل رفع الملف — حاول مرة أخرى')
+        if (!uploaded) throw new Error('__upload_failed__') // error already set inside uploadAttachment
         content = encodeAttachment(uploaded.url, uploaded.name, uploaded.mime, content)
         clearAttachment()
       }
@@ -947,12 +954,14 @@ function MessagesPageInner() {
           : m
       ))
       loadConversations()
-    } catch (error: any) {
+    } catch (err) {
       // Mark optimistic message as failed
       setMessages(prev => prev.map(m =>
         m.id === optimisticId ? { ...m, sending: false, failed: true } : m
       ))
-      setSendError(error.message || 'فشل إرسال الرسالة. حاول مرة أخرى')
+      const msg = err instanceof Error ? err.message : 'فشل إرسال الرسالة. حاول مرة أخرى'
+      // Don't overwrite the detailed upload error already set inside uploadAttachment
+      if (msg !== '__upload_failed__') setSendError(msg)
     } finally {
       setSending(false)
     }

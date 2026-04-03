@@ -110,8 +110,10 @@ export default function AssistantDoctorSelector({
                   : 'hover:bg-gray-50 text-gray-700'
               }`}
             >
-              <div className="w-8 h-8 rounded-full bg-primary-100 flex items-center justify-center text-primary-600 font-semibold text-xs">
-                {doctor.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+              <div className="w-8 h-8 rounded-full bg-primary-100 flex items-center justify-center">
+                <svg className="w-4 h-4 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                </svg>
               </div>
               <div className="flex-1 min-w-0">
                 <div className="font-medium truncate">{doctor.name}</div>

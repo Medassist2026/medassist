@@ -372,23 +372,8 @@ export default function ClinicSettingsPage() {
         </div>
       </div>
 
-      {/* Quick Links — templates visible to all, staff management owner-only */}
-      <div className="grid grid-cols-2 gap-3">
-        <Link
-          href="/doctor/clinic-settings/templates"
-          className="bg-white rounded-2xl border border-gray-100 p-4 flex items-center gap-3 hover:border-[#22C55E] hover:bg-[#F0FDF4] transition-colors group"
-        >
-          <div className="w-9 h-9 rounded-xl bg-[#DCFCE7] flex items-center justify-center flex-shrink-0">
-            <svg className="w-5 h-5 text-[#16A34A]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
-          </div>
-          <div>
-            <p className="font-cairo font-bold text-[13px] text-[#030712]">قوالب الروشتة</p>
-            <p className="font-cairo text-[11px] text-[#6B7280]">إدارة وتخصيص القوالب</p>
-          </div>
-        </Link>
-
+      {/* Quick Links */}
+      <div className="grid grid-cols-1 gap-3">
         <Link
           href="/doctor/clinics"
           className="bg-white rounded-2xl border border-gray-100 p-4 flex items-center gap-3 hover:border-[#16A34A] hover:bg-[#F0FDF4] transition-colors group"
