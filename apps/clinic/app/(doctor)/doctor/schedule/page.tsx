@@ -336,9 +336,10 @@ interface DayViewProps {
   appointments: Appointment[]
   availability: WeeklyAvailability
   onAppointmentClick: (apt: Appointment) => void
+  onCellClick?: (date: Date, hour: number) => void
 }
 
-function DayView({ date, appointments, availability, onAppointmentClick }: DayViewProps) {
+function DayView({ date, appointments, availability, onAppointmentClick, onCellClick }: DayViewProps) {
   const dayName = DAY_NAMES[date.getDay()]
   const dayAvailability = availability[dayName]
 
@@ -399,9 +400,19 @@ function DayView({ date, appointments, availability, onAppointmentClick }: DayVi
           return (
             <div
               key={hour}
-              className={`flex min-h-[60px] ${!isWorkingHour ? 'bg-gray-50' : ''}`}
+              onClick={() => hourAppointments.length === 0 && onCellClick?.(date, hour)}
+              className={`flex min-h-[60px] group ${
+                !isWorkingHour ? 'bg-gray-50' : ''
+              } ${hourAppointments.length === 0 && onCellClick ? 'cursor-pointer hover:bg-primary-50/40' : ''}`}
             >
-              <div className="w-20 flex-shrink-0 p-2 text-sm text-gray-500 border-l border-gray-100">
+              <div className="w-20 flex-shrink-0 p-2 text-sm text-gray-500 border-l border-gray-100 flex items-center justify-between">
+                <span
+                  className={`text-primary-400 text-base font-light transition-opacity ${
+                    hourAppointments.length === 0 && onCellClick ? 'opacity-0 group-hover:opacity-100' : 'opacity-0'
+                  }`}
+                >
+                  +
+                </span>
                 {formatTime(hourStr)}
               </div>
               <div className="flex-1 p-2">
@@ -479,7 +490,9 @@ function WeekView({ weekDates, appointments, availability, onAppointmentClick, o
               }`}
             >
               <div className={`text-xs font-medium ${isToday ? 'text-primary-600' : 'text-gray-500'}`}>
-                {DAY_LABELS[idx]}
+                {/* Full name on ≥sm screens, short on mobile */}
+                <span className="hidden sm:inline">{DAY_LABELS_FULL[date.getDay()]}</span>
+                <span className="sm:hidden">{DAY_LABELS[date.getDay()]}</span>
               </div>
               <div className={`mt-1 w-8 h-8 mx-auto rounded-full flex items-center justify-center ${
                 isToday
@@ -558,23 +571,27 @@ interface NewAppointmentModalProps {
   onClose: () => void
   onCreated: () => void
   defaultDate?: Date
+  defaultTime?: string
   defaultPatientId?: string
   defaultType?: string
+  appointments?: Appointment[]
 }
 
-function NewAppointmentModal({ onClose, onCreated, defaultDate, defaultPatientId, defaultType }: NewAppointmentModalProps) {
+function NewAppointmentModal({ onClose, onCreated, defaultDate, defaultTime, defaultPatientId, defaultType, appointments }: NewAppointmentModalProps) {
   const [patientSearch, setPatientSearch] = useState('')
   const [patients, setPatients] = useState<any[]>([])
   const [selectedPatient, setSelectedPatient] = useState<any>(null)
   const [searching, setSearching] = useState(false)
   const [date, setDate] = useState(defaultDate ? defaultDate.toISOString().split('T')[0] : getCairoTodayStr())
-  const [time, setTime] = useState('16:00')
+  const [time, setTime] = useState(defaultTime || '16:00')
   const [duration, setDuration] = useState(15)
   const [appointmentType, setAppointmentType] = useState(defaultType || 'regular')
   const [notes, setNotes] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [modalError, setModalError] = useState<string | null>(null)
   const [outsideHoursWarning, setOutsideHoursWarning] = useState(false)
+  const [pastTimeWarning, setPastTimeWarning] = useState(false)
+  const [clashWarning, setClashWarning] = useState<Appointment | null>(null)
   const searchTimeout = useRef<NodeJS.Timeout | null>(null)
 
   // Auto-load default patient when coming from session end (follow-up booking)
@@ -593,12 +610,15 @@ function NewAppointmentModal({ onClose, onCreated, defaultDate, defaultPatientId
     setPatientSearch(query)
     setSelectedPatient(null)
     if (searchTimeout.current) clearTimeout(searchTimeout.current)
-    if (query.trim().length < 2) { setPatients([]); return }
+    // Normalize Arabic-Indic digits (٠١٢…٩) → Latin (012…9) so phone search
+    // works when the user types numerals from an Arabic keyboard.
+    const normalized = query.replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    if (normalized.trim().length < 2) { setPatients([]); return }
 
     searchTimeout.current = setTimeout(async () => {
       setSearching(true)
       try {
-        const res = await fetch(`/api/doctor/patients/search?q=${encodeURIComponent(query.trim())}`)
+        const res = await fetch(`/api/doctor/patients/search?q=${encodeURIComponent(normalized.trim())}`)
         if (res.ok) {
           const data = await res.json()
           setPatients(data.patients || [])
@@ -614,7 +634,34 @@ function NewAppointmentModal({ onClose, onCreated, defaultDate, defaultPatientId
     setSubmitting(true)
     setModalError(null)
     try {
-      const startTime = new Date(`${date}T${time}:00`).toISOString()
+      // Construct ISO string with explicit Cairo offset (+02:00) so the time is
+      // never mis-converted regardless of the server/browser timezone.
+      const startTime = `${date}T${time}:00+02:00`
+      const selectedMs = new Date(startTime).getTime()
+
+      // --- Past-time check ---
+      if (!pastTimeWarning && selectedMs < Date.now()) {
+        setPastTimeWarning(true)
+        setSubmitting(false)
+        return
+      }
+
+      // --- Clash check against already-loaded appointments ---
+      if (!clashWarning && appointments) {
+        const selectedEnd = selectedMs + duration * 60_000
+        const clash = appointments.find(apt => {
+          if (apt.status === 'cancelled' || apt.status === 'no_show') return false
+          const aptStart = new Date(apt.start_time).getTime()
+          const aptEnd = aptStart + apt.duration_minutes * 60_000
+          return selectedMs < aptEnd && aptStart < selectedEnd
+        })
+        if (clash) {
+          setClashWarning(clash)
+          setSubmitting(false)
+          return
+        }
+      }
+
       const res = await fetch('/api/doctor/appointments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -672,6 +719,28 @@ function NewAppointmentModal({ onClose, onCreated, defaultDate, defaultPatientId
               </div>
             </div>
           )}
+          {pastTimeWarning && !modalError && (
+            <div className="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-lg text-sm flex items-start gap-2">
+              <span className="mt-0.5">🕐</span>
+              <div>
+                <p className="font-medium">هذا الموعد في الماضي</p>
+                <p className="text-red-700 mt-0.5">الوقت المختار قد مضى. اضغط &quot;حجز الموعد&quot; مرة أخرى للتأكيد.</p>
+              </div>
+            </div>
+          )}
+          {clashWarning && !modalError && (
+            <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-lg text-sm flex items-start gap-2">
+              <span className="text-amber-500 mt-0.5">⚠️</span>
+              <div>
+                <p className="font-medium">تعارض مع موعد آخر</p>
+                <p className="text-amber-700 mt-0.5">
+                  يوجد تعارض مع موعد {clashWarning.patient_name} في{' '}
+                  {new Date(clashWarning.start_time).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', timeZone: 'Africa/Cairo' })}.
+                  اضغط &quot;حجز الموعد&quot; مرة أخرى للتأكيد.
+                </p>
+              </div>
+            </div>
+          )}
           {/* Patient Search */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">المريض</label>
@@ -704,11 +773,11 @@ function NewAppointmentModal({ onClose, onCreated, defaultDate, defaultPatientId
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">التاريخ</label>
-              <input type="date" value={date} onChange={(e) => { setDate(e.target.value); setOutsideHoursWarning(false) }} min={getCairoTodayStr()} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none" />
+              <input type="date" value={date} onChange={(e) => { setDate(e.target.value); setOutsideHoursWarning(false); setPastTimeWarning(false); setClashWarning(null) }} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none" />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">الوقت</label>
-              <select value={time} onChange={(e) => { setTime(e.target.value); setOutsideHoursWarning(false) }} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none">
+              <select value={time} onChange={(e) => { setTime(e.target.value); setOutsideHoursWarning(false); setPastTimeWarning(false); setClashWarning(null) }} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none">
                 {timeOptions.map(t => <option key={t} value={t}>{formatTime(t)}</option>)}
               </select>
             </div>
@@ -744,7 +813,7 @@ function NewAppointmentModal({ onClose, onCreated, defaultDate, defaultPatientId
         <div className="p-6 border-t border-gray-100 flex justify-start gap-3 flex-row-reverse">
           <button onClick={onClose} className="px-5 py-2.5 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50" disabled={submitting}>إلغاء</button>
           <button onClick={handleSubmit} disabled={submitting || !selectedPatient} className="px-5 py-2.5 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 font-medium">
-            {submitting ? 'جاري الحجز...' : outsideHoursWarning ? 'تأكيد الحجز رغم ذلك' : 'حجز الموعد'}
+            {submitting ? 'جاري الحجز...' : (outsideHoursWarning || pastTimeWarning || clashWarning) ? 'تأكيد الحجز رغم ذلك' : 'حجز الموعد'}
           </button>
         </div>
       </div>
@@ -931,6 +1000,8 @@ function SchedulePageInner() {
   const [availability, setAvailability] = useState<WeeklyAvailability>(DEFAULT_AVAILABILITY)
   const [showWorkingHoursEditor, setShowWorkingHoursEditor] = useState(false)
   const [showNewAppointment, setShowNewAppointment] = useState(false)
+  const [newAptDefaultDate, setNewAptDefaultDate] = useState<Date | undefined>(undefined)
+  const [newAptDefaultTime, setNewAptDefaultTime] = useState<string | undefined>(undefined)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -1026,6 +1097,13 @@ function SchedulePageInner() {
     setDetailApt(apt)
   }
 
+  // Handle cell click — pre-fill modal with clicked date + hour
+  const handleCellClick = (date: Date, hour: number) => {
+    setNewAptDefaultDate(date)
+    setNewAptDefaultTime(`${hour.toString().padStart(2, '0')}:00`)
+    setShowNewAppointment(true)
+  }
+
   // Start session from detail sheet
   const handleStartSession = (apt: Appointment) => {
     setDetailApt(null)
@@ -1088,6 +1166,14 @@ function SchedulePageInner() {
     }
   }
 
+  // True when the current view already shows today — used to grey-out اليوم button
+  const isOnToday = useMemo(() => {
+    const today = getCairoToday()
+    return view === 'day'
+      ? isSameDay(selectedDate, today)
+      : weekDates.some(d => isSameDay(d, today))
+  }, [view, selectedDate, weekDates])
+
   // Get current period label
   const getPeriodLabel = () => {
     if (view === 'day') {
@@ -1135,7 +1221,7 @@ function SchedulePageInner() {
 
         <div className="flex gap-3 flex-row-reverse">
           <button
-            onClick={() => setShowNewAppointment(true)}
+            onClick={() => { setNewAptDefaultDate(undefined); setNewAptDefaultTime(undefined); setShowNewAppointment(true) }}
             className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 font-medium flex-row-reverse"
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1179,14 +1265,18 @@ function SchedulePageInner() {
       {/* New Appointment Modal */}
       {showNewAppointment && (
         <NewAppointmentModal
-          onClose={() => setShowNewAppointment(false)}
+          onClose={() => { setShowNewAppointment(false); setNewAptDefaultDate(undefined); setNewAptDefaultTime(undefined) }}
           onCreated={() => {
             setShowNewAppointment(false)
+            setNewAptDefaultDate(undefined)
+            setNewAptDefaultTime(undefined)
             loadData()
           }}
-          defaultDate={selectedDate}
+          defaultDate={newAptDefaultDate ?? selectedDate}
+          defaultTime={newAptDefaultTime}
           defaultPatientId={autoOpenPatientId}
           defaultType={autoOpenType}
+          appointments={appointments}
         />
       )}
 
@@ -1205,7 +1295,13 @@ function SchedulePageInner() {
           </button>
           <button
             onClick={goToToday}
-            className="px-3 py-1 text-sm font-medium text-primary-600 hover:bg-primary-50 rounded-lg"
+            disabled={isOnToday}
+            title="انتقل إلى اليوم الحالي"
+            className={`px-3 py-1 text-sm font-medium rounded-lg transition-opacity ${
+              isOnToday
+                ? 'text-gray-400 opacity-50 cursor-default'
+                : 'text-primary-600 hover:bg-primary-50'
+            }`}
           >
             اليوم
           </button>
@@ -1235,6 +1331,7 @@ function SchedulePageInner() {
           appointments={appointments}
           availability={availability}
           onAppointmentClick={handleAppointmentClick}
+          onCellClick={handleCellClick}
         />
       ) : (
         <WeekView
