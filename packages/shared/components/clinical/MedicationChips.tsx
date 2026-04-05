@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { checkDrugInteractionForUI, type DDIResultUI } from '../../lib/data/drug-interactions'
 
 // ============================================================================
 // TYPES
@@ -46,6 +47,8 @@ interface MedicationChipsProps {
   onChange: (medications: MedicationEntry[]) => void
   allergies?: string[]
   onAllergyWarning?: (drugName: string, allergyName: string, familyName: string) => void
+  /** B16: Called when a major DDI is detected — parent renders InteractionWarning modal */
+  onDrugInteraction?: (result: DDIResultUI) => void
   onOpenTemplates?: () => void
   /** Quick-add medication names ordered by this doctor's usage frequency */
   quickMeds?: string[]
@@ -57,7 +60,7 @@ interface MedicationChipsProps {
 // ALLERGY-DRUG FAMILY MAP (for cross-check)
 // ============================================================================
 
-// B14: Expanded to 8 families (was 3)
+// B15: Expanded to 14 families (was 8)
 const ALLERGY_DRUG_FAMILIES: Record<string, string[]> = {
   'بنسلين': ['amoxicillin', 'ampicillin', 'penicillin', 'augmentin', 'أموكسيسيلين', 'أوجمنتين', 'أمبيسيلين', 'فلوموكس', 'هاى بيوتك', 'ميجاموكس', 'كلاموكس', 'يوناسين'],
   'سلفا': ['sulfamethoxazole', 'trimethoprim', 'septrin', 'سبترين'],
@@ -67,6 +70,13 @@ const ALLERGY_DRUG_FAMILIES: Record<string, string[]> = {
   'ماكروليد': ['azithromycin', 'clarithromycin', 'erythromycin', 'أزيثروميسين', 'زيثروماكس', 'كلاريثروميسين', 'كلاسيد', 'إريثرومايسين'],
   'فلوروكينولون': ['ciprofloxacin', 'levofloxacin', 'moxifloxacin', 'سيبروفلوكساسين', 'سيبرو', 'تافانيك', 'ليفوفلوكساسين', 'أفالوكس'],
   'مثبطات ACE': ['captopril', 'enalapril', 'ramipril', 'lisinopril', 'كابتوبريل', 'كابوتين', 'إنالابريل', 'راميبريل', 'تريتاس', 'زيستريل'],
+  // B15: New families 9–14
+  'كودين / أفيونيات': ['codeine', 'tramadol', 'morphine', 'pethidine', 'fentanyl', 'oxycodone', 'nalbuphine', 'كودين', 'ترامادول', 'ترامال', 'زيدول', 'دولوسان', 'مورفين', 'بيثيدين', 'فنتانيل', 'نالبوفين'],
+  'تتراسيكلينات': ['doxycycline', 'minocycline', 'tetracycline', 'دوكسيسيكلين', 'دوكسيهيكسال', 'مينوسيكلين', 'مينوسين', 'تتراسيكلين', 'أوراسيكلين'],
+  'تخدير موضعي': ['lidocaine', 'procaine', 'bupivacaine', 'prilocaine', 'benzocaine', 'articaine', 'ليدوكائين', 'زيلوكائين', 'بروكائين', 'بوبيفاكائين', 'بريلوكائين', 'بنزوكائين'],
+  'يود / تباين': ['iodine', 'iohexol', 'iodixanol', 'iopamidol', 'povidone iodine', 'يود', 'يوديد', 'بيتادين', 'بوفيدون', 'أومنيباك', 'فيزيباك'],
+  'مضادات الاختلاج': ['carbamazepine', 'phenytoin', 'lamotrigine', 'oxcarbazepine', 'valproate', 'كاربامازيبين', 'تيجريتول', 'فينيتوين', 'ديلانتين', 'لاموتريجين', 'لاميكتال', 'أوكسكاربازيبين', 'تريليبتال', 'فالبروات', 'ديباكين'],
+  'نيتروإيميدازول': ['metronidazole', 'tinidazole', 'ornidazole', 'secnidazole', 'ميترونيدازول', 'فلاجيل', 'ميتروجيل', 'تينيدازول', 'فاسيجين', 'أورنيدازول', 'سيكنيدازول'],
 }
 
 // B06: Arabic text normalization for accurate allergy matching
@@ -156,6 +166,7 @@ export function MedicationChips({
   onChange,
   allergies = [],
   onAllergyWarning,
+  onDrugInteraction,
   onOpenTemplates,
   quickMeds = [],
   personalised = false,
@@ -226,6 +237,9 @@ export function MedicationChips({
   // Total estimated cost (sum of per-package prices for meds that have them)
   const pricedMeds = medications.filter(m => m.priceEGP && m.priceEGP > 0)
   const totalEstimate = pricedMeds.reduce((sum, m) => sum + (m.priceEGP || 0), 0)
+
+  // ── Alert 2b: Moderate DDI inline banner (major DDI → parent modal via onDrugInteraction) ──
+  const [ddiModerateWarning, setDdiModerateWarning] = useState<DDIResultUI | null>(null)
 
   // ── Alert 1: Duplicate Generic ────────────────────────────────────────────
   // State holds at most one pending duplicate warning at a time.
@@ -400,9 +414,24 @@ export function MedicationChips({
     setSearchResults([])
     setShowResults(false)
 
-    // Fire allergy warning after adding
+    // Fire allergy warning after adding (highest priority)
     if (conflict && onAllergyWarning) {
       onAllergyWarning(drug.nameAr || drug.name, conflict.allergyName, conflict.familyName)
+    }
+
+    // B16: DDI check — only run if no allergy conflict (avoid alert stacking)
+    if (!conflict) {
+      const ddi = checkDrugInteractionForUI(
+        { name: newMed.name, genericName: newMed.genericName },
+        medications, // existing meds before this add
+      )
+      if (ddi) {
+        if (ddi.severity === 'major' && onDrugInteraction) {
+          onDrugInteraction(ddi)            // parent shows orange blocking modal
+        } else if (ddi.severity === 'moderate') {
+          setDdiModerateWarning(ddi)        // inline amber banner inside this component
+        }
+      }
     }
   }
 
@@ -1001,6 +1030,42 @@ export function MedicationChips({
             <button
               onClick={() => setDupWarning(null)}
               className="px-2 py-1 bg-transparent text-[#92400E] rounded-[6px] font-cairo text-[10px] hover:bg-[#FEF3C7] transition-colors whitespace-nowrap text-center"
+            >
+              تجاهل
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Alert 2b: Moderate DDI Banner ──────────────────────────────────────
+           Orange inline warning — drug was added but a moderate interaction was detected.
+           Doctor can dismiss or remove the new drug. */}
+      {ddiModerateWarning && (
+        <div className="flex items-start gap-2 px-3 py-2.5 bg-[#FFF7ED] border border-[#FED7AA] rounded-[10px] mt-1">
+          <span className="text-[14px] mt-0.5 shrink-0">🔶</span>
+          <div className="flex-1 min-w-0">
+            <p className="font-cairo text-[12px] font-semibold text-[#9A3412] leading-snug">
+              تنبيه تفاعل دوائي
+            </p>
+            <p className="font-cairo text-[11px] text-[#C2410C] mt-0.5 leading-snug">
+              <span className="font-bold">{ddiModerateWarning.drugA}</span>{' '}+{' '}
+              <span className="font-bold">{ddiModerateWarning.drugB}</span>
+              {' — '}{ddiModerateWarning.messageAr}
+            </p>
+          </div>
+          <div className="flex flex-col gap-1 shrink-0">
+            <button
+              onClick={() => {
+                onChange(medications.slice(0, -1))
+                setDdiModerateWarning(null)
+              }}
+              className="px-2 py-1 bg-[#FED7AA] text-[#7C2D12] rounded-[6px] font-cairo text-[10px] font-bold hover:bg-[#FDBA74] transition-colors whitespace-nowrap"
+            >
+              حذف الأحدث
+            </button>
+            <button
+              onClick={() => setDdiModerateWarning(null)}
+              className="px-2 py-1 bg-transparent text-[#9A3412] rounded-[6px] font-cairo text-[10px] hover:bg-[#FFF7ED] transition-colors whitespace-nowrap text-center"
             >
               تجاهل
             </button>

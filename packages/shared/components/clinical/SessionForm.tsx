@@ -10,6 +10,8 @@ import { LabsInline, type LabItem } from './LabsInline'
 import { MedicationChips, type MedicationEntry } from './MedicationChips'
 import { TemplateModal, type PrescriptionTemplate } from './TemplateModal'
 import { AllergyWarning } from './AllergyWarning'
+import { InteractionWarning } from './InteractionWarning'
+import type { DDIResultUI } from '../../lib/data/drug-interactions'
 import { PatientHistorySheet } from './PatientHistorySheet'
 import DiagnosisInput from './DiagnosisInput'
 import { PatientLivingCard } from './PatientLivingCard'
@@ -337,6 +339,7 @@ export function SessionForm({ preselectedPatientId, queueId, appointmentId }: Se
   const [toastMessage, setToastMessage] = useState('')
   const [showToast, setShowToast] = useState(false)
   const [allergyWarning, setAllergyWarning] = useState<{ drugName: string; allergyName: string; familyName: string } | null>(null)
+  const [ddiWarning, setDdiWarning] = useState<DDIResultUI | null>(null)      // B16: major DDI modal
   const [savedNoteId, setSavedNoteId] = useState<string | null>(null) // FIX 6: Print CTA after save
 
   const prescriptionRef = useRef<HTMLDivElement>(null)
@@ -751,6 +754,11 @@ export function SessionForm({ preselectedPatientId, queueId, appointmentId }: Se
 
   const handleAllergyWarningCheck = (drugName: string, allergyName: string, familyName: string) => {
     setAllergyWarning({ drugName, allergyName, familyName })
+  }
+
+  // B16: DDI handler — receives major interactions from MedicationChips
+  const handleDrugInteraction = (result: DDIResultUI) => {
+    setDdiWarning(result)
   }
 
   const handleTemplateApply = (template: PrescriptionTemplate) => {
@@ -2420,6 +2428,7 @@ export function SessionForm({ preselectedPatientId, queueId, appointmentId }: Se
               onChange={handleMedicationsChange}
               allergies={allergies}
               onAllergyWarning={handleAllergyWarningCheck}
+              onDrugInteraction={handleDrugInteraction}
               onOpenTemplates={() => setShowTemplateModal(true)}
               quickMeds={medicationChips}
               personalised={chipsPersonalised}
@@ -2683,6 +2692,21 @@ export function SessionForm({ preselectedPatientId, queueId, appointmentId }: Se
             // Remove the last added medication
             setMedications(prev => prev.slice(0, -1))
             setAllergyWarning(null)
+          }}
+        />
+      )}
+
+      {/* B16: Major DDI blocking modal — orange, shown when major interaction detected */}
+      {ddiWarning && (
+        <InteractionWarning
+          drugA={ddiWarning.drugA}
+          drugB={ddiWarning.drugB}
+          severity={ddiWarning.severity}
+          messageAr={ddiWarning.messageAr}
+          onProceed={() => setDdiWarning(null)}
+          onCancel={() => {
+            setMedications(prev => prev.slice(0, -1))
+            setDdiWarning(null)
           }}
         />
       )}

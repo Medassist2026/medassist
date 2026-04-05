@@ -981,3 +981,205 @@ export function getSeverityDisplay(severity: InteractionSeverity) {
 
 // Export for testing
 export { INTERACTIONS, DRUG_CLASSES, checkPairInteraction }
+
+// ============================================================================
+// B16: ARABIC BRAND-NAME SUPPORT + ARABIC UI MESSAGES
+// Extends the English engine above for Arabic brand names and Arabic messages.
+// Does NOT modify the existing INTERACTIONS or DRUG_CLASSES structures.
+// ============================================================================
+
+/**
+ * Arabic brand names → English generic names.
+ * Used to resolve Arabic-named drugs before passing to checkPairInteraction.
+ */
+const ARABIC_BRAND_TO_GENERIC: Record<string, string> = {
+  // Anticoagulants
+  'وارفارين': 'warfarin',        'كومادين': 'warfarin',
+  // NSAIDs
+  'بروفين': 'ibuprofen',         'أدفيل': 'ibuprofen',
+  'فولتارين': 'diclofenac sodium', 'كاتافلام': 'diclofenac potassium',
+  'كيتوفان': 'ketoprofen',
+  'نابروكسين': 'naproxen',
+  'موبيك': 'meloxicam',
+  'بريكسين': 'piroxicam',        'فيلدين': 'piroxicam',
+  'سيليبركس': 'celecoxib',
+  'أركوكسيا': 'etoricoxib',
+  // Aspirin / antiplatelet
+  'أسبرين': 'acetylsalicylic acid', 'أسبوسيد': 'acetylsalicylic acid',
+  'جوسبرين': 'acetylsalicylic acid', 'ريفو': 'acetylsalicylic acid',
+  'بلافيكس': 'clopidogrel',      'كلوبيد': 'clopidogrel',
+  // SSRIs
+  'برستيق': 'escitalopram',      'سيبرالكس': 'escitalopram',
+  'زولوفت': 'sertraline',        'ليبرام': 'fluoxetine',
+  'باروكستين': 'paroxetine',
+  // Tramadol
+  'ترامال': 'tramadol',          'زيدول': 'tramadol',  'دولوسان': 'tramadol',
+  // Statins
+  'ليبيتور': 'atorvastatin',     'أتوروس': 'atorvastatin',
+  'كرستور': 'rosuvastatin',
+  'زوكور': 'simvastatin',        'ليبوفاكس': 'simvastatin',
+  // Macrolides
+  'زيثروماكس': 'azithromycin',   'زيثرو': 'azithromycin',
+  'كلاسيد': 'clarithromycin',
+  'إريثرومايسين': 'erythromycin',
+  // Fluoroquinolones
+  'سيبرو': 'ciprofloxacin',
+  'تافانيك': 'levofloxacin',
+  'أفالوكس': 'moxifloxacin',
+  // ACE inhibitors
+  'كابوتين': 'captopril',
+  'تريتاس': 'ramipril',
+  'زيستريل': 'lisinopril',
+  'كوفيريل': 'perindopril',
+  // ARBs
+  'كوزار': 'losartan',
+  'ديوفان': 'valsartan',
+  'ميكارديس': 'telmisartan',
+  // Diuretics
+  'ألداكتون': 'spironolactone',
+  'ميدامور': 'amiloride',
+  'لاسيكس': 'furosemide',
+  // Antiepileptics
+  'تيجريتول': 'carbamazepine',
+  'تريليبتال': 'oxcarbazepine',
+  'ديباكين': 'valproic acid',
+  'لاميكتال': 'lamotrigine',
+  // Antifungals
+  'ديفلوكان': 'fluconazole',
+  // PPIs
+  'لوسيك': 'omeprazole',
+  'باريت': 'pantoprazole',
+  'نيكسيوم': 'esomeprazole',
+  // Beta-blockers
+  'كونكور': 'bisoprolol',
+  // Corticosteroids
+  'ديكسادرون': 'dexamethasone',
+  'ميدرول': 'methylprednisolone',
+  // Benzodiazepines
+  'زاناكس': 'alprazolam',
+  'فاليوم': 'diazepam',
+  'ريفوتريل': 'clonazepam',
+  'لكسوتانيل': 'bromazepam',
+}
+
+/**
+ * Arabic messages for critical interactions.
+ * Key = alphabetically sorted pair of generic names or drug-class identifiers, joined by '|'.
+ * The identifiers must match what INTERACTIONS database and DRUG_CLASSES use.
+ */
+const ARABIC_INTERACTION_MESSAGES: Record<string, string> = {
+  // Warfarin combinations
+  'nsaid|warfarin':                  'مضاد الالتهاب يزيد خطر النزيف مع الوارفارين — تثبيط الصفائح ورفع مستوى الوارفارين في الدم',
+  'anticoagulant|nsaid':             'مضاد الالتهاب يزيد خطر النزيف مع الوارفارين — تثبيط الصفائح ورفع مستوى الوارفارين في الدم',
+  'acetylsalicylic acid|warfarin':   'الجمع يزيد خطر النزيف الهضمي بشكل كبير — راجع مؤشر INR بانتظام',
+  'anticoagulant|antiplatelet':      'الجمع يزيد خطر النزيف بشكل كبير — راجع مؤشر INR بانتظام',
+  'anticoagulant|azole-antifungal':  'مضاد الفطريات يرفع مستوى الوارفارين للضعف تقريباً — خطر نزيف شديد',
+  'fluconazole|warfarin':            'الفلوكونازول يرفع الوارفارين للضعف تقريباً — خطر نزيف شديد',
+  // Statin + azole antifungal
+  'azole-antifungal|statin':         'مضاد الفطريات يرفع مستوى الستاتين بشدة — خطر انهيار عضلي (Rhabdomyolysis)',
+  'atorvastatin|itraconazole':       'الإيتراكونازول يرفع مستوى الأتورفاستاتين بشدة — خطر انهيار عضلي',
+  'itraconazole|rosuvastatin':       'الإيتراكونازول يرفع مستوى الروزوفاستاتين — خطر انهيار عضلي',
+  // Methotrexate
+  'methotrexate|nsaid':              'مضاد الالتهاب يقلل إفراز الميثوتريكسات ويرفع سميته بشكل خطير',
+  // Macrolide + carbamazepine
+  'carbamazepine|clarithromycin':    'الكلاريثروميسين يرفع مستوى الكاربامازيبين بشدة — خطر تسمم (دوخة، رأرأة، ترنح)',
+  'antiepileptic|macrolide':         'الماكروليد يرفع مستوى مضاد الاختلاج — راجع الجرعة وراقب أعراض التسمم',
+  // SSRIs + tramadol
+  'escitalopram|tramadol':           'خطر متلازمة السيروتونين — أعراض: هياج، ارتفاع حرارة، تشنجات. خطير',
+  'fluoxetine|tramadol':             'خطر متلازمة السيروتونين — أعراض: هياج، ارتفاع حرارة، تشنجات. خطير',
+  'ssri|tramadol':                   'خطر متلازمة السيروتونين — أعراض: هياج، ارتفاع حرارة، تشنجات. خطير',
+  // Clopidogrel + PPI
+  'antiplatelet|ppi':                'بعض مثبطات المضخة (الأوميبرازول) يقللون فاعلية الكلوبيدوجريل — فضّل البانتوبرازول',
+  'clopidogrel|omeprazole':          'الأوميبرازول يقلل فاعلية الكلوبيدوجريل — فضّل البانتوبرازول أو الرابيبرازول',
+  // RAAS combinations
+  'ace-inhibitor|arb':               'الجمع لا يُنصح به — خطر فشل كلوي وارتفاع بوتاسيوم في الدم',
+  'ace-inhibitor|diuretic':          'قد يزيد خطر ارتفاع بوتاسيوم الدم مع مدرات حافظة للبوتاسيوم — راجع البوتاسيوم',
+  // Corticosteroid + NSAID
+  'corticosteroid|nsaid':            'الجمع يضاعف خطر قرحة المعدة والنزيف الهضمي — أضف حماية معدة',
+  // Opioid/BZD
+  'alprazolam|tramadol':             'الجمع يزيد خطر اكتئاب مركز التنفس — راقب المريض',
+  'benzodiazepine|opioid':           'الجمع يزيد خطر اكتئاب مركز التنفس — قلّل الجرعة وراقب المريض',
+  // Warfarin + macrolide/fluoroquinolone
+  'anticoagulant|fluoroquinolone':   'الفلوروكينولون يرفع مستوى الوارفارين في الدم — راجع INR وعدّل الجرعة',
+  'anticoagulant|macrolide':         'الماكروليد يثبط CYP2C9 ويرفع تركيز الوارفارين — خطر نزيف',
+  // Warfarin + corticosteroid
+  'anticoagulant|corticosteroid':    'الكورتيزون يزيد خطر النزيف مع الوارفارين — راجع INR',
+  // Lithium + NSAIDs
+  'lithium|nsaid':                   'مضاد الالتهاب يرفع مستوى الليثيوم في الدم — خطر تسمم بالليثيوم',
+}
+
+/**
+ * UI-ready DDI result — two severity tiers only (major / moderate)
+ */
+export type DDISeverityUI = 'major' | 'moderate'
+
+export interface DDIResultUI {
+  severity: DDISeverityUI
+  /** Arabic message for the doctor */
+  messageAr: string
+  /** Display name of the new drug being added */
+  drugA: string
+  /** Display name of the existing drug it conflicts with */
+  drugB: string
+}
+
+/**
+ * Resolve an English generic name from Arabic brand name fallback.
+ */
+function resolveGenericForUI(name: string, genericName?: string): string {
+  if (genericName && genericName.trim()) return genericName.toLowerCase().trim()
+  const trimmed = name.trim()
+  return ARABIC_BRAND_TO_GENERIC[trimmed]
+    ?? ARABIC_BRAND_TO_GENERIC[trimmed.replace(/\s+/g, '')]
+    ?? name.toLowerCase().trim()
+}
+
+/**
+ * B16: UI-ready DDI check for MedicationChips / SessionForm.
+ *
+ * Wraps the existing English engine with:
+ *   - Arabic brand-name → English generic resolution
+ *   - Arabic message lookup
+ *   - Two-tier severity: 'contraindicated' | 'major' → 'major', 'moderate' → 'moderate'
+ *
+ * Returns the single highest-severity conflict found, or null.
+ */
+export function checkDrugInteractionForUI(
+  newDrug: { name: string; genericName?: string },
+  existingMeds: Array<{ name: string; genericName?: string }>,
+): DDIResultUI | null {
+  const resolvedGeneric = resolveGenericForUI(newDrug.name, newDrug.genericName)
+
+  const results = checkDrugInteractions(
+    resolvedGeneric,
+    newDrug.name,
+    existingMeds.map(m => ({
+      name: m.name,
+      genericName: resolveGenericForUI(m.name, m.genericName),
+    })),
+  )
+
+  if (results.length === 0) return null
+
+  // Already sorted highest→lowest by checkDrugInteractions
+  const top = results[0]
+  const severity: DDISeverityUI = top.interaction.severity === 'moderate' ? 'moderate' : 'major'
+
+  // Look up Arabic message — try several key forms
+  const pairKey = [top.newDrugGeneric, top.existingDrugGeneric].sort().join('|')
+  const classKey1 = `${top.interaction.drugA}|${top.interaction.drugB}`
+  const classKey2 = `${top.interaction.drugB}|${top.interaction.drugA}`
+
+  const messageAr =
+    ARABIC_INTERACTION_MESSAGES[pairKey] ??
+    ARABIC_INTERACTION_MESSAGES[classKey1] ??
+    ARABIC_INTERACTION_MESSAGES[classKey2] ??
+    top.interaction.recommendation  // fallback: English recommendation
+
+  return {
+    severity,
+    messageAr,
+    drugA: newDrug.name,
+    drugB: top.existingDrug,
+  }
+}
