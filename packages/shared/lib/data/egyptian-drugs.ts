@@ -5241,7 +5241,7 @@ export const EGYPTIAN_DRUGS: EgyptianDrug[] = [
     category: 'NSAID',
     subcategory: 'NSAID',
     defaults: { type: 'injection', frequency: '1-injection-once-daily', duration: '3-days' },
-    searchTerms: ['catafast injection', 'كاتافاست']
+    searchTerms: ['catafast injection', 'diclofenac injection', 'كاتافاست حقن']
   },
   {
     id: 'drug_896',

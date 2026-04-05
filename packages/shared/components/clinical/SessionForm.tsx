@@ -277,7 +277,7 @@ export function SessionForm({ preselectedPatientId, queueId, appointmentId }: Se
   // ===== F4: PRESCRIPTION SMS TOGGLE =====
   // Default OFF — doctor must explicitly enable per session.
   // Disabled when no medications are added or patient has no phone.
-  const [sendPrescriptionSMS, setSendPrescriptionSMS] = useState(false)
+  const [sendPrescriptionSMS, setSendPrescriptionSMS] = useState(true) // default ON — SMS reaches patient without app
 
   // ===== F5 ALERT 3: ANTIBIOTIC WITHOUT INFECTIOUS INDICATION — SOFT NUDGE =====
   // Shows a dismissable blue nudge when the doctor prescribes an antibiotic
@@ -976,9 +976,9 @@ export function SessionForm({ preselectedPatientId, queueId, appointmentId }: Se
           return
         }
 
-        // FIX 6: After save (not save_and_print), show success screen
-        if (mode === 'save' && result.noteId) {
-          setSavedNoteId(result.noteId)
+        // After save (not save_and_print), go directly to dashboard
+        if (mode === 'save') {
+          router.push('/doctor/dashboard')
           return
         }
       }
@@ -1695,16 +1695,15 @@ export function SessionForm({ preselectedPatientId, queueId, appointmentId }: Se
               </label>
               <div className="flex items-center gap-2">
                 <input
-                  type="number"
+                  type="text"
                   inputMode="numeric"
-                  min="0"
-                  max="120"
                   value={selectedPatient?.age ? String(selectedPatient.age) : manualAge}
                   readOnly={!!selectedPatient?.age}
                   onChange={(e) => {
                     if (selectedPatient?.age) return
-                    // Strip non-digits and cap at 120
-                    const raw = e.target.value.replace(/\D/g, '').slice(0, 3)
+                    // Convert Arabic-Indic numerals (٠-٩) to Latin digits before processing
+                    const normalized = e.target.value.replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x0660))
+                    const raw = normalized.replace(/\D/g, '').slice(0, 3)
                     const num = parseInt(raw, 10)
                     if (!raw || isNaN(num)) { setManualAge(raw === '' ? '' : raw); return }
                     setManualAge(String(Math.min(num, 120)))
@@ -2649,16 +2648,18 @@ export function SessionForm({ preselectedPatientId, queueId, appointmentId }: Se
             onClick={() => confirmAndSave('save')}
             disabled={saving}
             className="font-cairo text-[13px] font-medium text-[#4B5563] hover:text-[#030712]"
+            title="يحفظ الجلسة في السجل الطبي بدون طباعة"
           >
-            حفظ فقط
+            حفظ بدون طباعة
           </button>
           <span className="text-[#E5E7EB]">|</span>
           <button
             onClick={() => confirmAndSave('print')}
             disabled={saving}
-            className="font-cairo text-[13px] font-medium text-[#4B5563] hover:text-[#030712]"
+            className="font-cairo text-[13px] font-medium text-[#9CA3AF] hover:text-[#4B5563]"
+            title="يطبع روشتة مؤقتة فقط — لا يُحفظ في السجل الطبي"
           >
-            طباعة فقط
+            طباعة بدون حفظ
           </button>
         </div>
       </div>

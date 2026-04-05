@@ -268,12 +268,16 @@ export default function PatientRegistrationForm() {
             Age <span className="text-red-500">*</span>
           </label>
           <input
-            type="number"
-            min="0"
-            max="120"
+            type="text"
+            inputMode="numeric"
             value={age}
-            onChange={(e) => setAge(e.target.value)}
-            placeholder="Age"
+            onChange={(e) => {
+              // Accept both Latin (123) and Arabic-Indic (١٢٣) digits
+              const normalized = e.target.value.replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x0660))
+              const raw = normalized.replace(/\D/g, '').slice(0, 3)
+              setAge(raw)
+            }}
+            placeholder="العمر"
             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 outline-none"
           />
         </div>

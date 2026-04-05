@@ -354,8 +354,8 @@ function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatientModalProps) {
 
               <button
                 onClick={handleCreate}
-                disabled={creating}
-                className="w-full py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50"
+                disabled={creating || !form.name.trim() || !form.phone.trim()}
+                className="w-full py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {creating ? 'جاري الإنشاء...' : 'إنشاء مريض زائر'}
               </button>

@@ -792,7 +792,7 @@ export function MedicationChips({
                 <div className="flex items-center gap-1.5 mt-2 px-2 py-1 bg-[#DCFCE7] rounded-[8px]">
                   <span className="text-[12px]">⚡</span>
                   <span className="font-cairo text-[10px] text-[#16A34A] font-medium">
-                    أُضيف تلقائياً بناءً على {med.frequency} يومياً
+                    أُضيف تلقائياً · {med.frequency}
                   </span>
                 </div>
               )}
