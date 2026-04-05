@@ -263,7 +263,7 @@ function WorkingHoursEditor({ availability, onSave, onCancel, saving }: WorkingH
               {localAvailability[day].enabled ? (
                 <div className="space-y-2">
                   {localAvailability[day].slots.map((slot, slotIdx) => (
-                    <div key={slotIdx} className="flex items-center gap-2 flex-row-reverse">
+                    <div key={slotIdx} className="flex items-center gap-2">
                       <select
                         value={slot.start}
                         onChange={(e) => updateSlot(day, slotIdx, 'start', e.target.value)}
@@ -1193,10 +1193,11 @@ function SchedulePageInner() {
       {/* Navigation & View Toggle */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white rounded-xl shadow-soft border border-gray-100 p-4 flex-col-reverse" dir="rtl">
         <div className="flex items-center gap-2 flex-row-reverse">
+          {/* RTL fix: < (left-pointing) = next day (future is left in Arabic) */}
           <button
-            onClick={goToPrevious}
+            onClick={goToNext}
             className="p-2 hover:bg-gray-100 rounded-lg"
-            title={view === 'day' ? 'اليوم السابق' : 'الأسبوع السابق'}
+            title={view === 'day' ? 'اليوم التالي' : 'الأسبوع التالي'}
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -1208,10 +1209,11 @@ function SchedulePageInner() {
           >
             اليوم
           </button>
+          {/* RTL fix: > (right-pointing) = previous day (past is right in Arabic) */}
           <button
-            onClick={goToNext}
+            onClick={goToPrevious}
             className="p-2 hover:bg-gray-100 rounded-lg"
-            title={view === 'day' ? 'اليوم التالي' : 'الأسبوع التالي'}
+            title={view === 'day' ? 'اليوم السابق' : 'الأسبوع السابق'}
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
