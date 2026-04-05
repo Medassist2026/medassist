@@ -62,6 +62,9 @@ function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatientModalProps) {
   })
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [modalError, setModalError] = useState('')
+  const [touched, setTouched] = useState<Record<string, boolean>>({})
+
+  const touch = (field: string) => setTouched(prev => ({ ...prev, [field]: true }))
 
   // Reset on close
   useEffect(() => {
@@ -69,6 +72,7 @@ function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatientModalProps) {
       setMode('search')
       setSearchQuery('')
       setSearchResults([])
+      setTouched({})
       setForm({
         name: '', phone: '', email: '', date_of_birth: '', gender: '', national_id: '', notes: ''
       })
@@ -280,9 +284,16 @@ function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatientModalProps) {
                     type="text"
                     value={form.name}
                     onChange={(e) => setForm({ ...form, name: e.target.value })}
-                    className={`w-full px-4 py-2 border rounded-lg ${errors.name ? 'border-red-300' : 'border-gray-300'}`}
+                    onBlur={() => touch('name')}
+                    className={`w-full px-4 py-2 border rounded-lg ${
+                      errors.name || (touched.name && !form.name.trim())
+                        ? 'border-red-400 ring-1 ring-red-300 bg-red-50'
+                        : 'border-gray-300'
+                    }`}
                   />
-                  {errors.name && <p className="text-sm text-red-600 mt-1">{errors.name}</p>}
+                  {(errors.name || (touched.name && !form.name.trim())) && (
+                    <p className="text-sm text-red-600 mt-1">{errors.name || 'الاسم الكامل مطلوب'}</p>
+                  )}
                 </div>
 
                 <div>
@@ -293,10 +304,17 @@ function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatientModalProps) {
                     type="tel"
                     value={form.phone}
                     onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                    onBlur={() => touch('phone')}
                     placeholder="01xxxxxxxxx"
-                    className={`w-full px-4 py-2 border rounded-lg ${errors.phone ? 'border-red-300' : 'border-gray-300'}`}
+                    className={`w-full px-4 py-2 border rounded-lg ${
+                      errors.phone || (touched.phone && !form.phone.trim())
+                        ? 'border-red-400 ring-1 ring-red-300 bg-red-50'
+                        : 'border-gray-300'
+                    }`}
                   />
-                  {errors.phone && <p className="text-sm text-red-600 mt-1">{errors.phone}</p>}
+                  {(errors.phone || (touched.phone && !form.phone.trim())) && (
+                    <p className="text-sm text-red-600 mt-1">{errors.phone || 'رقم الهاتف مطلوب'}</p>
+                  )}
                 </div>
 
                 <div>
@@ -359,6 +377,15 @@ function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatientModalProps) {
               >
                 {creating ? 'جاري الإنشاء...' : 'إنشاء مريض زائر'}
               </button>
+              {(!form.name.trim() || !form.phone.trim()) && (
+                <p className="text-xs text-center text-gray-400 mt-1" dir="rtl">
+                  {!form.name.trim() && !form.phone.trim()
+                    ? '* الاسم ورقم الهاتف مطلوبان'
+                    : !form.name.trim()
+                      ? '* الاسم الكامل مطلوب'
+                      : '* رقم الهاتف مطلوب'}
+                </p>
+              )}
             </div>
           )}
         </div>

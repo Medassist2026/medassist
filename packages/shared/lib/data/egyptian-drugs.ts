@@ -4089,7 +4089,7 @@ export const EGYPTIAN_DRUGS: EgyptianDrug[] = [
   {
     id: 'drug_802',
     brandName: 'Minoxidil IV 5mg',
-    brandNameAr: 'مينوكسيديل',
+    brandNameAr: 'مينوكسيديل وريدي',
     genericName: 'Minoxidil IV',
     strength: '5mg',
     form: 'injection',
@@ -5234,7 +5234,7 @@ export const EGYPTIAN_DRUGS: EgyptianDrug[] = [
   {
     id: 'drug_895',
     brandName: 'Catafast Injection',
-    brandNameAr: 'كاتافاست',
+    brandNameAr: 'كاتافاست حقن',
     genericName: 'Diclofenac',
     strength: '75mg',
     form: 'injection',
@@ -9732,7 +9732,23 @@ export function searchEgyptianDrugs(query: string, limit: number = 15): Egyptian
     .filter(d => !seen.has(d.id))
     .slice(0, limit)
 
-  const combined = [...exact, ...startsWith, ...includes, ...fuzzy]
+  // Within each tier: prefer oral forms (tablet/capsule/syrup/drops) over injections
+  // unless the query explicitly asks for an injection form.
+  const injectionQuery = /حقن|injection|ampoule|ampule|\biv\b|وريدي|im\b/i.test(q)
+  const formScore = (d: EgyptianDrug): number => {
+    if (injectionQuery) return 0                                    // doctor specifically wants an injection
+    if (['tablet','capsule','syrup','drops','spray'].includes(d.form)) return 0   // oral = highest priority
+    if (d.form === 'injection') return 1                           // injection deprioritised when not requested
+    return 0
+  }
+  const sortByForm = (a: EgyptianDrug, b: EgyptianDrug) => formScore(a) - formScore(b)
+
+  const combined = [
+    ...exact.sort(sortByForm),
+    ...startsWith.sort(sortByForm),
+    ...includes.sort(sortByForm),
+    ...fuzzy,
+  ]
   return combined.slice(0, limit)
 }
 
