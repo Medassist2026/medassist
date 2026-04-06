@@ -331,30 +331,65 @@ function WorkingHoursEditor({ availability, onSave, onCancel, saving }: WorkingH
   )
 }
 
+// 2 pixels per minute → 1 hour = 120px, 15 min = 30px (readable), 30 min = 60px
+const PPM = 2
+
 interface DayViewProps {
   date: Date
   appointments: Appointment[]
   availability: WeeklyAvailability
   onAppointmentClick: (apt: Appointment) => void
-  onCellClick?: (date: Date, hour: number) => void
+  onCellClick?: (date: Date, hour: number, minute: number) => void
 }
 
 function DayView({ date, appointments, availability, onAppointmentClick, onCellClick }: DayViewProps) {
   const dayName = DAY_NAMES[date.getDay()]
   const dayAvailability = availability[dayName]
 
-  // Generate hours for the day view (6 AM to 10 PM)
-  const hours = Array.from({ length: 17 }, (_, i) => i + 6)
-
-  // Filter appointments for this day (memoized for stable reference)
   const dayAppointments = useMemo(
     () => appointments.filter(apt => isSameDay(new Date(apt.start_time), date)),
     [appointments, date]
   )
-
-  // Detect overlapping appointments
   const overlappingIds = useMemo(() => detectOverlaps(dayAppointments), [dayAppointments])
   const hasOverlaps = overlappingIds.size > 0
+
+  // ── Smart range: clip to working hours ± appointments, pad ±1 hour ─────────
+  const { startHour, endHour } = useMemo(() => {
+    let sh = 23, eh = 1
+    if (dayAvailability.enabled && dayAvailability.slots.length > 0) {
+      for (const slot of dayAvailability.slots) {
+        sh = Math.min(sh, parseInt(slot.start.split(':')[0], 10))
+        eh = Math.max(eh, parseInt(slot.end.split(':')[0], 10))
+      }
+    } else {
+      sh = 8; eh = 20
+    }
+    for (const apt of dayAppointments) {
+      const aptDt = new Date(apt.start_time)
+      const h = parseInt(aptDt.toLocaleString('en-US', { hour: 'numeric', hour12: false, timeZone: 'Africa/Cairo' }), 10)
+      const m = parseInt(aptDt.toLocaleString('en-US', { minute: '2-digit', timeZone: 'Africa/Cairo' }), 10)
+      sh = Math.min(sh, h)
+      eh = Math.max(eh, Math.ceil((h * 60 + m + apt.duration_minutes) / 60))
+    }
+    if (sh >= eh) { sh = 8; eh = 22 }
+    return { startHour: Math.max(0, sh - 1), endHour: Math.min(24, eh + 1) }
+  }, [dayAvailability, dayAppointments])
+
+  const hours = Array.from({ length: endHour - startHour }, (_, i) => i + startHour)
+  const totalHeight = (endHour - startHour) * 60 * PPM
+
+  // ── Canvas click: snap to 15-min grid ────────────────────────────────────
+  const handleCanvasClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (!onCellClick) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const y = e.clientY - rect.top
+    const totalMin = Math.floor(y / PPM)
+    const snapped = Math.floor(totalMin / 15) * 15
+    const h = startHour + Math.floor(snapped / 60)
+    const m = snapped % 60
+    if (h >= endHour) return
+    onCellClick(date, h, m)
+  }, [onCellClick, date, startHour, endHour])
 
   return (
     <div className="bg-white rounded-xl shadow-soft border border-gray-100 overflow-hidden" dir="rtl">
@@ -362,12 +397,9 @@ function DayView({ date, appointments, availability, onAppointmentClick, onCellC
         <h3 className="text-lg font-semibold text-gray-900">
           {date.toLocaleDateString('ar-EG', { weekday: 'long', month: 'long', day: 'numeric' })}
         </h3>
-        {!dayAvailability.enabled && (
-          <p className="text-sm text-gray-500 mt-1">يوم إجازة</p>
-        )}
+        {!dayAvailability.enabled && <p className="text-sm text-gray-500 mt-1">يوم إجازة</p>}
       </div>
 
-      {/* Overlap Warning Banner */}
       {hasOverlaps && (
         <div className="px-4 py-2.5 bg-amber-50 border-b border-amber-200 flex items-center gap-2 flex-row-reverse">
           <svg className="w-4 h-4 text-amber-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -379,84 +411,100 @@ function DayView({ date, appointments, availability, onAppointmentClick, onCellC
         </div>
       )}
 
-      <div className="divide-y divide-gray-100 border-t border-gray-100">
-        {hours.map(hour => {
-          const hourStr = `${hour.toString().padStart(2, '0')}:00`
-          const hourAppointments = dayAppointments.filter(apt => {
-            // Use Cairo timezone for column bucketing
-            const aptHour = parseInt(
-              new Date(apt.start_time).toLocaleString('en-US', { hour: 'numeric', hour12: false, timeZone: 'Africa/Cairo' }),
-              10
-            )
-            return aptHour === hour
-          })
+      {/* ── Proportional time canvas ─────────────────────────────────────────── */}
+      <div className="overflow-y-auto" style={{ maxHeight: '70vh' }}>
+        <div className="relative flex select-none" style={{ height: totalHeight }}>
 
-          const isWorkingHour = dayAvailability.enabled && dayAvailability.slots.some(slot => {
-            const startHour = parseInt(slot.start.split(':')[0], 10)
-            const endHour = parseInt(slot.end.split(':')[0], 10)
-            return hour >= startHour && hour < endHour
-          })
-
-          return (
-            <div
-              key={hour}
-              onClick={() => hourAppointments.length === 0 && onCellClick?.(date, hour)}
-              className={`flex min-h-[60px] group ${
-                !isWorkingHour ? 'bg-gray-50' : ''
-              } ${hourAppointments.length === 0 && onCellClick ? 'cursor-pointer hover:bg-primary-50/40' : ''}`}
-            >
-              <div className="w-20 flex-shrink-0 p-2 text-sm text-gray-500 border-l border-gray-100 flex items-center justify-between">
-                <span
-                  className={`text-primary-400 text-base font-light transition-opacity ${
-                    hourAppointments.length === 0 && onCellClick ? 'opacity-0 group-hover:opacity-100' : 'opacity-0'
-                  }`}
-                >
-                  +
+          {/* Time label column */}
+          <div className="w-16 flex-shrink-0 relative">
+            {hours.map(hour => (
+              <div
+                key={hour}
+                className="absolute w-full flex items-start justify-end pr-2 pt-0.5"
+                style={{ top: (hour - startHour) * 60 * PPM }}
+              >
+                <span className="text-[11px] text-gray-400 leading-none tabular-nums">
+                  {formatTime(`${hour.toString().padStart(2, '0')}:00`)}
                 </span>
-                {formatTime(hourStr)}
               </div>
-              <div className="flex-1 p-2">
-                {hourAppointments.map(apt => {
-                  const isOverlapping = overlappingIds.has(apt.id)
-                  return (
-                    <button
-                      key={apt.id}
-                      onClick={() => onAppointmentClick(apt)}
-                      className={`w-full text-right p-2 rounded-lg mb-1 ${
-                        isOverlapping
-                          ? 'bg-amber-50 text-amber-900 border-2 border-amber-400 ring-1 ring-amber-200'
-                          : apt.status === 'completed'
-                          ? 'bg-green-100 text-green-800 border border-green-200'
-                          : apt.status === 'cancelled'
-                          ? 'bg-gray-100 text-gray-500 border border-gray-200 line-through'
-                          : 'bg-primary-100 text-primary-800 border border-primary-200 hover:bg-primary-200'
-                      }`}
-                    >
-                      <div className="font-medium text-sm flex items-center gap-1.5 flex-row-reverse">
-                        {isOverlapping && (
-                          <svg className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                          </svg>
-                        )}
-                        <span>{apt.patient_name}</span>
-                      </div>
-                      <div className="text-xs opacity-75">
-                        {new Date(apt.start_time).toLocaleTimeString('ar-EG', {
-                          hour: 'numeric',
-                          minute: '2-digit',
-                          timeZone: 'Africa/Cairo'
-                        })}
-                        {' · '}
-                        {apt.duration_minutes} د
-                        {isOverlapping && ' · تداخل ⚠️'}
-                      </div>
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-          )
-        })}
+            ))}
+          </div>
+
+          {/* Canvas: backgrounds, grid lines, appointment blocks, click target */}
+          <div
+            className="flex-1 relative"
+            style={{ cursor: onCellClick ? 'cell' : 'default' }}
+            onClick={handleCanvasClick}
+          >
+            {/* Hour background bands + top border */}
+            {hours.map(hour => {
+              const isWorkingHour = dayAvailability.enabled && dayAvailability.slots.some(slot => {
+                const sh = parseInt(slot.start.split(':')[0], 10)
+                const eh = parseInt(slot.end.split(':')[0], 10)
+                return hour >= sh && hour < eh
+              })
+              return (
+                <div
+                  key={hour}
+                  className={`absolute w-full border-t border-gray-100 ${!isWorkingHour ? 'bg-gray-50/70' : ''}`}
+                  style={{ top: (hour - startHour) * 60 * PPM, height: 60 * PPM }}
+                />
+              )
+            })}
+
+            {/* Half-hour dashed dividers */}
+            {hours.map(hour => (
+              <div
+                key={`h-${hour}`}
+                className="absolute w-full border-t border-dashed border-gray-100"
+                style={{ top: (hour - startHour) * 60 * PPM + 30 * PPM }}
+              />
+            ))}
+
+            {/* Appointment blocks — absolutely positioned by real time */}
+            {dayAppointments.map(apt => {
+              const aptDt = new Date(apt.start_time)
+              const aptH = parseInt(aptDt.toLocaleString('en-US', { hour: 'numeric', hour12: false, timeZone: 'Africa/Cairo' }), 10)
+              const aptM = parseInt(aptDt.toLocaleString('en-US', { minute: '2-digit', timeZone: 'Africa/Cairo' }), 10)
+              const top = ((aptH - startHour) * 60 + aptM) * PPM
+              const height = Math.max(apt.duration_minutes * PPM, 28)
+              const isOverlapping = overlappingIds.has(apt.id)
+
+              return (
+                <button
+                  key={apt.id}
+                  onClick={(e) => { e.stopPropagation(); onAppointmentClick(apt) }}
+                  className={`absolute right-1 left-1 rounded-lg px-2 py-0.5 text-right overflow-hidden hover:opacity-90 transition-opacity z-10 ${
+                    isOverlapping
+                      ? 'bg-amber-50 text-amber-900 border-2 border-amber-400'
+                      : apt.status === 'completed'
+                      ? 'bg-green-100 text-green-800 border border-green-200'
+                      : apt.status === 'cancelled'
+                      ? 'bg-gray-100 text-gray-500 border border-gray-200 line-through'
+                      : 'bg-primary-100 text-primary-800 border border-primary-200 hover:bg-primary-200'
+                  }`}
+                  style={{ top, height, cursor: 'pointer' }}
+                >
+                  <div className="font-medium text-xs flex items-center gap-1 flex-row-reverse leading-tight">
+                    {isOverlapping && (
+                      <svg className="w-3 h-3 text-amber-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                      </svg>
+                    )}
+                    <span className="truncate">{apt.patient_name}</span>
+                  </div>
+                  {height >= 36 && (
+                    <div className="text-[10px] opacity-75 leading-tight">
+                      {new Date(apt.start_time).toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit', timeZone: 'Africa/Cairo' })}
+                      {' · '}{apt.duration_minutes}د
+                      {isOverlapping && ' ⚠️'}
+                    </div>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        </div>
       </div>
     </div>
   )
@@ -688,12 +736,30 @@ function NewAppointmentModal({ onClose, onCreated, defaultDate, defaultTime, def
     } catch { setModalError('فشل في إنشاء الموعد') } finally { setSubmitting(false) }
   }
 
-  const timeOptions: string[] = []
-  for (let h = 8; h <= 23; h++) {
-    for (let m = 0; m < 60; m += 30) {
-      timeOptions.push(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`)
+  // Step size matches the selected duration so doctors can book at :00, :15, :30, :45 etc.
+  const timeOptions = useMemo(() => {
+    const step = duration <= 10 ? 10 : duration <= 20 ? 15 : 30
+    const opts: string[] = []
+    for (let h = 8; h <= 23; h++) {
+      for (let m = 0; m < 60; m += step) {
+        opts.push(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`)
+      }
     }
-  }
+    return opts
+  }, [duration])
+
+  // When duration changes, snap the current time to the nearest valid step
+  useEffect(() => {
+    const step = duration <= 10 ? 10 : duration <= 20 ? 15 : 30
+    const [hStr, mStr] = time.split(':')
+    const h = parseInt(hStr, 10)
+    const m = parseInt(mStr, 10)
+    const snapped = Math.round(m / step) * step
+    const newM = snapped >= 60 ? 0 : snapped
+    const newH = snapped >= 60 ? Math.min(h + 1, 23) : h
+    const newTime = `${newH.toString().padStart(2, '0')}:${newM.toString().padStart(2, '0')}`
+    if (newTime !== time) setTime(newTime)
+  }, [duration]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" dir="rtl">
@@ -822,6 +888,144 @@ function NewAppointmentModal({ onClose, onCreated, defaultDate, defaultTime, def
 }
 
 // ============================================================================
+// EDIT APPOINTMENT MODAL
+// ============================================================================
+
+interface EditAppointmentModalProps {
+  appointment: Appointment
+  onClose: () => void
+  onSaved: (updated: Partial<Appointment>) => void
+}
+
+function EditAppointmentModal({ appointment, onClose, onSaved }: EditAppointmentModalProps) {
+  // Parse existing start_time into Cairo date + time strings
+  const aptDt = new Date(appointment.start_time)
+  const initDate = aptDt.toLocaleDateString('en-CA', { timeZone: 'Africa/Cairo' }) // YYYY-MM-DD
+  const initHour = parseInt(aptDt.toLocaleString('en-US', { hour: 'numeric', hour12: false, timeZone: 'Africa/Cairo' }), 10)
+  const initMin  = parseInt(aptDt.toLocaleString('en-US', { minute: '2-digit', timeZone: 'Africa/Cairo' }), 10)
+  const initTime = `${initHour.toString().padStart(2,'0')}:${initMin.toString().padStart(2,'0')}`
+
+  const [date, setDate] = useState(initDate)
+  const [time, setTime] = useState(initTime)
+  const [duration, setDuration] = useState(appointment.duration_minutes)
+  const [aptType, setAptType] = useState(appointment.type || 'regular')
+  const [notes, setNotes] = useState(appointment.description || '')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  // Time options — step follows duration
+  const timeOptions = useMemo(() => {
+    const step = duration <= 10 ? 10 : duration <= 20 ? 15 : 30
+    const opts: string[] = []
+    for (let h = 0; h <= 23; h++)
+      for (let m = 0; m < 60; m += step)
+        opts.push(`${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}`)
+    return opts
+  }, [duration])
+
+  const handleSave = async () => {
+    setSubmitting(true)
+    setError(null)
+    try {
+      const startTime = `${date}T${time}:00+02:00`
+      const res = await fetch('/api/doctor/appointments', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          appointmentId: appointment.id,
+          startTime,
+          durationMinutes: duration,
+          appointmentType: aptType,
+          notes: notes.trim() || undefined,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setError(data.error || 'فشل في تعديل الموعد'); return }
+      onSaved({ start_time: startTime, duration_minutes: duration, type: aptType, description: notes.trim() || undefined })
+    } catch { setError('فشل في تعديل الموعد') } finally { setSubmitting(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" dir="rtl">
+      <div className="bg-white rounded-2xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+        <div className="p-5 border-b border-gray-100 flex items-center justify-between flex-row-reverse">
+          <h2 className="text-lg font-bold text-gray-900">تعديل الموعد</h2>
+          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div className="p-5 space-y-4">
+          {error && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{error}</div>}
+
+          {/* Patient — display only */}
+          <div className="bg-gray-50 rounded-lg p-3 text-right">
+            <p className="text-xs text-gray-500 mb-0.5">المريض</p>
+            <p className="font-semibold text-gray-900">{appointment.patient_name}</p>
+          </div>
+
+          {/* Date + Time */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">التاريخ</label>
+              <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
+                className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none text-sm" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">الوقت</label>
+              <select value={time} onChange={(e) => setTime(e.target.value)}
+                className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none text-sm">
+                {timeOptions.map(t => <option key={t} value={t}>{formatTime(t)}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* Duration + Type */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">المدة</label>
+              <select value={duration} onChange={(e) => setDuration(Number(e.target.value))}
+                className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none text-sm">
+                <option value={10}>١٠ دقائق</option>
+                <option value={15}>١٥ دقيقة</option>
+                <option value={20}>٢٠ دقيقة</option>
+                <option value={30}>٣٠ دقيقة</option>
+                <option value={45}>٤٥ دقيقة</option>
+                <option value={60}>٦٠ دقيقة</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">النوع</label>
+              <select value={aptType} onChange={(e) => setAptType(e.target.value)}
+                className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none text-sm">
+                <option value="regular">كشف</option>
+                <option value="followup">متابعة</option>
+                <option value="emergency">طارئ</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Notes */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">ملاحظات</label>
+            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2}
+              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none resize-none text-right text-sm" />
+          </div>
+        </div>
+        <div className="p-5 border-t border-gray-100 flex justify-start gap-3 flex-row-reverse">
+          <button onClick={onClose} className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm" disabled={submitting}>إلغاء</button>
+          <button onClick={handleSave} disabled={submitting}
+            className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 font-medium text-sm">
+            {submitting ? 'جاري الحفظ...' : 'حفظ التغييرات'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================================
 // APPOINTMENT DETAIL BOTTOM SHEET
 // ============================================================================
 
@@ -846,6 +1050,7 @@ interface AppointmentDetailSheetProps {
   onClose: () => void
   onStartSession: (apt: Appointment) => void
   onCancel: (apt: Appointment) => void
+  onEdit: (apt: Appointment) => void
   cancelling: boolean
 }
 
@@ -854,6 +1059,7 @@ function AppointmentDetailSheet({
   onClose,
   onStartSession,
   onCancel,
+  onEdit,
   cancelling,
 }: AppointmentDetailSheetProps) {
   const [confirmingCancel, setConfirmingCancel] = useState(false)
@@ -954,6 +1160,16 @@ function AppointmentDetailSheet({
                   </svg>
                   إلغاء الموعد
                 </button>
+                {/* Edit appointment */}
+                <button
+                  onClick={() => onEdit(appointment)}
+                  className="h-[50px] px-4 rounded-xl border-[0.8px] border-[#93C5FD] bg-[#EFF6FF] font-cairo text-[13px] font-bold text-[#1D4ED8] flex items-center justify-center gap-1.5 active:scale-[0.97] transition-transform"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  </svg>
+                  تعديل
+                </button>
                 {/* Start session */}
                 <button
                   onClick={() => onStartSession(appointment)}
@@ -1007,6 +1223,7 @@ function SchedulePageInner() {
   const [error, setError] = useState<string | null>(null)
   // Appointment detail sheet
   const [detailApt, setDetailApt] = useState<Appointment | null>(null)
+  const [editingApt, setEditingApt] = useState<Appointment | null>(null)
 
   // Deep-link: auto-open new appointment modal (from follow-up button at session end)
   const autoOpenPatientId = searchParams.get('patientId') || undefined
@@ -1097,10 +1314,23 @@ function SchedulePageInner() {
     setDetailApt(apt)
   }
 
-  // Handle cell click — pre-fill modal with clicked date + hour
-  const handleCellClick = (date: Date, hour: number) => {
+  // Open edit modal from detail sheet
+  const handleEditAppointment = (apt: Appointment) => {
+    setDetailApt(null)
+    setEditingApt(apt)
+  }
+
+  // Handle edit saved — update local state then reload
+  const handleEditSaved = (updated: Partial<Appointment>) => {
+    setAppointments(prev => prev.map(a => a.id === editingApt?.id ? { ...a, ...updated } : a))
+    setEditingApt(null)
+    loadData()
+  }
+
+  // Handle cell click — pre-fill modal with clicked date + hour:minute
+  const handleCellClick = (date: Date, hour: number, minute: number = 0) => {
     setNewAptDefaultDate(date)
-    setNewAptDefaultTime(`${hour.toString().padStart(2, '0')}:00`)
+    setNewAptDefaultTime(`${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`)
     setShowNewAppointment(true)
   }
 
@@ -1210,8 +1440,18 @@ function SchedulePageInner() {
         onClose={() => setDetailApt(null)}
         onStartSession={handleStartSession}
         onCancel={handleCancelAppointment}
+        onEdit={handleEditAppointment}
         cancelling={cancelling}
       />
+
+      {/* Edit appointment modal */}
+      {editingApt && (
+        <EditAppointmentModal
+          appointment={editingApt}
+          onClose={() => setEditingApt(null)}
+          onSaved={handleEditSaved}
+        />
+      )}
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 flex-col-reverse">
         <div>

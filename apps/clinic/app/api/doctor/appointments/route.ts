@@ -359,21 +359,20 @@ export async function POST(request: NextRequest) {
 
 // ============================================================================
 // PATCH /api/doctor/appointments
-// Cancel an appointment (doctor can only cancel their own appointments)
-// Body: { appointmentId, status: 'cancelled' }
+// Update an appointment: cancel OR reschedule.
+//
+// Cancel:     { appointmentId, status: 'cancelled' }
+// Reschedule: { appointmentId, startTime, durationMinutes?, appointmentType?, notes? }
 // ============================================================================
 
 export async function PATCH(request: NextRequest) {
   try {
     const user = await requireApiRole('doctor')
     const body = await request.json()
-    const { appointmentId, status } = body
+    const { appointmentId, status, startTime, durationMinutes, appointmentType, notes } = body
 
     if (!appointmentId) {
       return NextResponse.json({ error: 'Appointment ID is required' }, { status: 400 })
-    }
-    if (status !== 'cancelled') {
-      return NextResponse.json({ error: 'Only cancellation is supported' }, { status: 400 })
     }
 
     const supabase = createAdminClient('doctor-appointments')
@@ -389,22 +388,64 @@ export async function PATCH(request: NextRequest) {
     if (!existing) {
       return NextResponse.json({ error: 'Appointment not found' }, { status: 404 })
     }
-    if (existing.status === 'cancelled') {
-      return NextResponse.json({ error: 'Appointment is already cancelled' }, { status: 400 })
+
+    // ── Cancellation ──────────────────────────────────────────────────────────
+    if (status === 'cancelled') {
+      if (existing.status === 'cancelled') {
+        return NextResponse.json({ error: 'Appointment is already cancelled' }, { status: 400 })
+      }
+      const { error: updateError } = await supabase
+        .from('appointments')
+        .update({ status: 'cancelled' })
+        .eq('id', appointmentId)
+
+      if (updateError) {
+        return NextResponse.json({ error: 'Failed to cancel appointment' }, { status: 500 })
+      }
+      return NextResponse.json({ success: true })
     }
 
-    const { error: updateError } = await supabase
-      .from('appointments')
-      .update({ status: 'cancelled' })
-      .eq('id', appointmentId)
+    // ── Reschedule ────────────────────────────────────────────────────────────
+    if (startTime) {
+      if (!['scheduled', 'confirmed'].includes(existing.status)) {
+        return NextResponse.json({ error: 'Only scheduled or confirmed appointments can be rescheduled' }, { status: 400 })
+      }
 
-    if (updateError) {
-      return NextResponse.json({ error: 'Failed to cancel appointment' }, { status: 500 })
+      const duration = durationMinutes ?? 15
+      if (typeof duration !== 'number' || duration < 5 || duration > 120) {
+        return NextResponse.json({ error: 'Duration must be 5-120 minutes' }, { status: 400 })
+      }
+
+      const typeAliases: Record<string, string> = { consultation: 'regular', walkin: 'regular' }
+      const normalizedType = typeAliases[appointmentType] || appointmentType || undefined
+      const validTypes = ['regular', 'followup', 'emergency']
+      if (normalizedType && !validTypes.includes(normalizedType)) {
+        return NextResponse.json({ error: 'Invalid appointment type' }, { status: 400 })
+      }
+
+      const updatePayload: Record<string, unknown> = {
+        start_time: startTime,
+        duration_minutes: duration,
+        status: 'scheduled', // re-open if it was already confirmed
+      }
+      if (normalizedType) updatePayload.appointment_type = normalizedType
+      if (notes !== undefined) { updatePayload.notes = notes; updatePayload.reason = notes }
+
+      const { error: updateError } = await supabase
+        .from('appointments')
+        .update(updatePayload)
+        .eq('id', appointmentId)
+
+      if (updateError) {
+        return NextResponse.json({ error: 'Failed to reschedule appointment' }, { status: 500 })
+      }
+      return NextResponse.json({ success: true })
     }
 
-    return NextResponse.json({ success: true })
+    return NextResponse.json({ error: 'Provide either status or startTime to update' }, { status: 400 })
+
   } catch (error) {
-    console.error('Appointment cancellation error:', error)
-    return toApiErrorResponse(error, 'Failed to cancel appointment')
+    console.error('Appointment update error:', error)
+    return toApiErrorResponse(error, 'Failed to update appointment')
   }
 }
