@@ -127,6 +127,15 @@ interface WalkInSheetProps {
   onSuccess: (queueNumber: number, patientName: string) => void
 }
 
+interface GapSchedule {
+  nextAvailableSlot: string | null
+  nextAvailableSlotDisplay: string | null
+  estimatedWaitMinutes: number
+  gapTooSmall: boolean
+  availableGapMinutes: number
+  slotDurationMinutes: number
+}
+
 function WalkInSheet({ onClose, onSuccess }: WalkInSheetProps) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<WalkInPatient[]>([])
@@ -137,6 +146,9 @@ function WalkInSheet({ onClose, onSuccess }: WalkInSheetProps) {
   const [queueType, setQueueType] = useState<'walkin' | 'emergency'>('walkin')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  // Gap-aware schedule state
+  const [gapSchedule, setGapSchedule] = useState<GapSchedule | null>(null)
+  const [loadingGap, setLoadingGap] = useState(false)
   const searchTimer = useRef<NodeJS.Timeout>()
 
   // Load clinic doctors once
@@ -151,6 +163,22 @@ function WalkInSheet({ onClose, onSuccess }: WalkInSheetProps) {
       })
       .catch(() => {})
   }, [])
+
+  // Fetch gap schedule when doctor changes or walk-in type selected
+  useEffect(() => {
+    if (!selectedDoctorId || queueType !== 'walkin') {
+      setGapSchedule(null)
+      return
+    }
+    setLoadingGap(true)
+    fetch(`/api/frontdesk/schedule/gaps?doctorId=${selectedDoctorId}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data) setGapSchedule(data as GapSchedule)
+      })
+      .catch(() => {})
+      .finally(() => setLoadingGap(false))
+  }, [selectedDoctorId, queueType])
 
   // Debounced patient search
   useEffect(() => {
@@ -200,7 +228,7 @@ function WalkInSheet({ onClose, onSuccess }: WalkInSheetProps) {
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-end" onClick={onClose}>
       <div
-        className="w-full bg-white rounded-t-2xl pt-4 px-4 pb-8 max-w-md mx-auto shadow-xl"
+        className="w-full bg-white rounded-t-2xl pt-4 px-4 pb-8 max-w-md mx-auto shadow-xl max-h-[90vh] overflow-y-auto"
         onClick={e => e.stopPropagation()}
         dir="rtl"
       >
@@ -291,7 +319,7 @@ function WalkInSheet({ onClose, onSuccess }: WalkInSheetProps) {
         )}
 
         {/* Queue type */}
-        <div className="mb-4">
+        <div className="mb-3">
           <label className="font-cairo text-[12px] text-[#6B7280] mb-1 block">نوع الزيارة</label>
           <div className="flex gap-2">
             <button
@@ -312,6 +340,66 @@ function WalkInSheet({ onClose, onSuccess }: WalkInSheetProps) {
             </button>
           </div>
         </div>
+
+        {/* ── Gap-aware slot preview (walk-in only) ─────────────────────────── */}
+        {queueType === 'walkin' && (
+          <div className="mb-4">
+            {loadingGap ? (
+              <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-[#F9FAFB] border-[0.8px] border-[#E5E7EB]">
+                <Loader2 className="w-4 h-4 text-[#9CA3AF] animate-spin flex-shrink-0" />
+                <p className="font-cairo text-[12px] text-[#9CA3AF]">جاري حساب الوقت المتاح…</p>
+              </div>
+            ) : gapSchedule ? (
+              gapSchedule.nextAvailableSlot === null ? (
+                /* No free slot today */
+                <div className="px-3 py-2.5 rounded-xl bg-[#FEF2F2] border-[0.8px] border-[#EF4444]/30">
+                  <p className="font-cairo text-[13px] font-semibold text-[#EF4444]">لا توجد فترات متاحة اليوم</p>
+                  <p className="font-cairo text-[11px] text-[#9CA3AF] mt-0.5">الجدول ممتلئ — يمكنك إضافة المريض آخر الطابور</p>
+                </div>
+              ) : gapSchedule.gapTooSmall ? (
+                /* Gap exists but smaller than slot duration */
+                <div className="px-3 py-2.5 rounded-xl bg-[#FFFBEB] border-[0.8px] border-[#F59E0B]/40">
+                  <div className="flex items-start gap-2">
+                    <Clock className="w-4 h-4 text-[#F59E0B] flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-cairo text-[13px] font-semibold text-[#92400E]">
+                        الفترة المتاحة صغيرة ({gapSchedule.availableGapMinutes} د)
+                      </p>
+                      <p className="font-cairo text-[11px] text-[#92400E]/70 mt-0.5">
+                        الموعد المقدّر: {gapSchedule.nextAvailableSlotDisplay} · الوقت اللازم: {gapSchedule.slotDurationMinutes} د
+                      </p>
+                      <p className="font-cairo text-[11px] text-[#9CA3AF] mt-0.5">
+                        سيُضاف المريض للطابور — قد يكون الانتظار أطول
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                /* Normal: free slot found */
+                <div className="px-3 py-2.5 rounded-xl bg-[#F0FDF4] border-[0.8px] border-[#16A34A]/30">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-[#16A34A] flex-shrink-0" />
+                      <div>
+                        <p className="font-cairo text-[13px] font-semibold text-[#15803D]">
+                          الوقت المتوقع: {gapSchedule.nextAvailableSlotDisplay}
+                        </p>
+                        <p className="font-cairo text-[11px] text-[#6B7280] mt-0.5">
+                          {gapSchedule.estimatedWaitMinutes === 0
+                            ? 'يمكن دخوله الآن'
+                            : `انتظار ~${gapSchedule.estimatedWaitMinutes} دقيقة`}
+                        </p>
+                      </div>
+                    </div>
+                    <span className="font-cairo text-[11px] font-bold text-[#16A34A] bg-[#DCFCE7] px-2 py-0.5 rounded-full">
+                      {gapSchedule.availableGapMinutes} د متاح
+                    </span>
+                  </div>
+                </div>
+              )
+            ) : null}
+          </div>
+        )}
 
         {/* Error */}
         {error && (

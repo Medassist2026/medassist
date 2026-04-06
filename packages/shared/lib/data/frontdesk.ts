@@ -131,6 +131,39 @@ export interface AvailableSlot {
   appointment_id?: string
 }
 
+// ── Gap-aware schedule types ──
+
+/** A single block on the doctor's timeline */
+export interface ScheduleBlock {
+  start_time: string           // ISO timestamp
+  end_time: string             // ISO timestamp
+  block_type: 'appointment' | 'walkin' | 'urgent' | 'free'
+  patient_name?: string
+  queue_number?: number
+  minutes_free?: number        // only set on 'free' blocks
+}
+
+/**
+ * Full gap-aware schedule for a doctor on a given date.
+ * Used by WalkInSheet to show estimated slot time before confirming check-in.
+ */
+export interface GapAwareSchedule {
+  /** ISO timestamp of the next free slot for a new walk-in, or null if none */
+  nextAvailableSlot: string | null
+  /** Human-readable time like "15:30", null if none */
+  nextAvailableSlotDisplay: string | null
+  /** Minutes from now until the walk-in will be seen */
+  estimatedWaitMinutes: number
+  /** True when the next free gap is smaller than slot_duration_minutes */
+  gapTooSmall: boolean
+  /** Size of the next available gap in minutes */
+  availableGapMinutes: number
+  /** Doctor's configured slot duration for walk-ins */
+  slotDurationMinutes: number
+  /** Full ordered timeline: appointments + walk-in slots + free blocks */
+  blocks: ScheduleBlock[]
+}
+
 // ── Pagination ──
 
 export interface PaginationParams {
@@ -370,6 +403,14 @@ export async function checkInPatient(params: {
 
   if (error) throw new Error(error.message)
 
+  // ── For walk-ins, assign an estimated slot time (gap-aware) ──────────────
+  if (effectiveQueueType === 'walkin') {
+    // Fire-and-forget: if RPC fails, check-in still succeeds
+    assignWalkinSlot(params.doctorId, data.id).catch((e) =>
+      console.error('assignWalkinSlot failed (non-fatal):', e)
+    )
+  }
+
   // Mark appointment as checked-in
   if (effectiveAppointmentId) {
     const { data: authData } = await supabase.auth.getUser()
@@ -550,17 +591,22 @@ export async function completeQueueSession(queueId: string): Promise<SessionComp
 // ============================================================================
 
 /**
- * Get available time slots for a doctor on a specific date
+ * Get available time slots for a doctor on a specific date.
+ *
+ * Gap-aware: merges both scheduled appointments AND active walk-in queue
+ * entries (those with estimated_slot_time) so that gaps used by walk-ins
+ * are not offered again for new bookings.
  */
 export async function getAvailableSlots(
   doctorId: string,
   date: string // YYYY-MM-DD
 ): Promise<AvailableSlot[]> {
   const supabase = await createClient()
-  
+  const admin = createAdminClient('available-slots-gap-aware')
+
   // Get day of week (0 = Sunday)
   const dayOfWeek = new Date(date).getDay()
-  
+
   // Get doctor's availability for this day
   const { data: availability } = await supabase
     .from('doctor_availability')
@@ -569,65 +615,318 @@ export async function getAvailableSlots(
     .eq('day_of_week', dayOfWeek)
     .eq('is_active', true)
     .single()
-  
+
   if (!availability) {
     return [] // Doctor not available on this day
   }
-  
-  // Get existing appointments for this date
-  const startOfDay = new Date(date)
-  startOfDay.setHours(0, 0, 0, 0)
-  const endOfDay = new Date(date)
-  endOfDay.setHours(23, 59, 59, 999)
-  
-  const { data: appointments } = await supabase
+
+  // Date range in Cairo timezone (UTC+2)
+  const startOfDay = `${date}T00:00:00+02:00`
+  const endOfDay   = `${date}T23:59:59+02:00`
+
+  // Fetch scheduled appointments (not cancelled / no_show)
+  const { data: appointments } = await admin
     .from('appointments')
     .select('id, start_time, duration_minutes')
     .eq('doctor_id', doctorId)
-    .eq('status', 'scheduled')
-    .gte('start_time', startOfDay.toISOString())
-    .lte('start_time', endOfDay.toISOString())
-  
-  // Generate time slots
-  const slots: AvailableSlot[] = []
+    .not('status', 'in', '("cancelled","no_show")')
+    .gte('start_time', startOfDay)
+    .lte('start_time', endOfDay)
+
+  // Fetch active walk-in slots already assigned (gap-aware)
+  const { data: walkinSlots } = await admin
+    .from('check_in_queue')
+    .select('estimated_slot_time')
+    .eq('doctor_id', doctorId)
+    .eq('queue_type', 'walkin')
+    .in('status', ['waiting', 'in_progress'])
+    .gte('estimated_slot_time', startOfDay)
+    .lte('estimated_slot_time', endOfDay)
+    .not('estimated_slot_time', 'is', null)
+
   const slotDuration = availability.slot_duration_minutes
-  
-  const [startHour, startMinute] = availability.start_time.split(':').map(Number)
-  const [endHour, endMinute] = availability.end_time.split(':').map(Number)
-  
+
+  const [startHour, startMinute] = (availability.start_time as string).split(':').map(Number)
+  const [endHour, endMinute]     = (availability.end_time   as string).split(':').map(Number)
+
   let currentTime = new Date(date)
   currentTime.setHours(startHour, startMinute, 0, 0)
-  
+
   const endTime = new Date(date)
   endTime.setHours(endHour, endMinute, 0, 0)
-  
+
+  const slots: AvailableSlot[] = []
+
   while (currentTime < endTime) {
     const slotStart = new Date(currentTime)
-    const slotEnd = new Date(currentTime.getTime() + slotDuration * 60000)
-    
-    // Check if slot is booked
-    const isBooked = appointments?.some(apt => {
+    const slotEnd   = new Date(currentTime.getTime() + slotDuration * 60000)
+
+    // Occupied by a scheduled appointment?
+    const isAppointmentBooked = appointments?.some(apt => {
       const aptStart = new Date(apt.start_time)
-      const aptEnd = new Date(aptStart.getTime() + apt.duration_minutes * 60000)
+      const aptEnd   = new Date(aptStart.getTime() + apt.duration_minutes * 60000)
       return slotStart < aptEnd && slotEnd > aptStart
-    }) || false
-    
+    }) ?? false
+
+    // Occupied by an existing walk-in queue slot?
+    const isWalkinBooked = walkinSlots?.some(ws => {
+      if (!ws.estimated_slot_time) return false
+      const wsStart = new Date(ws.estimated_slot_time)
+      const wsEnd   = new Date(wsStart.getTime() + slotDuration * 60000)
+      return slotStart < wsEnd && slotEnd > wsStart
+    }) ?? false
+
+    const isBooked = isAppointmentBooked || isWalkinBooked
+
     const bookedAppointment = appointments?.find(apt => {
       const aptStart = new Date(apt.start_time)
       return aptStart.getTime() === slotStart.getTime()
     })
-    
+
     slots.push({
       start_time: slotStart.toISOString(),
-      end_time: slotEnd.toISOString(),
-      is_booked: isBooked,
-      appointment_id: bookedAppointment?.id
+      end_time:   slotEnd.toISOString(),
+      is_booked:  isBooked,
+      appointment_id: bookedAppointment?.id,
     })
-    
+
     currentTime = slotEnd
   }
-  
+
   return slots
+}
+
+/**
+ * Get the gap-aware schedule for a doctor on a given date.
+ *
+ * Merges appointments + active queue walk-in slots into a full timeline,
+ * then finds the next free gap for a new walk-in patient.
+ *
+ * Used by WalkInSheet to:
+ *   - Show the estimated check-in time before confirming arrival
+ *   - Warn when the only available gap is < slot_duration_minutes
+ *   - Render a visual timeline of the doctor's day
+ */
+export async function getGapAwareSchedule(
+  doctorId: string,
+  date?: string // YYYY-MM-DD, defaults to today (Cairo)
+): Promise<GapAwareSchedule> {
+  const admin = createAdminClient('gap-aware-schedule')
+
+  // ── Resolve date in Cairo timezone (UTC+2) ────────────────────────────────
+  const cairoNow  = new Date(Date.now() + 2 * 60 * 60 * 1000)
+  const targetDate = date ?? cairoNow.toISOString().split('T')[0]
+  const dayOfWeek  = new Date(targetDate).getDay()
+
+  // ── Doctor availability for this day ─────────────────────────────────────
+  const { data: avail } = await admin
+    .from('doctor_availability')
+    .select('start_time, end_time, slot_duration_minutes')
+    .eq('doctor_id', doctorId)
+    .eq('day_of_week', dayOfWeek)
+    .eq('is_active', true)
+    .maybeSingle()
+
+  const slotDuration = (avail?.slot_duration_minutes as number | null) ?? 15
+
+  if (!avail) {
+    return {
+      nextAvailableSlot:        null,
+      nextAvailableSlotDisplay: null,
+      estimatedWaitMinutes:     0,
+      gapTooSmall:              false,
+      availableGapMinutes:      0,
+      slotDurationMinutes:      slotDuration,
+      blocks:                   [],
+    }
+  }
+
+  // ── Build day boundaries (Cairo UTC+2) ───────────────────────────────────
+  const [sh, sm] = (avail.start_time as string).split(':').map(Number)
+  const [eh, em] = (avail.end_time   as string).split(':').map(Number)
+
+  const dayStart = new Date(`${targetDate}T${String(sh).padStart(2,'0')}:${String(sm).padStart(2,'0')}:00+02:00`)
+  const dayEnd   = new Date(`${targetDate}T${String(eh).padStart(2,'0')}:${String(em).padStart(2,'0')}:00+02:00`)
+
+  // ── Fetch scheduled appointments ─────────────────────────────────────────
+  const { data: apts } = await admin
+    .from('appointments')
+    .select('id, start_time, duration_minutes, appointment_type, patient:patients(full_name)')
+    .eq('doctor_id', doctorId)
+    .not('status', 'in', '("cancelled","no_show")')
+    .gte('start_time', dayStart.toISOString())
+    .lt('start_time', dayEnd.toISOString())
+    .order('start_time', { ascending: true })
+
+  // ── Fetch walk-in queue entries with estimated_slot_time ─────────────────
+  const { data: walkins } = await admin
+    .from('check_in_queue')
+    .select('queue_number, estimated_slot_time, patient:patients(full_name)')
+    .eq('doctor_id', doctorId)
+    .eq('queue_type', 'walkin')
+    .in('status', ['waiting', 'in_progress'])
+    .gte('estimated_slot_time', dayStart.toISOString())
+    .lt('estimated_slot_time', dayEnd.toISOString())
+    .not('estimated_slot_time', 'is', null)
+    .order('estimated_slot_time', { ascending: true })
+
+  // ── Build occupied blocks list ────────────────────────────────────────────
+  type OccupiedBlock = { start: Date; end: Date }
+  const occupied: OccupiedBlock[] = []
+
+  const blocks: ScheduleBlock[] = []
+
+  for (const apt of (apts ?? [])) {
+    const s = new Date(apt.start_time)
+    const e = new Date(s.getTime() + apt.duration_minutes * 60000)
+    const patientObj = (apt as any).patient
+    occupied.push({ start: s, end: e })
+    blocks.push({
+      start_time:   s.toISOString(),
+      end_time:     e.toISOString(),
+      block_type:   apt.appointment_type === 'urgent' ? 'urgent' : 'appointment',
+      patient_name: patientObj?.full_name ?? undefined,
+    })
+  }
+
+  for (const wk of (walkins ?? [])) {
+    if (!wk.estimated_slot_time) continue
+    const s = new Date(wk.estimated_slot_time)
+    const e = new Date(s.getTime() + slotDuration * 60000)
+    const patientObj = (wk as any).patient
+    occupied.push({ start: s, end: e })
+    blocks.push({
+      start_time:   s.toISOString(),
+      end_time:     e.toISOString(),
+      block_type:   'walkin',
+      patient_name: patientObj?.full_name ?? undefined,
+      queue_number: wk.queue_number,
+    })
+  }
+
+  // Sort occupied by start time
+  occupied.sort((a, b) => a.start.getTime() - b.start.getTime())
+  blocks.sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
+
+  // ── Find free gaps and insert them into blocks ────────────────────────────
+  let cursor = new Date(Math.max(dayStart.getTime(), cairoNow.getTime()))
+  // Snap cursor forward to next slot-duration boundary
+  const msPerSlot = slotDuration * 60000
+  const snapped = Math.ceil(cursor.getTime() / msPerSlot) * msPerSlot
+  cursor = new Date(snapped)
+
+  let nextAvailableSlot: string | null = null
+  let availableGapMinutes = 0
+  let gapTooSmall = false
+
+  const tempFreeBlocks: ScheduleBlock[] = []
+
+  while (cursor < dayEnd) {
+    const slotEnd = new Date(cursor.getTime() + slotDuration * 60000)
+    if (slotEnd > dayEnd) break
+
+    // Check conflict with any occupied block
+    const conflict = occupied.some(
+      (o) => cursor < o.end && slotEnd > o.start
+    )
+
+    if (!conflict) {
+      // Free gap found — measure how large it is
+      const nextOccupied = occupied
+        .filter((o) => o.start >= cursor)
+        .sort((a, b) => a.start.getTime() - b.start.getTime())[0]
+
+      const gapEnd   = nextOccupied ? new Date(Math.min(nextOccupied.start.getTime(), dayEnd.getTime())) : dayEnd
+      const gapMins  = Math.floor((gapEnd.getTime() - cursor.getTime()) / 60000)
+
+      if (!nextAvailableSlot) {
+        nextAvailableSlot    = cursor.toISOString()
+        availableGapMinutes  = gapMins
+        gapTooSmall          = gapMins < slotDuration
+
+        tempFreeBlocks.push({
+          start_time:   cursor.toISOString(),
+          end_time:     gapEnd.toISOString(),
+          block_type:   'free',
+          minutes_free: gapMins,
+        })
+      }
+
+      // Jump cursor past this whole free gap to find the next occupied block
+      cursor = gapEnd
+    } else {
+      // Advance past all overlapping occupied blocks
+      const overlap = occupied.filter((o) => o.start < slotEnd && o.end > cursor)
+      const furthest = overlap.reduce((max, o) => (o.end > max ? o.end : max), cursor)
+      // Snap to next slot boundary
+      const snappedFurthest = new Date(Math.ceil(furthest.getTime() / msPerSlot) * msPerSlot)
+      cursor = snappedFurthest
+    }
+  }
+
+  // Merge free blocks into the timeline
+  blocks.push(...tempFreeBlocks)
+  blocks.sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
+
+  // ── Compute estimated wait minutes ────────────────────────────────────────
+  let estimatedWaitMinutes = 0
+  if (nextAvailableSlot) {
+    estimatedWaitMinutes = Math.max(
+      0,
+      Math.round((new Date(nextAvailableSlot).getTime() - cairoNow.getTime()) / 60000)
+    )
+  }
+
+  // ── Format display time (Cairo HH:MM) ────────────────────────────────────
+  let nextAvailableSlotDisplay: string | null = null
+  if (nextAvailableSlot) {
+    const slotDate = new Date(nextAvailableSlot)
+    const cairoSlot = new Date(slotDate.getTime() + 2 * 60 * 60 * 1000)
+    nextAvailableSlotDisplay = cairoSlot.toISOString().substring(11, 16)
+  }
+
+  return {
+    nextAvailableSlot,
+    nextAvailableSlotDisplay,
+    estimatedWaitMinutes,
+    gapTooSmall,
+    availableGapMinutes,
+    slotDurationMinutes: slotDuration,
+    blocks,
+  }
+}
+
+/**
+ * Compute and store estimated_slot_time for a new walk-in check-in.
+ * Calls get_next_walkin_slot Postgres RPC which is gap-aware.
+ *
+ * Returns the ISO slot time assigned, or null if no gap available.
+ */
+export async function assignWalkinSlot(
+  doctorId: string,
+  queueItemId: string,
+  slotDurationMinutes?: number
+): Promise<string | null> {
+  const admin = createAdminClient('assign-walkin-slot')
+
+  const { data: slotTime, error } = await admin.rpc('get_next_walkin_slot', {
+    p_doctor_id:     doctorId,
+    p_slot_duration: slotDurationMinutes ?? 15,
+  })
+
+  if (error) {
+    console.error('assignWalkinSlot RPC error:', error)
+    return null
+  }
+
+  if (!slotTime) return null
+
+  await admin
+    .from('check_in_queue')
+    .update({ estimated_slot_time: slotTime })
+    .eq('id', queueItemId)
+
+  return slotTime as string
 }
 
 /**
