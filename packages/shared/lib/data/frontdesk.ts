@@ -31,6 +31,7 @@ export interface DoctorWithId extends DoctorSummary {
 
 export type QueueType = 'appointment' | 'walkin' | 'emergency'
 export type QueueStatus = 'waiting' | 'in_progress' | 'completed' | 'cancelled'
+export type WindowStatus = 'none' | 'open' | 'expired'
 
 export interface CheckInQueueItem {
   id: string
@@ -43,8 +44,25 @@ export interface CheckInQueueItem {
   checked_in_at: string
   called_at: string | null
   completed_at: string | null
+  // Window state — set when this item was swapped in for a deferred appointment
+  apt_window_status: WindowStatus
+  swapped_appointment_id: string | null
+  swapped_patient_name: string | null
   patient: PatientSummary
   doctor: DoctorSummary
+}
+
+// Result returned after completing a queue session
+export interface SessionCompleteResult {
+  completed: true
+  // A new window was opened: next walk-in is now carrying an appointment window
+  windowOpened: boolean
+  swappedAppointmentId?: string
+  swappedPatientName?: string
+  // A previously open window has now expired → appointment auto-marked no_show
+  windowExpired: boolean
+  expiredAppointmentId?: string
+  expiredPatientName?: string
 }
 
 // ── Payments ──
@@ -85,6 +103,9 @@ export interface Appointment {
   status: AppointmentStatus
   type: AppointmentType
   notes: string | null
+  // Window tracking — set when this appointment's slot is being held open
+  window_status?: WindowStatus
+  window_queue_id?: string | null
   doctor: DoctorWithId
   patient: PatientWithId
 }
@@ -236,7 +257,14 @@ export async function getQueueByDateRange(
 }
 
 /**
- * Check in a patient (create queue entry)
+ * Check in a patient — window-aware.
+ *
+ * If the patient has a booked appointment whose window_status = 'open',
+ * they are inserted IMMEDIATELY AFTER the currently in-progress patient
+ * rather than at the back of the queue.
+ *
+ * If the appointment has already been auto-marked no_show (window expired),
+ * the patient is downgraded to a walk-in.
  */
 export async function checkInPatient(params: {
   patientId: string
@@ -245,78 +273,264 @@ export async function checkInPatient(params: {
   queueType: 'appointment' | 'walkin' | 'emergency'
 }): Promise<CheckInQueueItem> {
   const supabase = await createClient()
-  
-  // Get next queue number
-  const { data: queueNumberData } = await supabase
-    .rpc('get_next_queue_number', { p_doctor_id: params.doctorId })
-  
-  const queueNumber = queueNumberData || 1
-  
-  const { data, error } = await supabase
+  const admin = createAdminClient('window-aware-checkin')
+
+  let effectiveQueueType: QueueType = params.queueType
+  let effectiveAppointmentId: string | null = params.appointmentId ?? null
+  let insertAfterQueueNumber: number | null = null
+
+  // ── Window-aware logic (only for appointment check-ins) ──────────────────
+  if (params.appointmentId && params.queueType === 'appointment') {
+    const { data: apt } = await admin
+      .from('appointments')
+      .select('id, status, window_status, window_queue_id')
+      .eq('id', params.appointmentId)
+      .maybeSingle()
+
+    if (apt) {
+      if (apt.status === 'no_show') {
+        // Window already expired — downgrade to walk-in
+        effectiveQueueType = 'walkin'
+        effectiveAppointmentId = null
+      } else if (apt.window_status === 'open') {
+        // Window is open — find the in-progress session (the window carrier)
+        const { data: inProgress } = await admin
+          .from('check_in_queue')
+          .select('id, queue_number')
+          .eq('doctor_id', params.doctorId)
+          .eq('status', 'in_progress')
+          .maybeSingle()
+
+        if (inProgress) {
+          insertAfterQueueNumber = inProgress.queue_number
+
+          // Close the window on the appointment
+          await admin
+            .from('appointments')
+            .update({ window_status: 'expired' })
+            .eq('id', params.appointmentId)
+
+          // Close the window on the carrier queue item
+          if (apt.window_queue_id) {
+            await admin
+              .from('check_in_queue')
+              .update({ apt_window_status: 'expired' })
+              .eq('id', apt.window_queue_id)
+          }
+        }
+      }
+    }
+  }
+
+  // ── Determine queue position ─────────────────────────────────────────────
+  let queueNumber: number
+
+  if (insertAfterQueueNumber !== null) {
+    // Atomically shift everything after the in-progress patient up by 1
+    await admin.rpc('shift_queue_numbers_up', {
+      p_doctor_id: params.doctorId,
+      p_after_queue_number: insertAfterQueueNumber,
+    })
+    queueNumber = insertAfterQueueNumber + 1
+  } else {
+    const { data: nextNum } = await supabase
+      .rpc('get_next_queue_number', { p_doctor_id: params.doctorId })
+    queueNumber = nextNum || 1
+  }
+
+  // ── Insert queue entry ───────────────────────────────────────────────────
+  const { data, error } = await admin
     .from('check_in_queue')
     .insert({
       patient_id: params.patientId,
       doctor_id: params.doctorId,
-      appointment_id: params.appointmentId,
+      appointment_id: effectiveAppointmentId,
       queue_number: queueNumber,
-      queue_type: params.queueType,
-      status: 'waiting'
+      queue_type: effectiveQueueType,
+      status: 'waiting',
     })
     .select(`
       *,
-      patient:patients (
-        full_name,
-        phone,
-        age,
-        sex
-      ),
-      doctor:doctors (
-        full_name,
-        specialty
-      )
+      patient:patients (full_name, phone, age, sex),
+      doctor:doctors  (full_name, specialty)
     `)
     .single()
-  
+
   if (error) throw new Error(error.message)
-  
-  // If appointment, mark as checked in
-  if (params.appointmentId) {
-    await supabase
+
+  // Mark appointment as checked-in
+  if (effectiveAppointmentId) {
+    const { data: authData } = await supabase.auth.getUser()
+    await admin
       .from('appointments')
       .update({
         checked_in_at: new Date().toISOString(),
-        checked_in_by: (await supabase.auth.getUser()).data.user?.id
+        checked_in_by: authData.user?.id ?? null,
       })
-      .eq('id', params.appointmentId)
+      .eq('id', effectiveAppointmentId)
   }
-  
+
   const [normalized] = await hydrateQueueDoctors([data as any])
   return normalized as unknown as CheckInQueueItem
 }
 
 /**
- * Update queue item status
+ * Update queue item status (non-completion transitions: waiting → in_progress, cancelled)
  */
 export async function updateQueueStatus(
   queueId: string,
-  status: 'waiting' | 'in_progress' | 'completed' | 'cancelled'
+  status: 'waiting' | 'in_progress' | 'cancelled'
 ): Promise<void> {
   const supabase = await createClient()
-  
-  const updates: any = { status }
-  
-  if (status === 'in_progress') {
-    updates.called_at = new Date().toISOString()
-  } else if (status === 'completed' || status === 'cancelled') {
-    updates.completed_at = new Date().toISOString()
-  }
-  
+
+  const updates: Record<string, unknown> = { status }
+  if (status === 'in_progress') updates.called_at = new Date().toISOString()
+  if (status === 'cancelled')   updates.completed_at = new Date().toISOString()
+
   const { error } = await supabase
     .from('check_in_queue')
     .update(updates)
     .eq('id', queueId)
-  
+
   if (error) throw new Error(error.message)
+}
+
+/**
+ * Complete a queue session — the primary completion path.
+ *
+ * Beyond marking the item completed it drives the window state machine:
+ *
+ * 1. If the completing item WAS a window carrier (apt_window_status = 'open'):
+ *    - If appointment patient arrived during the window → silently expire the window.
+ *    - If appointment patient never arrived → mark appointment as no_show and expire.
+ *
+ * 2. After completion, check whether the NEXT waiting item should open a new window:
+ *    - Look for a scheduled appointment whose start_time has passed and whose
+ *      patient has not yet checked in (window_status = 'none').
+ *    - If found, mark the next queue item as the window carrier and set the
+ *      appointment's window_status = 'open'.
+ */
+export async function completeQueueSession(queueId: string): Promise<SessionCompleteResult> {
+  const admin = createAdminClient('complete-queue-session')
+
+  const result: SessionCompleteResult = {
+    completed: true,
+    windowOpened: false,
+    windowExpired: false,
+  }
+
+  // ── 1. Fetch the item being completed ────────────────────────────────────
+  const { data: item, error: fetchErr } = await admin
+    .from('check_in_queue')
+    .select('id, doctor_id, queue_number, apt_window_status, swapped_appointment_id')
+    .eq('id', queueId)
+    .single()
+
+  if (fetchErr || !item) throw new Error('Queue item not found')
+
+  const now = new Date().toISOString()
+
+  // ── 2. Mark completed (expire any open window on this item) ──────────────
+  await admin
+    .from('check_in_queue')
+    .update({
+      status: 'completed',
+      completed_at: now,
+      ...(item.apt_window_status === 'open' ? { apt_window_status: 'expired' } : {}),
+    })
+    .eq('id', queueId)
+
+  // ── 3. Handle window expiry for the appointment that was deferred ─────────
+  if (item.apt_window_status === 'open' && item.swapped_appointment_id) {
+    // Did the appointment patient check in during the window?
+    const { data: aptQueue } = await admin
+      .from('check_in_queue')
+      .select('id')
+      .eq('appointment_id', item.swapped_appointment_id)
+      .neq('status', 'cancelled')
+      .maybeSingle()
+
+    if (!aptQueue) {
+      // Patient never came — auto no_show
+      const { data: apt } = await admin
+        .from('appointments')
+        .select('id, patient_id, patient:patients(full_name)')
+        .eq('id', item.swapped_appointment_id)
+        .maybeSingle() as { data: { id: string; patient_id: string; patient: { full_name: string | null } | null } | null }
+
+      await admin
+        .from('appointments')
+        .update({ status: 'no_show', window_status: 'expired' })
+        .eq('id', item.swapped_appointment_id)
+
+      result.windowExpired = true
+      result.expiredAppointmentId = item.swapped_appointment_id
+      result.expiredPatientName = apt?.patient?.full_name ?? 'مريض'
+    } else {
+      // Patient arrived during window — just close the window flag
+      await admin
+        .from('appointments')
+        .update({ window_status: 'expired' })
+        .eq('id', item.swapped_appointment_id)
+    }
+  }
+
+  // ── 4. Check if the NEXT waiting item should open a new window ───────────
+  // Cairo = UTC+2
+  const cairoNow = new Date(Date.now() + 2 * 60 * 60 * 1000)
+
+  const { data: nextItem } = await admin
+    .from('check_in_queue')
+    .select('id, queue_type, queue_number')
+    .eq('doctor_id', item.doctor_id)
+    .eq('status', 'waiting')
+    .order('queue_number', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  if (nextItem) {
+    // Look for a scheduled appointment that should have started and hasn't arrived
+    const { data: pendingApt } = await admin
+      .from('appointments')
+      .select('id, start_time, patient_id, patient:patients(full_name)')
+      .eq('doctor_id', item.doctor_id)
+      .eq('status', 'scheduled')
+      .eq('window_status', 'none')
+      .lte('start_time', cairoNow.toISOString())
+      .is('checked_in_at', null)
+      .order('start_time', { ascending: true })
+      .limit(1)
+      .maybeSingle() as { data: { id: string; start_time: string; patient_id: string; patient: { full_name: string | null } | null } | null }
+
+    if (pendingApt) {
+      const patientName = pendingApt.patient?.full_name ?? 'مريض'
+
+      // Mark next queue item as the window carrier
+      await admin
+        .from('check_in_queue')
+        .update({
+          apt_window_status: 'open',
+          swapped_appointment_id: pendingApt.id,
+          swapped_patient_name: patientName,
+        })
+        .eq('id', nextItem.id)
+
+      // Mark appointment as having an open window
+      await admin
+        .from('appointments')
+        .update({
+          window_status: 'open',
+          window_queue_id: nextItem.id,
+        })
+        .eq('id', pendingApt.id)
+
+      result.windowOpened = true
+      result.swappedAppointmentId = pendingApt.id
+      result.swappedPatientName = patientName
+    }
+  }
+
+  return result
 }
 
 // ============================================================================

@@ -1,6 +1,6 @@
 export const dynamic = 'force-dynamic'
 
-import { updateQueueStatus } from '@shared/lib/data/frontdesk'
+import { updateQueueStatus, completeQueueSession } from '@shared/lib/data/frontdesk'
 import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
 import { createClient } from '@shared/lib/supabase/server'
 import { ensureDoctorInFrontdeskClinic } from '@shared/lib/data/frontdesk-scope'
@@ -27,9 +27,7 @@ export async function POST(request: Request) {
       .eq('id', queueId)
       .maybeSingle()
 
-    if (queueLookupError) {
-      throw queueLookupError
-    }
+    if (queueLookupError) throw queueLookupError
 
     if (!queueItem?.doctor_id) {
       return NextResponse.json(
@@ -50,11 +48,16 @@ export async function POST(request: Request) {
       )
     }
 
-    await updateQueueStatus(queueId, status)
+    // ── Completion path: drives the full window state machine ────────────────
+    if (status === 'completed') {
+      const sessionResult = await completeQueueSession(queueId)
+      return NextResponse.json({ success: true, ...sessionResult })
+    }
 
-    return NextResponse.json({
-      success: true
-    })
+    // ── Non-completion transitions (waiting → in_progress, cancelled) ────────
+    await updateQueueStatus(queueId, status as 'waiting' | 'in_progress' | 'cancelled')
+
+    return NextResponse.json({ success: true })
 
   } catch (error: any) {
     console.error('Queue update error:', error)

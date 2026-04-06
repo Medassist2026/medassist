@@ -15,7 +15,6 @@ import {
   User,
   Clock,
   Stethoscope,
-  TrendingUp,
   Search,
   X,
   Loader2,
@@ -66,7 +65,7 @@ function deriveDoctorStatuses(queue: QueueItem[]): DoctorStatus[] {
 
     const doc = doctorMap.get(doctorId)!
 
-    if (item.status === 'in_progress') {
+    if ((item as QueueItem).status === 'in_progress') {
       doc.currentPatient = {
         name: item.patient?.full_name || 'مريض',
         queueNumber: item.queue_number,
@@ -510,6 +509,28 @@ function MobileQueueList({
 }
 
 // ============================================================================
+// WINDOW ALERT BANNER — shown when a walk-in is carrying an open apt window
+// ============================================================================
+
+function WindowAlertBanner({ patientName }: { patientName: string }) {
+  return (
+    <div className="flex items-start gap-3 bg-[#FFFBEB] border-[0.8px] border-[#D97706] rounded-[12px] px-3.5 py-3">
+      <div className="w-8 h-8 rounded-full bg-[#FEF3C7] flex items-center justify-center flex-shrink-0 mt-0.5">
+        <Clock className="w-4 h-4 text-[#D97706]" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="font-cairo text-[13px] font-bold text-[#92400E]">
+          نافذة موعد مفتوحة
+        </p>
+        <p className="font-cairo text-[12px] text-[#B45309] mt-0.5 leading-relaxed">
+          <span className="font-semibold">{patientName}</span> لم يصل بعد — إذا وصل الآن سيُدرج مباشرةً بعد المريض الحالي
+        </p>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================================
 // MAIN DASHBOARD PAGE
 // ============================================================================
 
@@ -523,6 +544,11 @@ export default function FrontDeskDashboardPage() {
   const [pendingInviteCount, setPendingInviteCount] = useState(0)
   const [showWalkIn, setShowWalkIn] = useState(false)
   const [walkInToast, setWalkInToast] = useState<string | null>(null)
+  // Window event toasts — shown after session completion events
+  const [windowToast, setWindowToast] = useState<{
+    type: 'opened' | 'expired'
+    patientName: string
+  } | null>(null)
 
   const refreshData = useCallback(async () => {
     try {
@@ -569,6 +595,11 @@ export default function FrontDeskDashboardPage() {
     return () => clearInterval(interval)
   }, [refreshData])
 
+  const showWindowToast = (type: 'opened' | 'expired', patientName: string) => {
+    setWindowToast({ type, patientName })
+    setTimeout(() => setWindowToast(null), 5000)
+  }
+
   const updateStatus = async (queueId: string, status: string) => {
     setUpdating(queueId)
     try {
@@ -578,6 +609,17 @@ export default function FrontDeskDashboardPage() {
         body: JSON.stringify({ queueId, status }),
       })
       if (!res.ok) throw new Error('فشل التحديث')
+      const data = await res.json()
+
+      // Handle window state events returned from session completion
+      if (status === 'completed') {
+        if (data.windowOpened && data.swappedPatientName) {
+          showWindowToast('opened', data.swappedPatientName)
+        } else if (data.windowExpired && data.expiredPatientName) {
+          showWindowToast('expired', data.expiredPatientName)
+        }
+      }
+
       refreshData()
     } catch (err) {
       console.error('Update error:', err)
@@ -612,6 +654,19 @@ export default function FrontDeskDashboardPage() {
       {walkInToast && (
         <div className="fixed top-4 left-4 right-4 z-50 mx-auto max-w-sm px-4 py-2.5 rounded-xl shadow-lg font-cairo text-[13px] font-bold text-center bg-[#F0FDF4] text-[#16A34A] border border-[#16A34A]/20">
           {walkInToast}
+        </div>
+      )}
+
+      {/* Window event toast */}
+      {windowToast && (
+        <div className={`fixed top-4 left-4 right-4 z-50 mx-auto max-w-sm px-4 py-2.5 rounded-xl shadow-lg font-cairo text-[13px] font-bold text-center border ${
+          windowToast.type === 'opened'
+            ? 'bg-[#FFFBEB] text-[#92400E] border-[#D97706]/30'
+            : 'bg-[#FEF2F2] text-[#991B1B] border-[#EF4444]/20'
+        }`}>
+          {windowToast.type === 'opened'
+            ? `⏳ نافذة مفتوحة لـ ${windowToast.patientName} — يمكنه الوصول الآن`
+            : `✗ ${windowToast.patientName} — سُجّل غيابه تلقائياً`}
         </div>
       )}
 
@@ -720,6 +775,16 @@ export default function FrontDeskDashboardPage() {
               </h2>
               <QuickActionsGrid />
             </div>
+
+            {/* Window Alert Banners — one per open window in active queue */}
+            {queue
+              .filter(q => q.apt_window_status === 'open' && q.swapped_patient_name)
+              .map(q => (
+                <WindowAlertBanner
+                  key={q.id}
+                  patientName={q.swapped_patient_name!}
+                />
+              ))}
 
             {/* Live Queue List */}
             <div>
