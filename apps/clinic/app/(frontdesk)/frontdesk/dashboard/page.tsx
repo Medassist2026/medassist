@@ -19,6 +19,8 @@ import {
   X,
   Loader2,
   Plus,
+  ArrowUp,
+  Zap,
 } from 'lucide-react'
 import { DoctorStatusCard } from '@ui-clinic/components/frontdesk/DoctorStatusCard'
 import type { CheckInQueueItem } from '@shared/lib/data/frontdesk'
@@ -337,6 +339,306 @@ function WalkInSheet({ onClose, onSuccess }: WalkInSheetProps) {
 }
 
 // ============================================================================
+// PULL-UP SHEET — manually move a patient earlier in the queue (A1)
+// ============================================================================
+
+interface PullUpSheetProps {
+  item: QueueItem
+  maxPosition: number
+  onClose: () => void
+  onSuccess: (patientName: string, from: number, to: number) => void
+}
+
+function PullUpSheet({ item, maxPosition, onClose, onSuccess }: PullUpSheetProps) {
+  const [targetPosition, setTargetPosition] = useState(Math.max(1, item.queue_number - 1))
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+
+  const handleSubmit = async () => {
+    if (targetPosition === item.queue_number) { onClose(); return }
+    setSubmitting(true); setError('')
+    try {
+      const res = await fetch('/api/frontdesk/queue/reorder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ queueId: item.id, targetPosition }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'فشل إعادة الترتيب')
+      onSuccess(item.patient?.full_name || 'المريض', item.queue_number, targetPosition)
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-end" onClick={onClose}>
+      <div className="w-full bg-white rounded-t-2xl pt-4 px-4 pb-8 max-w-md mx-auto shadow-xl"
+        onClick={e => e.stopPropagation()} dir="rtl">
+        <div className="w-10 h-1 bg-[#E5E7EB] rounded-full mx-auto mb-4" />
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-cairo text-[17px] font-bold text-[#030712]">تقديم في الترتيب</h3>
+          <button onClick={onClose} className="w-8 h-8 rounded-full bg-[#F3F4F6] flex items-center justify-center">
+            <X className="w-4 h-4 text-[#6B7280]" />
+          </button>
+        </div>
+
+        {/* Patient info */}
+        <div className="bg-[#F9FAFB] rounded-xl px-3 py-2.5 mb-4 border-[0.8px] border-[#E5E7EB]">
+          <p className="font-cairo text-[13px] font-bold text-[#030712]">{item.patient?.full_name || 'مريض'}</p>
+          <p className="font-cairo text-[12px] text-[#6B7280]">الترتيب الحالي: #{item.queue_number}</p>
+        </div>
+
+        {/* Position picker */}
+        <label className="font-cairo text-[12px] text-[#6B7280] mb-2 block">الترتيب الجديد</label>
+        <div className="flex items-center gap-3 mb-5">
+          <button
+            onClick={() => setTargetPosition(p => Math.max(1, p - 1))}
+            className="w-11 h-11 rounded-xl bg-[#F3F4F6] flex items-center justify-center font-bold text-[18px] text-[#030712]"
+          >−</button>
+          <div className="flex-1 h-12 rounded-xl border-[0.8px] border-[#16A34A] bg-[#F0FDF4] flex items-center justify-center">
+            <span className="font-cairo text-[24px] font-bold text-[#16A34A]">#{targetPosition}</span>
+          </div>
+          <button
+            onClick={() => setTargetPosition(p => Math.min(maxPosition, p + 1))}
+            className="w-11 h-11 rounded-xl bg-[#F3F4F6] flex items-center justify-center font-bold text-[18px] text-[#030712]"
+          >+</button>
+        </div>
+
+        {targetPosition < item.queue_number && (
+          <p className="font-cairo text-[12px] text-[#16A34A] text-center mb-4">
+            سيتقدم {item.queue_number - targetPosition} {item.queue_number - targetPosition === 1 ? 'مركز' : 'مراكز'}
+          </p>
+        )}
+        {targetPosition > item.queue_number && (
+          <p className="font-cairo text-[12px] text-[#D97706] text-center mb-4">
+            سيتأخر {targetPosition - item.queue_number} {targetPosition - item.queue_number === 1 ? 'مركز' : 'مراكز'}
+          </p>
+        )}
+
+        {error && <p className="font-cairo text-[12px] text-[#EF4444] text-center mb-3">{error}</p>}
+
+        <button
+          onClick={handleSubmit}
+          disabled={submitting || targetPosition === item.queue_number}
+          className="w-full h-[50px] rounded-xl bg-[#16A34A] text-white font-cairo text-[15px] font-bold flex items-center justify-center gap-2 disabled:opacity-40"
+        >
+          {submitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <><ArrowUp className="w-5 h-5" />تأكيد الترتيب الجديد</>}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================================
+// URGENT BOOKING SHEET — حجز مستعجل at specific time (A2)
+// ============================================================================
+
+interface UrgentBookingSheetProps {
+  onClose: () => void
+  onSuccess: (msg: string) => void
+}
+
+function UrgentBookingSheet({ onClose, onSuccess }: UrgentBookingSheetProps) {
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<Array<{ id: string; full_name: string | null; phone: string }>>([])
+  const [selectedPatient, setSelectedPatient] = useState<{ id: string; full_name: string | null; phone: string } | null>(null)
+  const [doctors, setDoctors] = useState<Array<{ id: string; full_name: string | null; specialty: string }>>([])
+  const [selectedDoctorId, setSelectedDoctorId] = useState('')
+  const [time, setTime] = useState(() => {
+    const now = new Date(Date.now() + 2 * 60 * 60 * 1000) // Cairo
+    const h = now.getHours().toString().padStart(2, '0')
+    const m = (Math.ceil(now.getMinutes() / 15) * 15 % 60).toString().padStart(2, '0')
+    return `${h}:${m}`
+  })
+  const [duration, setDuration] = useState(15)
+  const [patientPresent, setPatientPresent] = useState(false)
+  const [notes, setNotes] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+  const searchTimer = useRef<NodeJS.Timeout>()
+
+  useEffect(() => {
+    fetch('/api/doctors/list').then(r => r.ok ? r.json() : null).then(d => {
+      if (d?.doctors?.length) { setDoctors(d.doctors); setSelectedDoctorId(d.doctors[0]?.id || '') }
+    }).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    clearTimeout(searchTimer.current)
+    if (!query.trim() || selectedPatient || query.length < 2) { setResults([]); return }
+    searchTimer.current = setTimeout(async () => {
+      const res = await fetch(`/api/patients/search?q=${encodeURIComponent(query)}`).catch(() => null)
+      if (res?.ok) { const d = await res.json(); setResults(d.patients || []) }
+    }, 300)
+    return () => clearTimeout(searchTimer.current)
+  }, [query, selectedPatient])
+
+  const handleSubmit = async () => {
+    if (!selectedPatient || !selectedDoctorId) { setError('اختر المريض والطبيب'); return }
+    setSubmitting(true); setError('')
+    try {
+      const today = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString().split('T')[0]
+      const startTime = `${today}T${time}:00+02:00`
+      const res = await fetch('/api/frontdesk/appointments/urgent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          patientId: selectedPatient.id,
+          doctorId: selectedDoctorId,
+          startTime,
+          durationMinutes: duration,
+          notes: notes.trim() || undefined,
+          patientAlreadyPresent: patientPresent,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'فشل الحجز')
+      onSuccess(data.message || `حجز مستعجل: ${selectedPatient.full_name} — ${time}`)
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  // Generate 15-min time slots from 8am to 10pm
+  const timeSlots = Array.from({ length: 57 }, (_, i) => {
+    const totalMin = 8 * 60 + i * 15
+    const h = Math.floor(totalMin / 60).toString().padStart(2, '0')
+    const m = (totalMin % 60).toString().padStart(2, '0')
+    return `${h}:${m}`
+  })
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-end" onClick={onClose}>
+      <div className="w-full bg-white rounded-t-2xl pt-4 px-4 pb-8 max-w-md mx-auto shadow-xl max-h-[90vh] overflow-y-auto"
+        onClick={e => e.stopPropagation()} dir="rtl">
+        <div className="w-10 h-1 bg-[#E5E7EB] rounded-full mx-auto mb-4" />
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-full bg-[#FEF3C7] flex items-center justify-center">
+              <Zap className="w-3.5 h-3.5 text-[#D97706]" />
+            </div>
+            <h3 className="font-cairo text-[17px] font-bold text-[#030712]">حجز مستعجل</h3>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-full bg-[#F3F4F6] flex items-center justify-center">
+            <X className="w-4 h-4 text-[#6B7280]" />
+          </button>
+        </div>
+
+        {/* Patient search */}
+        <div className="mb-3">
+          <label className="font-cairo text-[12px] text-[#6B7280] mb-1 block">المريض</label>
+          {selectedPatient ? (
+            <div className="flex items-center justify-between bg-[#FFFBEB] rounded-xl px-3 py-2.5 border-[0.8px] border-[#D97706]/30">
+              <div>
+                <p className="font-cairo text-[14px] font-semibold">{selectedPatient.full_name}</p>
+                <p className="font-cairo text-[12px] text-[#6B7280]">{selectedPatient.phone}</p>
+              </div>
+              <button onClick={() => { setSelectedPatient(null); setQuery(''); setResults([]) }}
+                className="w-7 h-7 rounded-full bg-white flex items-center justify-center">
+                <X className="w-3.5 h-3.5 text-[#9CA3AF]" />
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="relative">
+                <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
+                <input type="text" value={query} onChange={e => setQuery(e.target.value)}
+                  placeholder="الاسم أو الهاتف..." autoFocus
+                  className="w-full h-11 pr-9 pl-3 rounded-xl border-[0.8px] border-[#E5E7EB] bg-[#F9FAFB] font-cairo text-[14px] outline-none focus:border-[#D97706]" />
+              </div>
+              {results.length > 0 && (
+                <div className="mt-1.5 bg-white rounded-xl border-[0.8px] border-[#E5E7EB] overflow-hidden max-h-[140px] overflow-y-auto">
+                  {results.map(p => (
+                    <button key={p.id} onClick={() => { setSelectedPatient(p); setResults([]); setQuery('') }}
+                      className="w-full px-3 py-2.5 text-right hover:bg-[#F9FAFB] border-b-[0.8px] last:border-b-0 border-[#E5E7EB]">
+                      <p className="font-cairo text-[13px] font-semibold">{p.full_name}</p>
+                      <p className="font-cairo text-[11px] text-[#6B7280]">{p.phone}</p>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Doctor selector */}
+        {doctors.length > 1 && (
+          <div className="mb-3">
+            <label className="font-cairo text-[12px] text-[#6B7280] mb-1 block">الطبيب</label>
+            <div className="flex gap-2 flex-wrap">
+              {doctors.map(d => (
+                <button key={d.id} onClick={() => setSelectedDoctorId(d.id)}
+                  className={`h-9 px-3.5 rounded-full font-cairo text-[12px] font-medium transition-colors ${selectedDoctorId === d.id ? 'bg-[#D97706] text-white' : 'bg-[#F3F4F6] text-[#4B5563]'}`}>
+                  {(d.full_name || '').replace(/^د\.\s*/, 'د. ')}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Time picker */}
+        <div className="mb-3">
+          <label className="font-cairo text-[12px] text-[#6B7280] mb-1 block">وقت الموعد</label>
+          <select value={time} onChange={e => setTime(e.target.value)}
+            className="w-full h-11 px-3 rounded-xl border-[0.8px] border-[#E5E7EB] bg-[#F9FAFB] font-cairo text-[14px] font-bold text-[#030712] outline-none focus:border-[#D97706] text-center">
+            {timeSlots.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
+
+        {/* Duration */}
+        <div className="mb-4">
+          <label className="font-cairo text-[12px] text-[#6B7280] mb-1 block">المدة (دقيقة)</label>
+          <div className="flex gap-2">
+            {[10, 15, 20, 30].map(d => (
+              <button key={d} onClick={() => setDuration(d)}
+                className={`flex-1 h-9 rounded-xl font-cairo text-[12px] font-medium transition-colors ${duration === d ? 'bg-[#D97706] text-white' : 'bg-[#F3F4F6] text-[#4B5563]'}`}>
+                {d}د
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Notes */}
+        <div className="mb-4">
+          <label className="font-cairo text-[12px] text-[#6B7280] mb-1 block">سبب الاستعجال <span className="font-normal text-[#9CA3AF]">(اختياري)</span></label>
+          <input type="text" value={notes} onChange={e => setNotes(e.target.value)} placeholder="مثال: متابعة نتيجة تحليل..."
+            className="w-full h-10 px-3 rounded-xl border-[0.8px] border-[#E5E7EB] bg-[#F9FAFB] font-cairo text-[13px] outline-none focus:border-[#D97706]" />
+        </div>
+
+        {/* Patient present toggle */}
+        <label className="flex items-center gap-3 mb-5 cursor-pointer">
+          <div onClick={() => setPatientPresent(p => !p)}
+            className={`w-11 h-6 rounded-full transition-colors relative ${patientPresent ? 'bg-[#D97706]' : 'bg-[#E5E7EB]'}`}>
+            <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${patientPresent ? 'translate-x-0.5' : 'translate-x-5'}`} />
+          </div>
+          <span className="font-cairo text-[13px] text-[#4B5563]">المريض موجود الآن في العيادة</span>
+        </label>
+
+        {patientPresent && (
+          <div className="bg-[#FFFBEB] border-[0.8px] border-[#D97706]/30 rounded-xl px-3 py-2.5 mb-4">
+            <p className="font-cairo text-[12px] text-[#92400E]">
+              <span className="font-bold">سيُضاف فوراً للطابور بأولوية مرتفعة</span> — بعد المريض الحالي مباشرةً
+            </p>
+          </div>
+        )}
+
+        {error && <p className="font-cairo text-[12px] text-[#EF4444] text-center mb-3">{error}</p>}
+
+        <button onClick={handleSubmit} disabled={!selectedPatient || !selectedDoctorId || submitting}
+          className="w-full h-[50px] rounded-xl bg-[#D97706] text-white font-cairo text-[15px] font-bold flex items-center justify-center gap-2 disabled:opacity-40 active:scale-[0.98] transition-transform">
+          {submitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Zap className="w-5 h-5" />تأكيد الحجز المستعجل</>}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================================
 // QUICK ACTIONS GRID
 // ============================================================================
 
@@ -409,10 +711,12 @@ function TodayStatsRow({
 function MobileQueueList({
   queue,
   onUpdateStatus,
+  onPullUp,
   updating,
 }: {
   queue: QueueItem[]
   onUpdateStatus: (id: string, status: string) => void
+  onPullUp: (item: QueueItem) => void
   updating: string | null
 }) {
   const activeQueue = queue.filter(q => q.status === 'waiting' || q.status === 'in_progress')
@@ -460,7 +764,12 @@ function MobileQueueList({
                   </h4>
                   {item.queue_type === 'emergency' && (
                     <span className="font-cairo text-[10px] font-bold bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full">
-                      طوارئ
+                      🔴 طوارئ
+                    </span>
+                  )}
+                  {item.priority === 3 && item.queue_type !== 'emergency' && (
+                    <span className="font-cairo text-[10px] font-bold bg-[#FEF3C7] text-[#92400E] px-1.5 py-0.5 rounded-full">
+                      ⚡ مستعجل
                     </span>
                   )}
                 </div>
@@ -482,13 +791,22 @@ function MobileQueueList({
                 </span>
 
                 {item.status === 'waiting' && (
-                  <button
-                    onClick={() => onUpdateStatus(item.id, 'in_progress')}
-                    disabled={updating === item.id}
-                    className="font-cairo text-[11px] font-medium text-[#16A34A] disabled:opacity-40"
-                  >
-                    {updating === item.id ? '...' : 'استدعاء'}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => onPullUp(item)}
+                      className="font-cairo text-[11px] font-medium text-[#6B7280]"
+                      title="تقديم في الترتيب"
+                    >
+                      <ArrowUp className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => onUpdateStatus(item.id, 'in_progress')}
+                      disabled={updating === item.id}
+                      className="font-cairo text-[11px] font-medium text-[#16A34A] disabled:opacity-40"
+                    >
+                      {updating === item.id ? '...' : 'استدعاء'}
+                    </button>
+                  </div>
                 )}
                 {item.status === 'in_progress' && (
                   <button
@@ -544,11 +862,15 @@ export default function FrontDeskDashboardPage() {
   const [pendingInviteCount, setPendingInviteCount] = useState(0)
   const [showWalkIn, setShowWalkIn] = useState(false)
   const [walkInToast, setWalkInToast] = useState<string | null>(null)
-  // Window event toasts — shown after session completion events
+  // Window event toasts
   const [windowToast, setWindowToast] = useState<{
     type: 'opened' | 'expired'
     patientName: string
   } | null>(null)
+  // Pull-up sheet
+  const [pullUpItem, setPullUpItem] = useState<QueueItem | null>(null)
+  // Urgent booking sheet
+  const [showUrgent, setShowUrgent] = useState(false)
 
   const refreshData = useCallback(async () => {
     try {
@@ -640,6 +962,21 @@ export default function FrontDeskDashboardPage() {
     refreshData()
   }
 
+  const handlePullUpSuccess = (patientName: string, from: number, to: number) => {
+    setPullUpItem(null)
+    setWalkInToast(`↑ ${patientName} — من #${from} إلى #${to}`)
+    setTimeout(() => setWalkInToast(null), 4000)
+    refreshData()
+  }
+
+  const handleUrgentSuccess = (msg: string) => {
+    setShowUrgent(false)
+    setWalkInToast(`⚡ ${msg}`)
+    setTimeout(() => setWalkInToast(null), 5000)
+    refreshData()
+  }
+
+
   return (
     <div dir="rtl">
       {/* Walk-in sheet */}
@@ -700,6 +1037,24 @@ export default function FrontDeskDashboardPage() {
         </div>
       </div>
 
+      {/* Pull-up sheet */}
+      {pullUpItem && (
+        <PullUpSheet
+          item={pullUpItem}
+          maxPosition={queue.filter(q => q.status === 'waiting').length}
+          onClose={() => setPullUpItem(null)}
+          onSuccess={handlePullUpSuccess}
+        />
+      )}
+
+      {/* Urgent booking sheet */}
+      {showUrgent && (
+        <UrgentBookingSheet
+          onClose={() => setShowUrgent(false)}
+          onSuccess={handleUrgentSuccess}
+        />
+      )}
+
       {/* Walk-in FAB — bottom right, above nav bar */}
       <button
         onClick={() => setShowWalkIn(true)}
@@ -707,6 +1062,15 @@ export default function FrontDeskDashboardPage() {
         title="تسجيل وصول مريض"
       >
         <UserCheck className="w-6 h-6 text-white" strokeWidth={2} />
+      </button>
+
+      {/* Urgent booking FAB — above walk-in FAB */}
+      <button
+        onClick={() => setShowUrgent(true)}
+        className="fixed bottom-40 left-4 z-30 w-12 h-12 rounded-full bg-[#D97706] shadow-lg shadow-[#D97706]/30 flex items-center justify-center active:scale-95 transition-transform"
+        title="حجز مستعجل"
+      >
+        <Zap className="w-5 h-5 text-white" strokeWidth={2} />
       </button>
 
       {/* Content */}
@@ -799,6 +1163,7 @@ export default function FrontDeskDashboardPage() {
               <MobileQueueList
                 queue={queue}
                 onUpdateStatus={updateStatus}
+                onPullUp={setPullUpItem}
                 updating={updating}
               />
             </div>

@@ -40,6 +40,8 @@ export interface CheckInQueueItem {
   appointment_id: string | null
   queue_number: number
   queue_type: QueueType
+  // Priority: 9=emergency, 3=urgent booking, 2=appointment on-time, 1=walk-in, 0=late
+  priority: number
   status: QueueStatus
   checked_in_at: string
   called_at: string | null
@@ -94,7 +96,7 @@ export interface EnrichedPayment extends Payment {
 // ── Appointments ──
 
 export type AppointmentStatus = 'scheduled' | 'cancelled' | 'completed' | 'no_show'
-export type AppointmentType = 'regular' | 'followup' | 'emergency' | 'consultation'
+export type AppointmentType = 'regular' | 'followup' | 'emergency' | 'consultation' | 'urgent'
 
 export interface Appointment {
   id: string
@@ -202,6 +204,7 @@ export async function getTodayQueue(doctorId?: string | string[]): Promise<Check
     `)
     .gte('created_at', cairoMidnight)
     .in('status', ['waiting', 'in_progress'])
+    .order('priority', { ascending: false })
     .order('queue_number', { ascending: true })
     .limit(200)
 
@@ -338,6 +341,14 @@ export async function checkInPatient(params: {
     queueNumber = nextNum || 1
   }
 
+  // ── Derive priority from queue type ─────────────────────────────────────
+  const priorityMap: Record<QueueType, number> = {
+    emergency:   9,
+    appointment: insertAfterQueueNumber !== null ? 2 : 2, // window arrival same as on-time
+    walkin:      1,
+  }
+  const itemPriority = priorityMap[effectiveQueueType]
+
   // ── Insert queue entry ───────────────────────────────────────────────────
   const { data, error } = await admin
     .from('check_in_queue')
@@ -347,6 +358,7 @@ export async function checkInPatient(params: {
       appointment_id: effectiveAppointmentId,
       queue_number: queueNumber,
       queue_type: effectiveQueueType,
+      priority: itemPriority,
       status: 'waiting',
     })
     .select(`
