@@ -14,7 +14,7 @@ import {
   Check,
   ChevronDown,
 } from 'lucide-react'
-import { translateSpecialty } from '@shared/lib/data/frontdesk'
+import { translateSpecialty } from '@shared/lib/utils/specialty-labels'
 
 // ============================================================================
 // TYPES

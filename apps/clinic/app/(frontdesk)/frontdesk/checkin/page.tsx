@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ChevronRight, Search, UserPlus, Check, AlertTriangle, ChevronDown, Banknote, CreditCard, Building2, ArrowLeftRight, WifiOff } from 'lucide-react'
 import { syncOfflineQueue, getOfflineQueueStats } from '@shared/hooks/useOfflineMutation'
-import { translateSpecialty } from '@shared/lib/data/frontdesk'
+import { translateSpecialty } from '@shared/lib/utils/specialty-labels'
 
 // ============================================================================
 // TYPES

@@ -24,7 +24,7 @@ import {
 } from 'lucide-react'
 import { DoctorStatusCard } from '@ui-clinic/components/frontdesk/DoctorStatusCard'
 import type { CheckInQueueItem } from '@shared/lib/data/frontdesk'
-import { translateSpecialty } from '@shared/lib/data/frontdesk'
+import { translateSpecialty } from '@shared/lib/utils/specialty-labels'
 
 // ============================================================================
 // TYPES

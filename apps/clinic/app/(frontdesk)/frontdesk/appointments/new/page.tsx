@@ -24,7 +24,7 @@ import type {
   AvailableSlot,
   AppointmentType,
 } from '@shared/lib/data/frontdesk'
-import { translateSpecialty } from '@shared/lib/data/frontdesk'
+import { translateSpecialty } from '@shared/lib/utils/specialty-labels'
 
 // ============================================================================
 // TYPES — using shared where possible, local only for page-specific shapes
