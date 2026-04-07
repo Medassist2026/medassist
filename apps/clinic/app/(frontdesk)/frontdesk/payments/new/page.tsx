@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { ChevronRight, Check, AlertTriangle, Banknote, CreditCard, Building2 } from 'lucide-react'
+import { ChevronRight, Check, AlertTriangle, Banknote, CreditCard, Building2, ArrowLeftRight } from 'lucide-react'
 
 // ============================================================================
 // TYPES
@@ -28,7 +28,7 @@ export default function NewPaymentPage() {
   const [selectedPatientId, setSelectedPatientId] = useState('')
   const [selectedDoctorId, setSelectedDoctorId] = useState('')
   const [amount, setAmount] = useState('')
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'insurance'>('cash')
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'insurance' | 'transfer'>('cash')
   const [notes, setNotes] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -109,6 +109,7 @@ export default function NewPaymentPage() {
     { value: 'cash' as const, label: 'نقد', icon: Banknote, color: 'border-[#16A34A] bg-[#F0FDF4]' },
     { value: 'card' as const, label: 'بطاقة', icon: CreditCard, color: 'border-[#2563EB] bg-[#EFF6FF]' },
     { value: 'insurance' as const, label: 'تأمين', icon: Building2, color: 'border-[#7C3AED] bg-[#F5F3FF]' },
+    { value: 'transfer' as const, label: 'تحويل', icon: ArrowLeftRight, color: 'border-[#D97706] bg-[#FFFBEB]' },
   ]
 
   return (

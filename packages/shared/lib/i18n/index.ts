@@ -117,20 +117,23 @@ export function formatNumber(number: number, lang: Language = 'ar'): string {
  * @returns Formatted currency string
  */
 export function formatCurrency(
-  amount: number,
+  amount: number | null | undefined,
   currency: string = 'EGP',
   lang: Language = 'ar'
 ): string {
+  // Guard against null/undefined/NaN — show zero instead of a broken symbol
+  const safeAmount = (amount == null || isNaN(Number(amount))) ? 0 : Number(amount)
+
   const options: Intl.NumberFormatOptions = {
     style: 'currency',
     currency,
   }
 
   if (lang === 'ar') {
-    return amount.toLocaleString('ar-EG', options)
+    return safeAmount.toLocaleString('ar-EG', options)
   }
 
-  return amount.toLocaleString('en-US', options)
+  return safeAmount.toLocaleString('en-US', options)
 }
 
 /**

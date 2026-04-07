@@ -131,7 +131,11 @@ export default function ReportsPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <TrendingUp className="w-4 h-4 text-[#16A34A]" />
+                  {/* Only show trending-up when there are actually completed visits */}
+                  {completed > 0
+                    ? <TrendingUp className="w-4 h-4 text-[#16A34A]" />
+                    : <Users className="w-4 h-4 text-[#9CA3AF]" />
+                  }
                   <div>
                     <p className="font-cairo text-[12px] text-[#6B7280]">مكتمل</p>
                     <p className="font-cairo text-[16px] font-bold text-[#030712]">{completed}</p>
@@ -141,7 +145,7 @@ export default function ReportsPage() {
                   <Banknote className="w-4 h-4 text-[#16A34A]" />
                   <div>
                     <p className="font-cairo text-[12px] text-[#6B7280]">الإيرادات</p>
-                    <p className="font-cairo text-[16px] font-bold text-[#030712]">{totalRevenue.toLocaleString('ar-EG')} ج.م</p>
+                    <p className="font-cairo text-[16px] font-bold text-[#030712]">{(totalRevenue ?? 0).toLocaleString('ar-EG')} ج.م</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">

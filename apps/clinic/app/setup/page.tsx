@@ -139,6 +139,12 @@ function SetupPageInner() {
       setError('أدخل كود الدعوة')
       return
     }
+    // Validate invite code format: XXXX-YY (4 chars + dash + 2 chars, uppercase alphanumeric)
+    const normalizedForValidation = inviteCode.trim().toUpperCase().replace(/[\s-]/g, '')
+    if (!/^[A-Z2-9]{6}$/.test(normalizedForValidation)) {
+      setError('صيغة الكود غير صحيحة — الكود مكوّن من 6 أحرف وأرقام مثل: ABCD-EF')
+      return
+    }
     // Doctors must select specialty before joining
     if (roleParam !== 'frontdesk' && !specialty) {
       setError('اختر تخصصك أولاً')
@@ -267,7 +273,8 @@ function SetupPageInner() {
                 </p>
 
                 <div className="flex flex-col gap-4 mt-8">
-                  {/* Create clinic — PRIMARY for doctors */}
+                  {/* Create clinic — DOCTORS ONLY, hidden for frontdesk */}
+                  {roleParam !== 'frontdesk' && (
                   <motion.button
                     whileHover={{ scale: 1.01 }}
                     whileTap={{ scale: 0.98 }}
@@ -286,6 +293,7 @@ function SetupPageInner() {
                     </div>
                     <ChevronLeft className="w-5 h-5 text-[#22C55E] flex-shrink-0" />
                   </motion.button>
+                  )}
 
                   {/* Join clinic — secondary */}
                   <motion.button

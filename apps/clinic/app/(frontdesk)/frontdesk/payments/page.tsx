@@ -497,7 +497,7 @@ export default function PaymentsPage() {
                 إيرادات {dateLabel}
               </p>
               <p className="font-cairo text-[28px] font-bold text-[#030712] mb-2">
-                {totals.total.toLocaleString('ar-EG')} <span className="text-[16px] font-medium text-[#6B7280]">ج.م</span>
+                {(totals.total ?? 0).toLocaleString('ar-EG')} <span className="text-[16px] font-medium text-[#6B7280]">ج.م</span>
               </p>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-cairo text-[12px] text-[#4B5563]">
                 {PAYMENT_METHODS.map(m => {

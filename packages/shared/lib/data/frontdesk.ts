@@ -2,6 +2,52 @@ import { createClient } from '@shared/lib/supabase/server'
 import { createAdminClient } from '@shared/lib/supabase/admin'
 
 // ============================================================================
+// SPECIALTY TRANSLATIONS — English DB values → Arabic display labels
+// ============================================================================
+
+const SPECIALTY_AR: Record<string, string> = {
+  internal_medicine:   'باطنة',
+  internal:            'باطنة',
+  cardiology:          'قلب',
+  dermatology:         'جلدية',
+  pediatrics:          'أطفال',
+  gynecology:          'نساء وتوليد',
+  obstetrics:          'نساء وتوليد',
+  orthopedics:         'عظام',
+  neurology:           'مخ وأعصاب',
+  ophthalmology:       'عيون',
+  ent:                 'أنف وأذن وحنجرة',
+  urology:             'مسالك بولية',
+  psychiatry:          'طب نفسي',
+  general_surgery:     'جراحة عامة',
+  general:             'طب عام',
+  dentistry:           'أسنان',
+  radiology:           'أشعة',
+  endocrinology:       'غدد صماء',
+  gastroenterology:    'جهاز هضمي',
+  nephrology:          'كلى',
+  pulmonology:         'صدر',
+  rheumatology:        'روماتيزم',
+  oncology:            'أورام',
+  hematology:          'دم',
+  plastic_surgery:     'تجميل',
+  vascular_surgery:    'أوعية دموية',
+  anesthesiology:      'تخدير',
+  family_medicine:     'طب أسرة',
+  emergency_medicine:  'طوارئ',
+}
+
+/**
+ * Translate a specialty value from the DB (English / slug) to Arabic.
+ * Falls back to the original value if no translation is found.
+ */
+export function translateSpecialty(specialty: string | null | undefined): string {
+  if (!specialty) return ''
+  const key = specialty.trim().toLowerCase().replace(/\s+/g, '_')
+  return SPECIALTY_AR[key] ?? specialty
+}
+
+// ============================================================================
 // TYPES — Shared across all frontdesk, doctor, and API consumers
 // ============================================================================
 
@@ -649,11 +695,11 @@ export async function getAvailableSlots(
   const [startHour, startMinute] = (availability.start_time as string).split(':').map(Number)
   const [endHour, endMinute]     = (availability.end_time   as string).split(':').map(Number)
 
-  let currentTime = new Date(date)
-  currentTime.setHours(startHour, startMinute, 0, 0)
+  // Build slot times using Cairo timezone (UTC+2) to avoid server-UTC offset bugs
+  const pad = (n: number) => String(n).padStart(2, '0')
+  let currentTime = new Date(`${date}T${pad(startHour)}:${pad(startMinute)}:00+02:00`)
 
-  const endTime = new Date(date)
-  endTime.setHours(endHour, endMinute, 0, 0)
+  const endTime = new Date(`${date}T${pad(endHour)}:${pad(endMinute)}:00+02:00`)
 
   const slots: AvailableSlot[] = []
 

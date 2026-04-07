@@ -24,6 +24,7 @@ import type {
   AvailableSlot,
   AppointmentType,
 } from '@shared/lib/data/frontdesk'
+import { translateSpecialty } from '@shared/lib/data/frontdesk'
 
 // ============================================================================
 // TYPES — using shared where possible, local only for page-specific shapes
@@ -566,7 +567,7 @@ export default function NewAppointmentPage() {
               <option value="">اختر الطبيب</option>
               {doctors.map((d) => (
                 <option key={d.id} value={d.id}>
-                  د. {(d.full_name || '').replace(/^د\.\s*/, '')} — {d.specialty}
+                  د. {(d.full_name || '').replace(/^د\.\s*/, '')} — {translateSpecialty(d.specialty)}
                 </option>
               ))}
             </select>
@@ -772,7 +773,7 @@ export default function NewAppointmentPage() {
             {submitting === 'save-start' ? (
               <Loader2 className="w-4 h-4 animate-spin" />
             ) : (
-              'حفظ وبدء جلسة'
+              'تأكيد الحجز'
             )}
           </button>
         </div>

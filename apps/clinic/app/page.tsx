@@ -33,5 +33,10 @@ export default async function ClinicHomePage() {
   }
 
   // Authenticated but no clinic — needs setup
+  // Pass role so /setup shows the correct form:
+  // frontdesk users can only JOIN a clinic (never create one)
+  if (user.role === 'frontdesk') {
+    redirect('/setup?role=frontdesk')
+  }
   redirect('/setup')
 }

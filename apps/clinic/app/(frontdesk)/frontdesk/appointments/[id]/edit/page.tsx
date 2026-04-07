@@ -14,6 +14,7 @@ import {
   Check,
   ChevronDown,
 } from 'lucide-react'
+import { translateSpecialty } from '@shared/lib/data/frontdesk'
 
 // ============================================================================
 // TYPES
@@ -346,7 +347,7 @@ export default function EditAppointmentPage() {
               >
                 {doctors.map((doc) => (
                   <option key={doc.id} value={doc.id}>
-                    د. {doc.full_name} — {doc.specialty}
+                    د. {doc.full_name} — {translateSpecialty(doc.specialty)}
                   </option>
                 ))}
               </select>

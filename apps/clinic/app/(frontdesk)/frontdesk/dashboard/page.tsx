@@ -24,6 +24,7 @@ import {
 } from 'lucide-react'
 import { DoctorStatusCard } from '@ui-clinic/components/frontdesk/DoctorStatusCard'
 import type { CheckInQueueItem } from '@shared/lib/data/frontdesk'
+import { translateSpecialty } from '@shared/lib/data/frontdesk'
 
 // ============================================================================
 // TYPES
@@ -60,7 +61,7 @@ function deriveDoctorStatuses(queue: QueueItem[]): DoctorStatus[] {
       doctorMap.set(doctorId, {
         doctorId,
         doctorName: item.doctor?.full_name || 'طبيب',
-        specialty: item.doctor?.specialty || '',
+        specialty: translateSpecialty(item.doctor?.specialty) || '',
         waitingCount: 0,
       })
     }
@@ -785,7 +786,7 @@ function TodayStatsRow({
         <p className="font-cairo text-[11px] text-[#6B7280]">انتظار</p>
       </div>
       <div className="flex-1 bg-white rounded-[12px] border-[0.8px] border-[#E5E7EB] p-3 text-center">
-        <p className="font-cairo text-[20px] font-bold text-[#16A34A]">{revenue.toLocaleString('ar-EG')}</p>
+        <p className="font-cairo text-[20px] font-bold text-[#16A34A]">{(revenue ?? 0).toLocaleString('ar-EG')}</p>
         <p className="font-cairo text-[11px] text-[#6B7280]">ج.م</p>
       </div>
     </div>

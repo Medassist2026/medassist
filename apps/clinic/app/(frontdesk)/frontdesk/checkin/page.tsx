@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ChevronRight, Search, UserPlus, Check, AlertTriangle, ChevronDown, Banknote, CreditCard, Building2, ArrowLeftRight, WifiOff } from 'lucide-react'
 import { syncOfflineQueue, getOfflineQueueStats } from '@shared/hooks/useOfflineMutation'
+import { translateSpecialty } from '@shared/lib/data/frontdesk'
 
 // ============================================================================
 // TYPES
@@ -59,7 +60,7 @@ export default function CheckInPage() {
   } | null>(null)
 
   // ── Payment Capture (optional) ──
-  const [showPayment, setShowPayment] = useState(true) // Default open
+  const [showPayment, setShowPayment] = useState(false) // Default closed — payment collected after visit, not at check-in
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'transfer' | 'insurance'>('cash')
   const [skipPayment, setSkipPayment] = useState(false)
@@ -382,7 +383,7 @@ export default function CheckInPage() {
                   </div>
                   <div>
                     <p className="font-cairo text-[14px] font-medium text-[#030712]">د. {(doc.full_name || '').replace(/^د\.\s*/, '')}</p>
-                    <p className="font-cairo text-[12px] text-[#6B7280]">{doc.specialty}</p>
+                    <p className="font-cairo text-[12px] text-[#6B7280]">{translateSpecialty(doc.specialty)}</p>
                   </div>
                 </div>
                 <div className="text-left">
@@ -432,7 +433,7 @@ export default function CheckInPage() {
             <div className="flex items-center gap-2">
               <Banknote className="w-[18px] h-[18px] text-[#16A34A]" />
               <span className="font-cairo text-[14px] font-semibold text-[#030712]">تحصيل الدفع</span>
-              <span className="font-cairo text-[11px] text-[#9CA3AF] font-normal">(اختياري)</span>
+              <span className="font-cairo text-[11px] text-[#9CA3AF] font-normal">(اختياري — بعد الكشف)</span>
             </div>
             <ChevronDown className={`w-4 h-4 text-[#6B7280] transition-transform ${showPayment ? 'rotate-180' : ''}`} />
           </button>
