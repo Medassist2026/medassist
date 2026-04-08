@@ -1,0 +1,982 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MedAssist — All Patient Scenarios</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0c1220; color: #e2e8f0; min-height: 100vh; }
+
+/* ── PAGE ── */
+.page { max-width: 1500px; margin: 0 auto; padding: 36px 28px 80px; }
+.page-title { font-size: 24px; font-weight: 800; color: #f8fafc; margin-bottom: 6px; }
+.page-sub { font-size: 13px; color: #64748b; margin-bottom: 48px; line-height: 1.7; }
+
+/* ── SECTION ── */
+.scenario-block { margin-bottom: 60px; }
+.scenario-header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+.scenario-num { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 800; flex-shrink: 0; }
+.scenario-title-block { flex: 1; }
+.scenario-title { font-size: 18px; font-weight: 700; color: #f8fafc; }
+.scenario-subtitle { font-size: 12px; color: #64748b; margin-top: 3px; }
+.scenario-status-pill { padding: 5px 14px; border-radius: 20px; font-size: 11px; font-weight: 700; flex-shrink: 0; }
+
+/* ── 3-COLUMN GRID ── */
+.three-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; align-items: start; }
+@media (max-width: 1100px) { .three-col { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 700px) { .three-col { grid-template-columns: 1fr; } }
+
+/* ── COLUMN CARDS ── */
+.col-card { border-radius: 12px; overflow: hidden; border: 1px solid rgba(255,255,255,0.07); }
+.col-header { padding: 10px 14px; font-size: 10px; font-weight: 800; letter-spacing: 1.2px; text-transform: uppercase; display: flex; align-items: center; gap: 8px; }
+.col-body { padding: 14px; background: rgba(255,255,255,0.025); display: flex; flex-direction: column; gap: 10px; }
+.col-footer { padding: 10px 14px; background: rgba(0,0,0,0.2); font-size: 10px; color: #475569; line-height: 1.6; border-top: 1px solid rgba(255,255,255,0.04); }
+
+/* column types */
+.col-frontdesk .col-header { background: #1a2a1a; color: #6ee7b7; }
+.col-doctor .col-header { background: #1a1f3a; color: #93c5fd; }
+.col-data .col-header { background: #2a1a2a; color: #d8b4fe; }
+
+/* ── MINI DASHBOARD ── */
+.mini-dash { background: #f8fafc; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.mini-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.mini-stat { background: #fff; border-radius: 7px; padding: 8px; border: 1px solid #e5e7eb; text-align: center; }
+.mini-stat-num { font-size: 18px; font-weight: 800; }
+.mini-stat-label { font-size: 9px; color: #6b7280; }
+.c-orange { color: #ea580c; }
+.c-blue { color: #2563eb; }
+.c-green { color: #16a34a; }
+.c-red { color: #dc2626; }
+.c-amber { color: #d97706; }
+.c-gray { color: #9ca3af; }
+
+.mini-section-label { font-size: 9px; font-weight: 700; color: #6b7280; letter-spacing: 0.8px; text-transform: uppercase; }
+.mini-patient-card {
+  background: #fff; border-radius: 8px; padding: 8px 10px;
+  border: 1px solid #e5e7eb; display: flex; flex-direction: column; gap: 5px;
+}
+.mini-patient-card.urgent { border-left: 3px solid #ea580c; }
+.mini-patient-card.incoming { border-left: 3px solid #3b82f6; }
+.mini-patient-card.late { border-left: 3px solid #f59e0b; }
+.mini-patient-card.early { border-left: 3px solid #a855f7; }
+.mini-patient-card.walkin { border-left: 3px solid #ef4444; }
+.mini-patient-card.pending { border-left: 3px solid #d1d5db; opacity: 0.7; }
+.mini-patient-card.done { border-left: 3px solid #16a34a; opacity: 0.55; }
+
+.mini-patient-top { display: flex; justify-content: space-between; align-items: flex-start; }
+.mini-patient-name { font-size: 11px; font-weight: 700; color: #0f172a; }
+.mini-patient-meta { font-size: 9px; color: #9ca3af; }
+.mini-badge { font-size: 8px; font-weight: 700; padding: 2px 6px; border-radius: 6px; }
+.b-orange { background: #fff7ed; color: #c2410c; }
+.b-blue { background: #eff6ff; color: #1d4ed8; }
+.b-red { background: #fef2f2; color: #dc2626; }
+.b-amber { background: #fffbeb; color: #92400e; }
+.b-green { background: #f0fdf4; color: #15803d; }
+.b-purple { background: #faf5ff; color: #7e22ce; }
+.b-gray { background: #f9fafb; color: #4b5563; }
+
+.mini-apt-row { display: flex; align-items: center; gap: 8px; background: #fff; border-radius: 7px; padding: 6px 8px; border: 1px solid #e5e7eb; }
+.mini-apt-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.d-orange { background: #f97316; }
+.d-blue { background: #3b82f6; }
+.d-green { background: #22c55e; }
+.d-amber { background: #f59e0b; }
+.d-gray { background: #d1d5db; }
+.d-red { background: #ef4444; }
+.d-purple { background: #a855f7; }
+.mini-apt-time { font-size: 10px; font-weight: 700; color: #374151; width: 32px; flex-shrink: 0; }
+.mini-apt-name { font-size: 10px; color: #1f2937; flex: 1; }
+.mini-apt-status { font-size: 8px; font-weight: 600; padding: 1px 6px; border-radius: 5px; }
+.s-waiting { background: #fff7ed; color: #c2410c; }
+.s-arrived { background: #fffbeb; color: #92400e; }
+.s-upcoming { background: #eff6ff; color: #1e40af; }
+.s-done { background: #f0fdf4; color: #15803d; }
+.s-late { background: #fffbeb; color: #92400e; }
+.s-noshow { background: #fef2f2; color: #b91c1c; }
+.s-early { background: #faf5ff; color: #7e22ce; }
+
+/* ── FRONTDESK ACTIONS ── */
+.action-step { display: flex; align-items: flex-start; gap: 10px; padding: 10px; background: rgba(255,255,255,0.04); border-radius: 8px; border: 1px solid rgba(255,255,255,0.06); }
+.action-num { width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800; flex-shrink: 0; }
+.action-text { font-size: 11px; color: #cbd5e1; line-height: 1.5; }
+.action-bold { font-weight: 700; color: #f1f5f9; }
+.action-ui { font-size: 10px; color: #64748b; margin-top: 3px; font-style: italic; }
+
+/* ── DATA LOGIC ── */
+.data-row { display: flex; flex-direction: column; gap: 4px; padding: 9px; background: rgba(255,255,255,0.03); border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); }
+.data-table-name { font-size: 10px; font-weight: 700; color: #a78bfa; }
+.data-field { font-size: 10px; font-family: monospace; color: #94a3b8; }
+.data-value { color: #fbbf24; }
+.data-arrow { font-size: 10px; color: #475569; padding: 2px 0; }
+
+/* ── FLOW ARROWS ── */
+.flow-connector { text-align: center; color: #334155; font-size: 20px; padding: 4px 0; }
+
+/* ── EDGE CASE PILLS ── */
+.edge-cases { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.edge-pill { font-size: 10px; padding: 4px 10px; border-radius: 6px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); color: #94a3b8; }
+
+/* ── GLOBAL STATE MACHINE ── */
+.state-machine { margin-top: 48px; }
+.state-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0; align-items: center; }
+.state-node { display: flex; flex-direction: column; align-items: center; }
+.state-circle { width: 52px; height: 52px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; border: 2px solid; }
+.state-name { font-size: 9px; font-weight: 600; text-align: center; margin-top: 5px; color: #94a3b8; max-width: 70px; line-height: 1.3; }
+.state-sub { font-size: 8px; color: #475569; text-align: center; max-width: 70px; }
+.state-arr { font-size: 24px; color: #334155; text-align: center; }
+
+/* ── RULE BOXES ── */
+.rules-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-top: 32px; }
+.rule-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07); border-radius: 10px; padding: 16px; }
+.rule-title { font-size: 13px; font-weight: 700; color: #f1f5f9; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.rule-item { display: flex; align-items: flex-start; gap: 8px; font-size: 11px; color: #94a3b8; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.04); line-height: 1.5; }
+.rule-item:last-child { border-bottom: none; }
+.rule-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; margin-top: 4px; }
+
+/* ── DIVIDER ── */
+.section-divider { height: 1px; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent); margin: 48px 0; }
+</style>
+</head>
+<body>
+<div class="page">
+
+<h1 class="page-title">MedAssist — All Patient Scenarios</h1>
+<p class="page-sub">
+  For each scenario: <strong style="color:#f1f5f9">what the frontdesk does</strong> · <strong style="color:#93c5fd">what the doctor sees on their dashboard</strong> · <strong style="color:#d8b4fe">what changes in the database</strong><br>
+  Covers 4 requested scenarios + 5 additional edge cases that must be handled.
+</p>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     SCENARIO 1: Appointment, arrived on time
+══════════════════════════════════════════════════════════════════ -->
+<div class="scenario-block">
+  <div class="scenario-header">
+    <div class="scenario-num" style="background:#052e16;color:#4ade80;border:2px solid #166534">1</div>
+    <div class="scenario-title-block">
+      <div class="scenario-title">Patient booked an appointment — arrived on time ✅</div>
+      <div class="scenario-subtitle">Most common scenario in a well-run clinic. Everything works as expected.</div>
+    </div>
+    <div class="scenario-status-pill" style="background:#052e16;color:#4ade80;border:1px solid #166534">IDEAL CASE</div>
+  </div>
+
+  <div class="three-col">
+    <!-- Frontdesk -->
+    <div class="col-card col-frontdesk">
+      <div class="col-header">👩‍💼 Frontdesk Actions</div>
+      <div class="col-body">
+        <div class="action-step">
+          <div class="action-num" style="background:#14532d;color:#4ade80">1</div>
+          <div>
+            <div class="action-text"><span class="action-bold">Patient walks in and gives name.</span> Frontdesk searches for their appointment in the upcoming list.</div>
+            <div class="action-ui">→ Frontdesk dashboard: "مواعيد اليوم" tab → sees محمود at 16:00</div>
+          </div>
+        </div>
+        <div class="action-step">
+          <div class="action-num" style="background:#14532d;color:#4ade80">2</div>
+          <div>
+            <div class="action-text"><span class="action-bold">Clicks "وصل" (Arrived)</span> on the appointment card. System records <code style="font-size:10px;color:#6ee7b7">arrived_at = now()</code> and adds patient to the doctor's queue.</div>
+            <div class="action-ui">→ Appointment status: scheduled → arrived</div>
+          </div>
+        </div>
+        <div class="action-step">
+          <div class="action-num" style="background:#14532d;color:#4ade80">3</div>
+          <div>
+            <div class="action-text"><span class="action-bold">No further action needed.</span> Doctor sees patient in their queue immediately.</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-footer">⚡ Frontdesk effort: minimal. One button tap. The system handles the rest.</div>
+    </div>
+
+    <!-- Doctor Dashboard -->
+    <div class="col-card col-doctor">
+      <div class="col-header">🩺 Doctor Dashboard — What They See</div>
+      <div class="col-body">
+        <div class="mini-dash">
+          <div class="mini-stats">
+            <div class="mini-stat"><div class="mini-stat-num c-orange">1</div><div class="mini-stat-label">في الانتظار</div></div>
+            <div class="mini-stat"><div class="mini-stat-num c-blue">4</div><div class="mini-stat-label">مواعيد اليوم</div></div>
+            <div class="mini-stat"><div class="mini-stat-num c-green">0</div><div class="mini-stat-label">مكتمل</div></div>
+          </div>
+          <div class="mini-section-label">🟠 في الانتظار الآن</div>
+          <div class="mini-patient-card urgent">
+            <div class="mini-patient-top">
+              <div><div class="mini-patient-name">محمود عبد الله</div><div class="mini-patient-meta">58 سنة · ذكر · انتظر 3 دقائق</div></div>
+              <div class="mini-badge b-blue">كشف</div>
+            </div>
+          </div>
+          <div class="mini-section-label" style="margin-top:4px">🔵 مواعيد اليوم</div>
+          <div class="mini-apt-row"><div class="mini-apt-dot d-orange"></div><div class="mini-apt-time">١٦:٠٠</div><div class="mini-apt-name">محمود عبد الله</div><div class="mini-apt-status s-waiting">في الانتظار</div></div>
+          <div class="mini-apt-row"><div class="mini-apt-dot d-blue"></div><div class="mini-apt-time">١٦:٣٠</div><div class="mini-apt-name">أمير فاروق</div><div class="mini-apt-status s-upcoming">قادم</div></div>
+          <div class="mini-apt-row"><div class="mini-apt-dot d-blue"></div><div class="mini-apt-time">١٧:٠٠</div><div class="mini-apt-name">رانيا حسين</div><div class="mini-apt-status s-upcoming">قادم</div></div>
+        </div>
+      </div>
+      <div class="col-footer">محمود appears in BOTH sections: queue (actionable) + timeline (informational). The queue card shows wait time since arrival, not since appointment time.</div>
+    </div>
+
+    <!-- Data Logic -->
+    <div class="col-card col-data">
+      <div class="col-header">🗄️ Database State Changes</div>
+      <div class="col-body">
+        <div class="data-row">
+          <div class="data-table-name">appointments row</div>
+          <div class="data-field">status: <span class="data-value">'scheduled' → 'arrived'</span></div>
+          <div class="data-field">arrived_at: <span class="data-value">2026-04-07T16:02:00+02:00</span></div>
+        </div>
+        <div class="data-arrow">↓ triggers queue insert</div>
+        <div class="data-row">
+          <div class="data-table-name">queue (new row inserted)</div>
+          <div class="data-field">patient_id: <span class="data-value">[mahmoud_id]</span></div>
+          <div class="data-field">doctor_id: <span class="data-value">[doctor_id]</span></div>
+          <div class="data-field">source: <span class="data-value">'appointment'</span></div>
+          <div class="data-field">appointment_id: <span class="data-value">[apt_id]</span></div>
+          <div class="data-field">checked_in_at: <span class="data-value">now()</span></div>
+          <div class="data-field">status: <span class="data-value">'waiting'</span></div>
+          <div class="data-field">priority: <span class="data-value">1 (normal)</span></div>
+        </div>
+        <div class="data-arrow">↓ when doctor starts session</div>
+        <div class="data-row">
+          <div class="data-table-name">queue + appointments both update</div>
+          <div class="data-field">queue.status: <span class="data-value">'waiting' → 'with_doctor'</span></div>
+          <div class="data-field">appointments.status: <span class="data-value">'arrived' → 'in_progress'</span></div>
+        </div>
+      </div>
+      <div class="col-footer">source='appointment' lets us distinguish appointment arrivals from walk-ins for reporting.</div>
+    </div>
+  </div>
+</div>
+
+<div class="section-divider"></div>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     SCENARIO 2: Walk-in, no appointment
+══════════════════════════════════════════════════════════════════ -->
+<div class="scenario-block">
+  <div class="scenario-header">
+    <div class="scenario-num" style="background:#450a0a;color:#fca5a5;border:2px solid #991b1b">2</div>
+    <div class="scenario-title-block">
+      <div class="scenario-title">Walk-in patient — no appointment 🚶</div>
+      <div class="scenario-subtitle">Patient shows up without booking. Very common in Egyptian clinics. Frontdesk decides whether to add them.</div>
+    </div>
+    <div class="scenario-status-pill" style="background:#450a0a;color:#fca5a5;border:1px solid #991b1b">WALK-IN</div>
+  </div>
+
+  <div class="three-col">
+    <div class="col-card col-frontdesk">
+      <div class="col-header">👩‍💼 Frontdesk Actions</div>
+      <div class="col-body">
+        <div class="action-step">
+          <div class="action-num" style="background:#450a0a;color:#fca5a5">1</div>
+          <div>
+            <div class="action-text"><span class="action-bold">Patient walks in with no booking.</span> Frontdesk checks if doctor has capacity today (free slots visible in schedule).</div>
+            <div class="action-ui">→ Frontdesk checks doctor's schedule for gaps between appointments</div>
+          </div>
+        </div>
+        <div class="action-step">
+          <div class="action-num" style="background:#450a0a;color:#fca5a5">2</div>
+          <div>
+            <div class="action-text"><span class="action-bold">Clicks "إضافة زيارة عادية"</span> (Add walk-in). Searches for patient by name/phone. If new patient, registers them first.</div>
+            <div class="action-ui">→ If new patient: quick registration form (name, phone, age, sex)</div>
+          </div>
+        </div>
+        <div class="action-step">
+          <div class="action-num" style="background:#450a0a;color:#fca5a5">3</div>
+          <div>
+            <div class="action-text"><span class="action-bold">Selects visit type</span> (كشف / متابعة / طارئ) and confirms. Patient enters queue immediately. Frontdesk tells patient to wait.</div>
+            <div class="action-ui">→ Queue counter increases by 1 on doctor's dashboard instantly</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-footer">⚠️ Frontdesk has authority to accept or turn away walk-ins based on capacity. System should show how many scheduled patients are still coming.</div>
+    </div>
+
+    <div class="col-card col-doctor">
+      <div class="col-header">🩺 Doctor Dashboard — What They See</div>
+      <div class="col-body">
+        <div class="mini-dash">
+          <div class="mini-stats">
+            <div class="mini-stat"><div class="mini-stat-num c-orange">2</div><div class="mini-stat-label">في الانتظار</div></div>
+            <div class="mini-stat"><div class="mini-stat-num c-blue">3</div><div class="mini-stat-label">مواعيد اليوم</div></div>
+            <div class="mini-stat"><div class="mini-stat-num c-green">0</div><div class="mini-stat-label">مكتمل</div></div>
+          </div>
+          <div class="mini-section-label">🟠 في الانتظار الآن</div>
+          <div class="mini-patient-card urgent">
+            <div class="mini-patient-top">
+              <div><div class="mini-patient-name">محمود عبد الله</div><div class="mini-patient-meta">58 سنة · انتظر 10 دقائق · موعد مجدول</div></div>
+              <div class="mini-badge b-blue">كشف</div>
+            </div>
+          </div>
+          <div class="mini-patient-card walkin">
+            <div class="mini-patient-top">
+              <div><div class="mini-patient-name">خالد مصطفى</div><div class="mini-patient-meta">44 سنة · انتظر 3 دقائق · <span style="color:#ef4444">زيارة عادية</span></div></div>
+              <div class="mini-badge b-red">بدون موعد</div>
+            </div>
+          </div>
+          <div class="mini-section-label" style="margin-top:4px">🔵 مواعيد اليوم</div>
+          <div class="mini-apt-row"><div class="mini-apt-dot d-orange"></div><div class="mini-apt-time">١٦:٠٠</div><div class="mini-apt-name">محمود عبد الله</div><div class="mini-apt-status s-waiting">في الانتظار</div></div>
+          <div class="mini-apt-row"><div class="mini-apt-dot d-blue"></div><div class="mini-apt-time">١٦:٣٠</div><div class="mini-apt-name">أمير فاروق</div><div class="mini-apt-status s-upcoming">قادم</div></div>
+        </div>
+      </div>
+      <div class="col-footer">Walk-in appears in queue with a red "بدون موعد" badge so doctor knows the difference. Appointment patients always take queue priority unless frontdesk manually overrides.</div>
+    </div>
+
+    <div class="col-card col-data">
+      <div class="col-header">🗄️ Database State Changes</div>
+      <div class="col-body">
+        <div class="data-row">
+          <div class="data-table-name">patients (if new — insert)</div>
+          <div class="data-field">full_name: <span class="data-value">'خالد مصطفى'</span></div>
+          <div class="data-field">phone: <span class="data-value">'010xxxxxxxx'</span></div>
+          <div class="data-field">age: <span class="data-value">44</span></div>
+          <div class="data-field">sex: <span class="data-value">'male'</span></div>
+        </div>
+        <div class="data-arrow">↓ then insert into queue</div>
+        <div class="data-row">
+          <div class="data-table-name">queue (insert — no appointment)</div>
+          <div class="data-field">patient_id: <span class="data-value">[khalid_id]</span></div>
+          <div class="data-field">doctor_id: <span class="data-value">[doctor_id]</span></div>
+          <div class="data-field">source: <span class="data-value">'walkin'</span></div>
+          <div class="data-field">appointment_id: <span class="data-value">NULL</span></div>
+          <div class="data-field">checked_in_at: <span class="data-value">now()</span></div>
+          <div class="data-field">status: <span class="data-value">'waiting'</span></div>
+          <div class="data-field">priority: <span class="data-value">1 (normal)</span></div>
+          <div class="data-field">visit_type: <span class="data-value">'regular'</span></div>
+        </div>
+        <div class="data-row">
+          <div class="data-table-name">No appointments row created</div>
+          <div class="data-field" style="color:#64748b">Walk-ins skip the appointments table entirely. Queue is the source of truth for walk-ins.</div>
+        </div>
+      </div>
+      <div class="col-footer">source='walkin' vs 'appointment' is the critical distinction for reporting: % walk-ins, busiest walk-in days, etc.</div>
+    </div>
+  </div>
+</div>
+
+<div class="section-divider"></div>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     SCENARIO 3: Appointment — arrived late
+══════════════════════════════════════════════════════════════════ -->
+<div class="scenario-block">
+  <div class="scenario-header">
+    <div class="scenario-num" style="background:#451a03;color:#fdba74;border:2px solid #c2410c">3</div>
+    <div class="scenario-title-block">
+      <div class="scenario-title">Appointment patient — arrived late ⏱️</div>
+      <div class="scenario-subtitle">Patient had a 16:00 appointment, showed up at 16:45. Doctor may have already moved on. System must handle queue position correctly.</div>
+    </div>
+    <div class="scenario-status-pill" style="background:#451a03;color:#fdba74;border:1px solid #c2410c">LATE ARRIVAL</div>
+  </div>
+
+  <div class="three-col">
+    <div class="col-card col-frontdesk">
+      <div class="col-header">👩‍💼 Frontdesk Actions</div>
+      <div class="col-body">
+        <div class="action-step">
+          <div class="action-num" style="background:#451a03;color:#fdba74">1</div>
+          <div>
+            <div class="action-text"><span class="action-bold">Patient arrives at 16:45 for a 16:00 appointment.</span> System highlights the appointment as "متأخر" (late) automatically — any appointment past its start time with no arrival is flagged amber.</div>
+            <div class="action-ui">→ Appointment card shows: "متأخر بـ 45 دقيقة" in amber</div>
+          </div>
+        </div>
+        <div class="action-step">
+          <div class="action-num" style="background:#451a03;color:#fdba74">2</div>
+          <div>
+            <div class="action-text"><span class="action-bold">Frontdesk clicks "وصل متأخراً".</span> A decision dialog appears: <br>a) Add to end of queue (fair to others) <br>b) Squeeze in if doctor is between patients <br>c) Reschedule to another day</div>
+            <div class="action-ui">→ Dialog: "وصل متأخراً بـ 45 دقيقة — كيف تريد التعامل معه؟"</div>
+          </div>
+        </div>
+        <div class="action-step">
+          <div class="action-num" style="background:#451a03;color:#fdba74">3</div>
+          <div>
+            <div class="action-text"><span class="action-bold">If added to queue:</span> placed at END regardless of original slot, with amber "متأخر" badge. Wait time counts from arrival, not from appointment time.</div>
+            <div class="action-ui">→ queue.priority = 0 (lower than normal), queue.late = true</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-footer">Key rule: late patients lose their time priority. They go to end of queue. Doctor can override if they choose to see them sooner.</div>
+    </div>
+
+    <div class="col-card col-doctor">
+      <div class="col-header">🩺 Doctor Dashboard — What They See</div>
+      <div class="col-body">
+        <div class="mini-dash">
+          <div class="mini-stats">
+            <div class="mini-stat"><div class="mini-stat-num c-orange">2</div><div class="mini-stat-label">في الانتظار</div></div>
+            <div class="mini-stat"><div class="mini-stat-num c-blue">2</div><div class="mini-stat-label">مواعيد اليوم</div></div>
+            <div class="mini-stat"><div class="mini-stat-num c-green">1</div><div class="mini-stat-label">مكتمل</div></div>
+          </div>
+          <div class="mini-section-label">🟠 في الانتظار الآن</div>
+          <div class="mini-patient-card urgent">
+            <div class="mini-patient-top">
+              <div><div class="mini-patient-name">سارة أحمد</div><div class="mini-patient-meta">34 سنة · انتظرت 15 دقيقة</div></div>
+              <div class="mini-badge b-blue">موعد ١٦:٣٠</div>
+            </div>
+          </div>
+          <div class="mini-patient-card late">
+            <div class="mini-patient-top">
+              <div><div class="mini-patient-name">محمود عبد الله</div><div class="mini-patient-meta">58 سنة · وصل متأخراً 45د · آخر القائمة</div></div>
+              <div class="mini-badge b-amber">متأخر</div>
+            </div>
+          </div>
+          <div class="mini-section-label" style="margin-top:4px">🔵 مواعيد اليوم</div>
+          <div class="mini-apt-row"><div class="mini-apt-dot d-amber"></div><div class="mini-apt-time">١٦:٠٠</div><div class="mini-apt-name">محمود عبد الله</div><div class="mini-apt-status s-late">وصل متأخراً</div></div>
+          <div class="mini-apt-row"><div class="mini-apt-dot d-orange"></div><div class="mini-apt-time">١٦:٣٠</div><div class="mini-apt-name">سارة أحمد</div><div class="mini-apt-status s-waiting">في الانتظار</div></div>
+        </div>
+      </div>
+      <div class="col-footer">محمود is at the bottom of the queue despite his earlier appointment time. Amber badge makes the reason clear. Doctor can drag him up if they want.</div>
+    </div>
+
+    <div class="col-card col-data">
+      <div class="col-header">🗄️ Database State Changes</div>
+      <div class="col-body">
+        <div class="data-row">
+          <div class="data-table-name">Auto-flag at appointment time + 15min</div>
+          <div class="data-field" style="color:#64748b">A scheduled job or client-side timer checks: if now() &gt; start_time + 15min AND status = 'scheduled' → flag as late</div>
+          <div class="data-field">appointments.status: <span class="data-value">'scheduled' → 'late'</span></div>
+        </div>
+        <div class="data-arrow">↓ frontdesk confirms arrival</div>
+        <div class="data-row">
+          <div class="data-table-name">appointments update</div>
+          <div class="data-field">status: <span class="data-value">'late' → 'arrived_late'</span></div>
+          <div class="data-field">arrived_at: <span class="data-value">2026-04-07T16:45:00+02:00</span></div>
+          <div class="data-field">late_minutes: <span class="data-value">45</span></div>
+        </div>
+        <div class="data-row">
+          <div class="data-table-name">queue insert</div>
+          <div class="data-field">source: <span class="data-value">'appointment'</span></div>
+          <div class="data-field">priority: <span class="data-value">0 (deprioritized)</span></div>
+          <div class="data-field">is_late: <span class="data-value">true</span></div>
+          <div class="data-field">checked_in_at: <span class="data-value">16:45 (actual arrival)</span></div>
+        </div>
+      </div>
+      <div class="col-footer">late_minutes is stored for analytics: which patients are chronic late arrivers, which time slots cause the most lateness, etc.</div>
+    </div>
+  </div>
+</div>
+
+<div class="section-divider"></div>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     SCENARIO 4: Appointment in 30 minutes, not yet arrived
+══════════════════════════════════════════════════════════════════ -->
+<div class="scenario-block">
+  <div class="scenario-header">
+    <div class="scenario-num" style="background:#172554;color:#93c5fd;border:2px solid #1d4ed8">4</div>
+    <div class="scenario-title-block">
+      <div class="scenario-title">Appointment in 30 minutes — patient hasn't arrived yet 🔵</div>
+      <div class="scenario-subtitle">Patient is expected but not yet in the building. Pure informational state — no action needed from anyone yet.</div>
+    </div>
+    <div class="scenario-status-pill" style="background:#172554;color:#93c5fd;border:1px solid #1d4ed8">UPCOMING</div>
+  </div>
+
+  <div class="three-col">
+    <div class="col-card col-frontdesk">
+      <div class="col-header">👩‍💼 Frontdesk Actions</div>
+      <div class="col-body">
+        <div class="action-step">
+          <div class="action-num" style="background:#172554;color:#93c5fd">1</div>
+          <div>
+            <div class="action-text"><span class="action-bold">No action required at this point.</span> The appointment is visible in the frontdesk "مواعيد اليوم" list as "قادم" (upcoming) with a 30-minute countdown.</div>
+            <div class="action-ui">→ Frontdesk sees: أمير فاروق — ١٦:٣٠ — "بعد 30 دقيقة"</div>
+          </div>
+        </div>
+        <div class="action-step">
+          <div class="action-num" style="background:#172554;color:#93c5fd">2</div>
+          <div>
+            <div class="action-text"><span class="action-bold">Optional: Send SMS reminder</span> via the appointment card action. System can also auto-send 1 hour before (if SMS enabled).</div>
+            <div class="action-ui">→ Button: "إرسال تذكير" on the appointment card</div>
+          </div>
+        </div>
+        <div class="action-step">
+          <div class="action-num" style="background:#172554;color:#93c5fd">3</div>
+          <div>
+            <div class="action-text"><span class="action-bold">When patient arrives:</span> frontdesk clicks "وصل" and they enter the queue. Until then, this card is display-only.</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-footer">Frontdesk can see all upcoming appointments for the day sorted by time. This lets them anticipate busy periods and prepare.</div>
+    </div>
+
+    <div class="col-card col-doctor">
+      <div class="col-header">🩺 Doctor Dashboard — What They See</div>
+      <div class="col-body">
+        <div class="mini-dash">
+          <div class="mini-stats">
+            <div class="mini-stat"><div class="mini-stat-num c-orange">1</div><div class="mini-stat-label">في الانتظار</div></div>
+            <div class="mini-stat"><div class="mini-stat-num c-blue">3</div><div class="mini-stat-label">مواعيد اليوم</div></div>
+            <div class="mini-stat"><div class="mini-stat-num c-green">0</div><div class="mini-stat-label">مكتمل</div></div>
+          </div>
+          <div class="mini-section-label">🟠 في الانتظار الآن</div>
+          <div class="mini-patient-card urgent">
+            <div class="mini-patient-top">
+              <div><div class="mini-patient-name">محمود عبد الله</div><div class="mini-patient-meta">58 سنة · انتظر 5 دقائق</div></div>
+              <div class="mini-badge b-blue">كشف</div>
+            </div>
+          </div>
+          <div class="mini-section-label" style="margin-top:4px">🔵 مواعيد اليوم</div>
+          <div class="mini-apt-row"><div class="mini-apt-dot d-orange"></div><div class="mini-apt-time">١٦:٠٠</div><div class="mini-apt-name">محمود عبد الله</div><div class="mini-apt-status s-waiting">في الانتظار</div></div>
+          <div class="mini-apt-row"><div class="mini-apt-dot d-blue"></div><div class="mini-apt-time">١٦:٣٠</div><div class="mini-apt-name">أمير فاروق</div><div class="mini-apt-status s-upcoming">بعد 30 دقيقة</div></div>
+          <div class="mini-apt-row"><div class="mini-apt-dot d-blue"></div><div class="mini-apt-time">١٧:٠٠</div><div class="mini-apt-name">رانيا حسين</div><div class="mini-apt-status s-upcoming">بعد 60 دقيقة</div></div>
+        </div>
+      </div>
+      <div class="col-footer">أمير is NOT in the queue. He appears only in "مواعيد اليوم" with a live countdown. Doctor knows he's coming but takes no action. The counter shows "بعد X دقيقة" not a static time.</div>
+    </div>
+
+    <div class="col-card col-data">
+      <div class="col-header">🗄️ Database State Changes</div>
+      <div class="col-body">
+        <div class="data-row">
+          <div class="data-table-name">No changes yet — read only</div>
+          <div class="data-field">appointments.status: <span class="data-value">'scheduled'</span> (unchanged)</div>
+          <div class="data-field">arrived_at: <span class="data-value">NULL</span></div>
+          <div class="data-field" style="color:#64748b;margin-top:4px">No queue row exists. Patient is not in the building.</div>
+        </div>
+        <div class="data-arrow">↓ UI computes countdown from data</div>
+        <div class="data-row">
+          <div class="data-table-name">Client-side only (no DB write)</div>
+          <div class="data-field">minutes_until = <span class="data-value">start_time - now()</span></div>
+          <div class="data-field">label: <span class="data-value">"بعد 30 دقيقة"</span></div>
+        </div>
+        <div class="data-arrow">↓ at appointment time + 15min with no arrival</div>
+        <div class="data-row">
+          <div class="data-table-name">Auto-flag as late (appointments update)</div>
+          <div class="data-field">status: <span class="data-value">'scheduled' → 'late'</span></div>
+          <div class="data-field" style="color:#64748b">Frontdesk sees amber alert. No-show timer starts.</div>
+        </div>
+      </div>
+      <div class="col-footer">Key insight: "upcoming" is purely display logic — computed from start_time. Nothing changes in the DB until the patient physically arrives or the grace period expires.</div>
+    </div>
+  </div>
+</div>
+
+<div class="section-divider"></div>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     SCENARIO 5: No-show
+══════════════════════════════════════════════════════════════════ -->
+<div class="scenario-block">
+  <div class="scenario-header">
+    <div class="scenario-num" style="background:#3b0764;color:#d8b4fe;border:2px solid #7e22ce">5</div>
+    <div class="scenario-title-block">
+      <div class="scenario-title">No-show — patient never arrives 👻</div>
+      <div class="scenario-subtitle">Appointment time passed. Patient didn't come. Slot is wasted. System should auto-flag and give frontdesk options.</div>
+    </div>
+    <div class="scenario-status-pill" style="background:#3b0764;color:#d8b4fe;border:1px solid #7e22ce">NO-SHOW</div>
+  </div>
+
+  <div class="three-col">
+    <div class="col-card col-frontdesk">
+      <div class="col-header">👩‍💼 Frontdesk Actions</div>
+      <div class="col-body">
+        <div class="action-step">
+          <div class="action-num" style="background:#3b0764;color:#d8b4fe">1</div>
+          <div>
+            <div class="action-text"><span class="action-bold">System auto-flags after grace period</span> (default: 20 min past appointment time). Appointment turns red on frontdesk screen with "غياب محتمل" alert.</div>
+          </div>
+        </div>
+        <div class="action-step">
+          <div class="action-num" style="background:#3b0764;color:#d8b4fe">2</div>
+          <div>
+            <div class="action-text"><span class="action-bold">Frontdesk can call the patient</span> via phone number shown on card. Then chooses: <br>a) "تأكيد الغياب" → marks as no_show <br>b) "في الطريق" → extends grace period 15 more min</div>
+          </div>
+        </div>
+        <div class="action-step">
+          <div class="action-num" style="background:#3b0764;color:#d8b4fe">3</div>
+          <div>
+            <div class="action-text"><span class="action-bold">If confirmed no-show:</span> slot becomes available. Frontdesk can offer it to a waiting walk-in or next appointment patient.</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-footer">System can optionally auto-send an SMS: "لم تحضر لموعدك. هل تريد إعادة الجدولة؟"</div>
+    </div>
+
+    <div class="col-card col-doctor">
+      <div class="col-header">🩺 Doctor Dashboard — What They See</div>
+      <div class="col-body">
+        <div class="mini-dash">
+          <div class="mini-stats">
+            <div class="mini-stat"><div class="mini-stat-num c-orange">0</div><div class="mini-stat-label">في الانتظار</div></div>
+            <div class="mini-stat"><div class="mini-stat-num c-blue">2</div><div class="mini-stat-label">مواعيد اليوم</div></div>
+            <div class="mini-stat"><div class="mini-stat-num c-green">1</div><div class="mini-stat-label">مكتمل</div></div>
+          </div>
+          <div class="mini-section-label">🟠 في الانتظار الآن</div>
+          <div style="background:#f8fafc;border-radius:8px;padding:12px;text-align:center;font-size:10px;color:#9ca3af;border:1px dashed #e5e7eb">لا أحد في الانتظار</div>
+          <div class="mini-section-label" style="margin-top:4px">🔵 مواعيد اليوم</div>
+          <div class="mini-apt-row"><div class="mini-apt-dot d-red"></div><div class="mini-apt-time">١٦:٠٠</div><div class="mini-apt-name">محمود عبد الله</div><div class="mini-apt-status s-noshow">لم يحضر</div></div>
+          <div class="mini-apt-row"><div class="mini-apt-dot d-blue"></div><div class="mini-apt-time">١٦:٣٠</div><div class="mini-apt-name">أمير فاروق</div><div class="mini-apt-status s-upcoming">قادم</div></div>
+        </div>
+      </div>
+      <div class="col-footer">Doctor sees the no-show in the timeline (greyed/red) so they understand where their schedule stands. Queue shows empty — doctor knows they have a free moment.</div>
+    </div>
+
+    <div class="col-card col-data">
+      <div class="col-header">🗄️ Database State Changes</div>
+      <div class="col-body">
+        <div class="data-row">
+          <div class="data-table-name">appointments update (confirmed no-show)</div>
+          <div class="data-field">status: <span class="data-value">'late' → 'no_show'</span></div>
+          <div class="data-field">no_show_confirmed_at: <span class="data-value">now()</span></div>
+          <div class="data-field">no_show_confirmed_by: <span class="data-value">[frontdesk_user_id]</span></div>
+        </div>
+        <div class="data-row">
+          <div class="data-table-name">No queue row ever created</div>
+          <div class="data-field" style="color:#64748b">Patient never physically arrived → never added to queue. Clean state.</div>
+        </div>
+        <div class="data-row">
+          <div class="data-table-name">patients update (for analytics)</div>
+          <div class="data-field">no_show_count: <span class="data-value">patients.no_show_count + 1</span></div>
+          <div class="data-field" style="color:#64748b;font-size:9px">Useful for identifying unreliable patients in the future</div>
+        </div>
+      </div>
+      <div class="col-footer">no_show_count on patient profile helps frontdesk flag repeat offenders and require confirmation calls before booking.</div>
+    </div>
+  </div>
+</div>
+
+<div class="section-divider"></div>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     SCENARIO 6: Very early arrival
+══════════════════════════════════════════════════════════════════ -->
+<div class="scenario-block">
+  <div class="scenario-header">
+    <div class="scenario-num" style="background:#1e1b4b;color:#c7d2fe;border:2px solid #4338ca">6</div>
+    <div class="scenario-title-block">
+      <div class="scenario-title">Patient arrives very early (45+ min before slot) 🐦</div>
+      <div class="scenario-subtitle">Patient has a 17:00 appointment but arrives at 15:30. Doctor is still busy with other patients. Should not disrupt the schedule.</div>
+    </div>
+    <div class="scenario-status-pill" style="background:#1e1b4b;color:#c7d2fe;border:1px solid #4338ca">EARLY</div>
+  </div>
+
+  <div class="three-col">
+    <div class="col-card col-frontdesk">
+      <div class="col-header">👩‍💼 Frontdesk Actions</div>
+      <div class="col-body">
+        <div class="action-step">
+          <div class="action-num" style="background:#1e1b4b;color:#c7d2fe">1</div>
+          <div>
+            <div class="action-text"><span class="action-bold">Patient arrives 90 minutes early.</span> Frontdesk finds their appointment in "مواعيد اليوم" — it shows "بعد 90 دقيقة".</div>
+          </div>
+        </div>
+        <div class="action-step">
+          <div class="action-num" style="background:#1e1b4b;color:#c7d2fe">2</div>
+          <div>
+            <div class="action-text"><span class="action-bold">Frontdesk clicks "وصل مبكراً".</span> Dialog: "هل تريد إضافته للقائمة الآن أم الانتظار حتى موعده؟"<br>a) Add to queue now (if slots are free)<br>b) Hold — enter at their scheduled time</div>
+            <div class="action-ui">→ Option B recommended: keeps schedule predictable for doctor</div>
+          </div>
+        </div>
+        <div class="action-step">
+          <div class="action-num" style="background:#1e1b4b;color:#c7d2fe">3</div>
+          <div>
+            <div class="action-text"><span class="action-bold">If "Hold" selected:</span> patient is marked as "حاضر — ينتظر دوره" but not added to queue yet. Queue entry auto-fires at their appointment time if doctor is free.</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-footer">Frontdesk should communicate wait time clearly to patient: "موعدك في الساعة ٥، نضيفك للقائمة عند الساعة ٤:٥٠"</div>
+    </div>
+
+    <div class="col-card col-doctor">
+      <div class="col-header">🩺 Doctor Dashboard — What They See</div>
+      <div class="col-body">
+        <div class="mini-dash">
+          <div class="mini-stats">
+            <div class="mini-stat"><div class="mini-stat-num c-orange">1</div><div class="mini-stat-label">في الانتظار</div></div>
+            <div class="mini-stat"><div class="mini-stat-num c-blue">3</div><div class="mini-stat-label">مواعيد اليوم</div></div>
+            <div class="mini-stat"><div class="mini-stat-num c-green">0</div><div class="mini-stat-label">مكتمل</div></div>
+          </div>
+          <div class="mini-section-label">🟠 في الانتظار الآن</div>
+          <div class="mini-patient-card urgent">
+            <div class="mini-patient-top">
+              <div><div class="mini-patient-name">محمود عبد الله</div><div class="mini-patient-meta">58 سنة · في الانتظار</div></div>
+              <div class="mini-badge b-blue">كشف ١٦:٠٠</div>
+            </div>
+          </div>
+          <div class="mini-section-label" style="margin-top:4px">🔵 مواعيد اليوم</div>
+          <div class="mini-apt-row"><div class="mini-apt-dot d-orange"></div><div class="mini-apt-time">١٦:٠٠</div><div class="mini-apt-name">محمود عبد الله</div><div class="mini-apt-status s-waiting">في الانتظار</div></div>
+          <div class="mini-apt-row"><div class="mini-apt-dot d-purple"></div><div class="mini-apt-time">١٧:٠٠</div><div class="mini-apt-name">رانيا حسين</div><div class="mini-apt-status s-early">وصلت مبكراً</div></div>
+          <div class="mini-apt-row"><div class="mini-apt-dot d-blue"></div><div class="mini-apt-time">١٧:٣٠</div><div class="mini-apt-name">علاء سلامة</div><div class="mini-apt-status s-upcoming">قادم</div></div>
+        </div>
+      </div>
+      <div class="col-footer">رانيا shows as "وصلت مبكراً" (purple) in the timeline — doctor is aware she's in the building but she's NOT in the active queue yet. No queue card exists for her.</div>
+    </div>
+
+    <div class="col-card col-data">
+      <div class="col-header">🗄️ Database State Changes</div>
+      <div class="col-body">
+        <div class="data-row">
+          <div class="data-table-name">appointments update (arrived early)</div>
+          <div class="data-field">status: <span class="data-value">'scheduled' → 'arrived_early'</span></div>
+          <div class="data-field">arrived_at: <span class="data-value">2026-04-07T15:30:00+02:00</span></div>
+          <div class="data-field">early_minutes: <span class="data-value">90</span></div>
+        </div>
+        <div class="data-row">
+          <div class="data-table-name">No queue row yet</div>
+          <div class="data-field" style="color:#64748b">Queue entry held back until appointment time or frontdesk manually promotes them.</div>
+        </div>
+        <div class="data-arrow">↓ at appointment time (17:00)</div>
+        <div class="data-row">
+          <div class="data-table-name">queue auto-insert (scheduled task)</div>
+          <div class="data-field">status: <span class="data-value">'waiting'</span></div>
+          <div class="data-field">checked_in_at: <span class="data-value">15:30 (actual arrival)</span></div>
+          <div class="data-field">queued_at: <span class="data-value">17:00 (when added)</span></div>
+          <div class="data-field">priority: <span class="data-value">1 (normal — their slot)</span></div>
+        </div>
+      </div>
+      <div class="col-footer">Two timestamps stored: arrived_at (physical) vs queued_at (when they entered the queue). This gives accurate wait time from the patient's perspective.</div>
+    </div>
+  </div>
+</div>
+
+<div class="section-divider"></div>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     SCENARIO 7: Emergency walk-in
+══════════════════════════════════════════════════════════════════ -->
+<div class="scenario-block">
+  <div class="scenario-header">
+    <div class="scenario-num" style="background:#450a0a;color:#fecaca;border:2px solid #dc2626">7</div>
+    <div class="scenario-title-block">
+      <div class="scenario-title">Emergency walk-in — jumps the queue 🚨</div>
+      <div class="scenario-subtitle">Patient arrives in urgent distress. Must be seen immediately regardless of queue order. Frontdesk escalates.</div>
+    </div>
+    <div class="scenario-status-pill" style="background:#450a0a;color:#fecaca;border:1px solid #dc2626">EMERGENCY</div>
+  </div>
+
+  <div class="three-col">
+    <div class="col-card col-frontdesk">
+      <div class="col-header">👩‍💼 Frontdesk Actions</div>
+      <div class="col-body">
+        <div class="action-step">
+          <div class="action-num" style="background:#450a0a;color:#fecaca">1</div>
+          <div>
+            <div class="action-text"><span class="action-bold">Patient arrives in clear distress.</span> Frontdesk clicks "إضافة طارئ" — prominent red button always visible on frontdesk screen.</div>
+          </div>
+        </div>
+        <div class="action-step">
+          <div class="action-num" style="background:#450a0a;color:#fecaca">2</div>
+          <div>
+            <div class="action-text"><span class="action-bold">Minimal data entry:</span> just name + phone (or skip if truly urgent). Confirm as "طارئ". Patient enters queue with priority = 9 (highest).</div>
+            <div class="action-ui">→ Doctor dashboard: emergency card appears at TOP with 🚨 red banner</div>
+          </div>
+        </div>
+        <div class="action-step">
+          <div class="action-num" style="background:#450a0a;color:#fecaca">3</div>
+          <div>
+            <div class="action-text"><span class="action-bold">Doctor gets a push notification</span> (if on another screen) — "مريض طارئ في الانتظار". Existing patient session can be paused.</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-footer">⚠️ Emergency button bypasses all validation. Frontdesk has full authority. The system records who added the emergency for audit trail.</div>
+    </div>
+
+    <div class="col-card col-doctor">
+      <div class="col-header">🩺 Doctor Dashboard — What They See</div>
+      <div class="col-body">
+        <div class="mini-dash">
+          <div class="mini-stats">
+            <div class="mini-stat"><div class="mini-stat-num c-red">🚨</div><div class="mini-stat-label">طارئ!</div></div>
+            <div class="mini-stat"><div class="mini-stat-num c-orange">3</div><div class="mini-stat-label">في الانتظار</div></div>
+            <div class="mini-stat"><div class="mini-stat-num c-blue">2</div><div class="mini-stat-label">مواعيد</div></div>
+          </div>
+          <!-- Emergency banner -->
+          <div style="background:#fef2f2;border:2px solid #dc2626;border-radius:8px;padding:8px 10px;">
+            <div style="font-size:10px;font-weight:800;color:#dc2626;margin-bottom:4px">🚨 مريض طارئ</div>
+            <div class="mini-patient-top">
+              <div><div class="mini-patient-name" style="color:#0f172a">سارة يوسف</div><div class="mini-patient-meta">28 سنة · وصلت الآن</div></div>
+              <div class="mini-badge b-red">طارئ</div>
+            </div>
+          </div>
+          <div class="mini-section-label">قائمة الانتظار العادية</div>
+          <div class="mini-patient-card urgent">
+            <div class="mini-patient-top">
+              <div><div class="mini-patient-name">محمود عبد الله</div><div class="mini-patient-meta">58 سنة · انتظر 22 دقيقة</div></div>
+              <div class="mini-badge b-blue">كشف</div>
+            </div>
+          </div>
+          <div class="mini-patient-card walkin">
+            <div class="mini-patient-top">
+              <div><div class="mini-patient-name">خالد مصطفى</div><div class="mini-patient-meta">44 سنة · انتظر 10 دقائق</div></div>
+              <div class="mini-badge b-gray">بدون موعد</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="col-footer">Emergency card is visually separated with red border at the very top. Cannot be missed. Normal queue continues below it undisturbed.</div>
+    </div>
+
+    <div class="col-card col-data">
+      <div class="col-header">🗄️ Database State Changes</div>
+      <div class="col-body">
+        <div class="data-row">
+          <div class="data-table-name">queue insert (high priority)</div>
+          <div class="data-field">source: <span class="data-value">'walkin'</span></div>
+          <div class="data-field">visit_type: <span class="data-value">'emergency'</span></div>
+          <div class="data-field">priority: <span class="data-value">9 (max)</span></div>
+          <div class="data-field">added_by: <span class="data-value">[frontdesk_user_id]</span></div>
+          <div class="data-field">emergency_note: <span class="data-value">'chest pain'</span></div>
+        </div>
+        <div class="data-row">
+          <div class="data-table-name">notifications insert</div>
+          <div class="data-field">type: <span class="data-value">'emergency_queue'</span></div>
+          <div class="data-field">recipient: <span class="data-value">doctor_id</span></div>
+          <div class="data-field">read: <span class="data-value">false</span></div>
+        </div>
+      </div>
+      <div class="col-footer">Priority system: 9=emergency, 2=appointment (on-time), 1=walk-in, 0=late arrival. Queue sorted by priority DESC, then checked_in_at ASC.</div>
+    </div>
+  </div>
+</div>
+
+<div class="section-divider"></div>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     SCENARIO 8: Doctor running behind
+══════════════════════════════════════════════════════════════════ -->
+<div class="scenario-block">
+  <div class="scenario-header">
+    <div class="scenario-num" style="background:#1c1917;color:#d6d3d1;border:2px solid #57534e">8</div>
+    <div class="scenario-title-block">
+      <div class="scenario-title">Doctor is running behind — cascade delay ⏰</div>
+      <div class="scenario-subtitle">Doctor took longer with a patient. Next appointment patient arrives on time but will wait extra. System should show delay to frontdesk so they can communicate.</div>
+    </div>
+    <div class="scenario-status-pill" style="background:#1c1917;color:#d6d3d1;border:1px solid #57534e">DELAY</div>
+  </div>
+
+  <div class="three-col">
+    <div class="col-card col-frontdesk">
+      <div class="col-header">👩‍💼 Frontdesk Actions</div>
+      <div class="col-body">
+        <div class="action-step">
+          <div class="action-num" style="background:#1c1917;color:#d6d3d1">1</div>
+          <div>
+            <div class="action-text"><span class="action-bold">System detects delay automatically</span> when a session runs past its scheduled duration. Shows frontdesk: "الدكتور متأخر بـ 20 دقيقة — المرضى القادمون سيتأثرون"</div>
+          </div>
+        </div>
+        <div class="action-step">
+          <div class="action-num" style="background:#1c1917;color:#d6d3d1">2</div>
+          <div>
+            <div class="action-text"><span class="action-bold">Frontdesk communicates delay</span> to waiting patients verbally. Can optionally send SMS to upcoming appointment patients: "الدكتور متأخر قليلاً، موعدك سيبدأ الساعة ١٧:٢٠"</div>
+          </div>
+        </div>
+        <div class="action-step">
+          <div class="action-num" style="background:#1c1917;color:#d6d3d1">3</div>
+          <div>
+            <div class="action-text"><span class="action-bold">Cascading delay shown</span> on appointment timeline: all future appointments shift by the estimated delay minutes.</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-footer">Frontdesk is the patient-facing communicator. The system gives them the delay data — they use it to manage expectations and avoid complaints.</div>
+    </div>
+
+    <div class="col-card col-doctor">
+      <div class="col-header">🩺 Doctor Dashboard — What They See</div>
+      <div class="col-body">
+        <div class="mini-dash">
+          <div class="mini-stats">
+            <div class="mini-stat"><div class="mini-stat-num c-orange">2</div><div class="mini-stat-label">في الانتظار</div></div>
+            <div class="mini-stat"><div class="mini-stat-num c-blue">2</div><div class="mini-stat-label">مواعيد</div></div>
+            <div class="mini-stat"><div class="mini-stat-num c-amber">20د</div><div class="mini-stat-label">تأخير</div></div>
+          </div>
+          <!-- Delay banner -->
+          <div style="background:#fffbeb;border:1px solid #f59e0b;border-radius:8px;padding:7px 10px;font-size:9px;color:#92400e">⚠️ أنت متأخر بـ 20 دقيقة — المرضى القادمون متأثرون</div>
+          <div class="mini-section-label">🔵 مواعيد اليوم (مع تأخير)</div>
+          <div class="mini-apt-row"><div class="mini-apt-dot d-orange"></div><div class="mini-apt-time">١٦:٣٠</div><div class="mini-apt-name">سارة أحمد</div><div class="mini-apt-status s-waiting">في الانتظار</div></div>
+          <div class="mini-apt-row"><div class="mini-apt-dot d-blue"></div><div class="mini-apt-time">١٧:٢٠</div><div class="mini-apt-name">أمير فاروق</div><div class="mini-apt-status" style="background:#fffbeb;color:#92400e;font-size:8px;font-weight:600;padding:1px 6px;border-radius:5px">متأثر بالتأخير</div></div>
+        </div>
+      </div>
+      <div class="col-footer">Doctor sees their personal delay counter and shifted appointment times. The 17:00 appointment now realistically starts at 17:20 based on current pace.</div>
+    </div>
+
+    <div class="col-card col-data">
+      <div class="col-header">🗄️ Database State + Computation</div>
+      <div class="col-body">
+        <div class="data-row">
+          <div class="data-table-name">sessions (active)</div>
+          <div class="data-field">started_at: <span class="data-value">16:10</span></div>
+          <div class="data-field">expected_end: <span class="data-value">16:25 (15min appt)</span></div>
+          <div class="data-field">current_time: <span class="data-value">16:30</span></div>
+          <div class="data-field">delay_minutes: <span class="data-value">computed = 5</span></div>
+        </div>
+        <div class="data-row">
+          <div class="data-table-name">Client-side cascade (no DB write)</div>
+          <div class="data-field" style="color:#64748b">Upcoming appointment display times shift by delay_minutes. No actual appointment times changed in DB — this is display-only until the doctor reschedules.</div>
+        </div>
+      </div>
+      <div class="col-footer">Delay is computed live, not stored. Appointments keep their original times — shifting them permanently requires explicit action (rescheduling, which we now support via PATCH).</div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     MASTER PRIORITY TABLE
+══════════════════════════════════════════════════════════════════ -->
+<div class="section-divider"></div>
+<div style="margin-bottom:20px">
+  <div class="section-label" style="font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#64748b;margin-bottom:20px">Queue Priority Rules — How Patients Are Ordered in "في الانتظار الآن"</div>
+  <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:12px;overflow:hidden">
+    <table style="width:100%;border-collapse:collapse;font-size:11px">
+      <thead>
+        <tr style="background:rgba(255,255,255,0.06)">
+          <th style="padding:12px 16px;text-align:left;color:#94a3b8;font-weight:700;letter-spacing:0.5px">Patient Type</th>
+          <th style="padding:12px 16px;text-align:center;color:#94a3b8;font-weight:700">Priority Score</th>
+          <th style="padding:12px 16px;text-align:left;color:#94a3b8;font-weight:700">Queue Position Rule</th>
+          <th style="padding:12px 16px;text-align:left;color:#94a3b8;font-weight:700">Badge Shown</th>
+          <th style="padding:12px 16px;text-align:left;color:#94a3b8;font-weight:700">Who Sets Priority</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="border-top:1px solid rgba(255,255,255,0.04)">
+          <td style="padding:11px 16px;color:#fca5a5;font-weight:600">🚨 Emergency walk-in</td>
+          <td style="padding:11px 16px;text-align:center;color:#fca5a5;font-weight:800">9</td>
+          <td style="padding:11px 16px;color:#94a3b8">Always first. Separate red banner above queue.</td>
+          <td style="padding:11px 16px"><span class="mini-badge b-red">طارئ</span></td>
+          <td style="padding:11px 16px;color:#64748b">Frontdesk (manual)</td>
+        </tr>
+        <tr style="border-top:1px solid rgba(255,255,255,0.04);background:rgba(255,255,255,0.02)">
+          <td style="padding:11px 16px;color:#93c5fd;font-weight:600">✅ Appointment — on time</td>
+          <td style="padding:11px 16px;text-align:center;color:#93c5fd;font-weight:800">2</td>
+          <td style="padding:11px 16px;color:#94a3b8">Sorted by appointment time, then by arrival time within same slot.</td>
+          <td style="padding:11px 16px"><span class="mini-badge b-blue">كشف</span></td>
+          <td style="padding:11px 16px;color:#64748b">Auto (system)</td>
+        </tr>
+        <tr style="border-top:1px solid rgba(255,255,255,0.04)">
+          <td style="padding:11px 16px;color:#e2e8f0;font-weight:600">🚶 Walk-in</td>
+          <td style="padding:11px 16px;text-align:center;color:#e2e8f0;font-weight:800">1</td>
+          <td style="padding:11px 16px;color:#94a3b8">After all appointment patients. Sorted by arrival time.</td>
+          <td style="padding:11px 16px"><span class="mini-badge b-gray">بدون موعد</span></td>
+          <td style="padding:11px 16px;color:#64748b">Auto (system)</td>
+        </tr>
+        <tr style="border-top:1px solid rgba(255,255,255,0.04);background:rgba(255,255,255,0.02)">
+          <td style="padding:11px 16px;color:#fdba74;font-weight:600">⏱️ Late arrival</td>
+          <td style="padding:11px 16px;text-align:center;color:#fdba74;font-weight:800">0</td>
+          <td style="padding:11px 16px;color:#94a3b8">Last in queue. Treated as walk-in effectively.</td>
+          <td style="padding:11px 16px"><span class="mini-badge b-amber">متأخر</span></td>
+          <td style="padding:11px 16px;color:#64748b">Auto (system)</td>
+        </tr>
+        <tr style="border-top:1px solid rgba(255,255,255,0.04)">
+          <td style="padding:11px 16px;color:#c7d2fe;font-weight:600">🐦 Early arrival (promoted)</td>
+          <td style="padding:11px 16px;text-align:center;color:#c7d2fe;font-weight:800">2</td>
+          <td style="padding:11px 16px;color:#94a3b8">Gets original appointment priority when their slot arrives.</td>
+          <td style="padding:11px 16px"><span class="mini-badge b-purple">مبكر</span></td>
+          <td style="padding:11px 16px;color:#64748b">Auto at appointment time</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ── SORT FORMULA ── -->
+<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:10px;padding:16px;margin-top:16px">
+  <div style="font-size:11px;font-weight:700;color:#94a3b8;margin-bottom:8px">Queue Sort Formula (SQL ORDER BY)</div>
+  <code style="font-size:11px;color:#6ee7b7;line-height:1.8;display:block">
+    ORDER BY<br>
+    &nbsp;&nbsp;priority DESC,&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#475569">-- 9=emergency first</span><br>
+    &nbsp;&nbsp;COALESCE(appointment.start_time, '9999') ASC,&nbsp;&nbsp;<span style="color:#475569">-- appointments by slot time</span><br>
+    &nbsp;&nbsp;checked_in_at ASC&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#475569">-- within same priority, FIFO</span>
+  </code>
+</div>
+
+</div><!-- end page -->
+</body>
+</html>

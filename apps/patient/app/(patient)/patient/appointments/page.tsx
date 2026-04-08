@@ -26,22 +26,22 @@ function StatusBadge({ status }: { status: string }) {
     scheduled: {
       bg: 'bg-blue-100',
       text: 'text-blue-700',
-      label: 'Scheduled'
+      label: 'مجدول'
     },
     completed: {
       bg: 'bg-green-100',
       text: 'text-green-700',
-      label: 'Completed'
+      label: 'مكتمل'
     },
     cancelled: {
       bg: 'bg-red-100',
       text: 'text-red-700',
-      label: 'Cancelled'
+      label: 'ملغي'
     },
     no_show: {
       bg: 'bg-gray-100',
       text: 'text-gray-700',
-      label: 'No Show'
+      label: 'لم يحضر'
     }
   }
 
@@ -60,13 +60,13 @@ function StatusBadge({ status }: { status: string }) {
 
 function AppointmentCard({ appointment }: { appointment: Appointment }) {
   const appointmentDate = new Date(appointment.start_time)
-  const formattedDate = appointmentDate.toLocaleDateString('en-US', {
+  const formattedDate = appointmentDate.toLocaleDateString('ar-EG', {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
     year: 'numeric'
   })
-  const formattedTime = appointmentDate.toLocaleTimeString('en-US', {
+  const formattedTime = appointmentDate.toLocaleTimeString('ar-EG', {
     hour: '2-digit',
     minute: '2-digit',
     hour12: true
@@ -90,16 +90,28 @@ function AppointmentCard({ appointment }: { appointment: Appointment }) {
 
   const getSpecialtyLabel = (specialty: string) => {
     const labels: Record<string, string> = {
-      'general-practitioner': 'General Practice',
-      'pediatrics': 'Pediatrics',
-      'cardiology': 'Cardiology',
-      'endocrinology': 'Endocrinology'
+      'general-practitioner': 'طب عام / باطنة',
+      'pediatrics': 'أطفال',
+      'cardiology': 'قلب وأوعية دموية',
+      'endocrinology': 'غدد صماء وسكر',
+      'dermatology': 'جلدية',
+      'ophthalmology': 'عيون',
+      'ent': 'أنف وأذن وحنجرة',
+      'orthopedics': 'عظام',
+      'neurology': 'مخ وأعصاب',
+      'psychiatry': 'طب نفسي',
+      'obstetrics-gynecology': 'نساء وتوليد',
+      'general-surgery': 'جراحة عامة',
+      'urology': 'مسالك بولية',
+      'nephrology': 'كلى',
+      'pulmonology': 'صدر',
+      'gastroenterology': 'جهاز هضمي',
     }
     return labels[specialty] || specialty
   }
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-4 hover:border-gray-300 transition-colors">
+    <div dir="rtl" className="bg-white rounded-lg border border-gray-200 p-4 hover:border-gray-300 transition-colors">
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1">
           {/* Date and Time */}
@@ -108,7 +120,7 @@ function AppointmentCard({ appointment }: { appointment: Appointment }) {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
             <span className="font-medium text-gray-900">
-              {formattedDate} at {formattedTime}
+              {formattedDate} — {formattedTime}
             </span>
           </div>
 
@@ -119,7 +131,7 @@ function AppointmentCard({ appointment }: { appointment: Appointment }) {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
               </svg>
               <div>
-                <p className="font-medium text-gray-900">Dr. {appointment.doctor_name}</p>
+                <p className="font-medium text-gray-900">د. {appointment.doctor_name}</p>
                 <p className="text-sm text-gray-500">{getSpecialtyLabel(appointment.doctor_specialty)}</p>
               </div>
             </div>
@@ -138,7 +150,7 @@ function AppointmentCard({ appointment }: { appointment: Appointment }) {
             <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <span>{appointment.duration_minutes} minutes</span>
+            <span>{appointment.duration_minutes} دقيقة</span>
           </div>
         </div>
 
@@ -149,7 +161,7 @@ function AppointmentCard({ appointment }: { appointment: Appointment }) {
           {/* Action Button */}
           {appointment.status === 'scheduled' && (
             <button className="text-sm px-3 py-1 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors">
-              Reschedule
+              إعادة جدولة
             </button>
           )}
         </div>
@@ -205,11 +217,11 @@ export default function AppointmentsPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div dir="rtl" className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">My Appointments</h1>
-        <p className="text-gray-600 mt-1">View and manage your doctor visits</p>
+        <h1 className="text-2xl font-bold text-gray-900">مواعيدي</h1>
+        <p className="text-gray-600 mt-1">عرض وإدارة زياراتك للطبيب</p>
       </div>
 
       {/* Error Message */}
@@ -225,13 +237,13 @@ export default function AppointmentsPage() {
           <svg className="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
           </svg>
-          <h3 className="text-lg font-medium text-gray-900 mb-2">No appointments yet</h3>
-          <p className="text-gray-600 text-sm mb-4">You don't have any scheduled appointments</p>
+          <h3 className="text-lg font-medium text-gray-900 mb-2">لا توجد مواعيد بعد</h3>
+          <p className="text-gray-600 text-sm mb-4">ليس لديك أي مواعيد مجدولة</p>
           <Link
             href="/patient/dashboard"
             className="inline-block px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
           >
-            Back to Dashboard
+            العودة للرئيسية
           </Link>
         </div>
       )}
@@ -239,7 +251,7 @@ export default function AppointmentsPage() {
       {/* Upcoming Appointments */}
       {upcomingAppointments.length > 0 && (
         <div>
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Upcoming Appointments</h2>
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">المواعيد القادمة</h2>
           <div className="space-y-3">
             {upcomingAppointments.map(apt => (
               <AppointmentCard key={apt.id} appointment={apt} />
@@ -251,7 +263,7 @@ export default function AppointmentsPage() {
       {/* Past Appointments */}
       {pastAppointments.length > 0 && (
         <div>
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Past Appointments</h2>
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">المواعيد السابقة</h2>
           <div className="space-y-3">
             {pastAppointments.map(apt => (
               <AppointmentCard key={apt.id} appointment={apt} />
@@ -270,7 +282,7 @@ export default function AppointmentsPage() {
             <svg className="w-6 h-6 text-primary-600 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-3m0 0l7-4 7 4M5 9v10a1 1 0 001 1h12a1 1 0 001-1V9m-9 11l4-4m-9-8l7-4 7 4" />
             </svg>
-            <span className="text-sm font-medium text-gray-700">Dashboard</span>
+            <span className="text-sm font-medium text-gray-700">الرئيسية</span>
           </Link>
 
           <Link
@@ -280,7 +292,7 @@ export default function AppointmentsPage() {
             <svg className="w-6 h-6 text-primary-600 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
             </svg>
-            <span className="text-sm font-medium text-gray-700">Messages</span>
+            <span className="text-sm font-medium text-gray-700">الرسائل</span>
           </Link>
         </div>
       )}

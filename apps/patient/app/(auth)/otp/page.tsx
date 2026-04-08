@@ -1,10 +1,11 @@
 'use client'
 
+import { Suspense } from 'react'
 import { useState, useEffect, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { ar } from '@shared/lib/i18n/ar'
 
-export default function OTPVerificationPage() {
+function OTPVerificationContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const phone = searchParams.get('phone') || ''
@@ -136,8 +137,12 @@ export default function OTPVerificationPage() {
           router.push(`/auth?role=${regData.role}`)
         }
       } else if (purpose === 'password_reset') {
-        // Go to reset password page with verified phone
-        router.push(`/reset-password?phone=${encodeURIComponent(phone)}&verified=true`)
+        // Pass the single-use resetToken to the reset-password page so the
+        // API can validate that OTP was genuinely verified server-side.
+        const resetToken = data.resetToken || ''
+        router.push(
+          `/reset-password?phone=${encodeURIComponent(phone)}&resetToken=${encodeURIComponent(resetToken)}`
+        )
       }
 
     } catch {
@@ -242,5 +247,17 @@ export default function OTPVerificationPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function OTPVerificationPage() {
+  return (
+    <Suspense fallback={
+      <div dir="rtl" className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="w-8 h-8 border-4 border-primary-600 border-t-transparent rounded-full animate-spin" />
+      </div>
+    }>
+      <OTPVerificationContent />
+    </Suspense>
   )
 }

@@ -1,17 +1,17 @@
 'use client'
 
+import { Suspense } from 'react'
 import { useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { ar } from '@shared/lib/i18n/ar'
 
-export default function ResetPasswordPage() {
+function ResetPasswordContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const phoneParam = searchParams.get('phone') || ''
-  const verified = searchParams.get('verified') === 'true'
+  const resetToken = searchParams.get('resetToken') || ''
 
-  // Step 1: Enter phone and send OTP
-  // Step 2: Enter new password (if verified=true)
+  // If a resetToken is present in the URL, skip straight to step 2
   const [phone, setPhone] = useState(phoneParam)
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -57,7 +57,7 @@ export default function ResetPasswordPage() {
     }
   }
 
-  // Step 2: Set new password
+  // Step 2: Set new password (requires server-issued resetToken)
   const handleResetPassword = async () => {
     setError('')
     if (!newPassword || !confirmPassword) {
@@ -78,7 +78,7 @@ export default function ResetPasswordPage() {
       const res = await fetch('/api/auth/reset-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: phoneParam, newPassword }),
+        body: JSON.stringify({ phone: phoneParam, newPassword, resetToken }),
       })
       const data = await res.json()
 
@@ -138,8 +138,8 @@ export default function ResetPasswordPage() {
           </div>
         )}
 
-        {verified ? (
-          // Step 2: Set new password
+        {resetToken ? (
+          // Step 2: Set new password (token received from OTP verification)
           <div className="mt-6 space-y-4">
             <p className="text-sm text-gray-500 text-center mb-4">أدخل كلمة المرور الجديدة</p>
             <div>
@@ -209,5 +209,17 @@ export default function ResetPasswordPage() {
         </button>
       </div>
     </div>
+  )
+}
+
+export default function ResetPasswordPage() {
+  return (
+    <Suspense fallback={
+      <div dir="rtl" className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="w-8 h-8 border-4 border-primary-600 border-t-transparent rounded-full animate-spin" />
+      </div>
+    }>
+      <ResetPasswordContent />
+    </Suspense>
   )
 }

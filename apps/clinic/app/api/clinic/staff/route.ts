@@ -35,17 +35,30 @@ export async function GET() {
     if (!isMembershipsTableMissing && memberRows) {
       members = memberRows
     } else if (isMembershipsTableMissing) {
-      // Fallback: read doctors from clinic_doctors table
+      // Fallback: read doctors from clinic_doctors + frontdesk from front_desk_staff
       const { data: cdRows } = await admin
         .from('clinic_doctors')
         .select('doctor_id, created_at')
         .eq('clinic_id', clinicId)
-      members = (cdRows || []).map((r: any) => ({
+      const doctorMembers = (cdRows || []).map((r: any) => ({
         user_id: r.doctor_id,
         role: 'DOCTOR',
         status: 'ACTIVE',
         created_at: r.created_at,
       }))
+
+      const { data: fdsRows } = await admin
+        .from('front_desk_staff')
+        .select('id, created_at')
+        .eq('clinic_id', clinicId)
+      const fdMembers = (fdsRows || []).map((r: any) => ({
+        user_id: r.id,
+        role: 'ASSISTANT',
+        status: 'ACTIVE',
+        created_at: r.created_at,
+      }))
+
+      members = [...doctorMembers, ...fdMembers]
     } else if (membersError) {
       throw membersError
     }
@@ -64,7 +77,7 @@ export async function GET() {
         userMap = Object.fromEntries(users.map(u => [u.id, u]))
       }
 
-      // Also get doctor names
+      // Get doctor names
       const { data: doctors } = await admin
         .from('doctors')
         .select('id, full_name, specialty')
@@ -75,6 +88,23 @@ export async function GET() {
           if (userMap[d.id]) {
             userMap[d.id].full_name = d.full_name
             userMap[d.id].specialty = d.specialty
+          }
+        })
+      }
+
+      // Get frontdesk staff names (stored in front_desk_staff, not doctors table)
+      const { data: fdsUsers } = await admin
+        .from('front_desk_staff')
+        .select('id, full_name, unique_id')
+        .in('id', userIds)
+
+      if (fdsUsers) {
+        fdsUsers.forEach(f => {
+          if (userMap[f.id]) {
+            userMap[f.id].full_name = userMap[f.id].full_name || f.full_name
+            userMap[f.id].unique_id = f.unique_id
+          } else {
+            userMap[f.id] = { id: f.id, full_name: f.full_name, unique_id: f.unique_id }
           }
         })
       }

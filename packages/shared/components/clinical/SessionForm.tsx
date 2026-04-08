@@ -168,7 +168,7 @@ export function SessionForm({ preselectedPatientId, queueId, appointmentId }: Se
   const [diagnosis, setDiagnosis] = useState<string[]>([])
   const [doctorNotes, setDoctorNotes] = useState('')
   const [pendingLabsFromLastVisit, setPendingLabsFromLastVisit] = useState<string[]>([]) // FIX 9
-  const [showNotesInPrint, setShowNotesInPrint] = useState(true)
+  const [showNotesInPrint, setShowNotesInPrint] = useState(false)
   const [medications, setMedications] = useState<MedicationEntry[]>([])
   const [radiology, setRadiology] = useState<RadiologyItem[]>([])
   const [labs, setLabs] = useState<LabItem[]>([])
@@ -279,7 +279,7 @@ export function SessionForm({ preselectedPatientId, queueId, appointmentId }: Se
   // ===== F4: PRESCRIPTION SMS TOGGLE =====
   // Default OFF — doctor must explicitly enable per session.
   // Disabled when no medications are added or patient has no phone.
-  const [sendPrescriptionSMS, setSendPrescriptionSMS] = useState(true) // default ON — SMS reaches patient without app
+  const [sendPrescriptionSMS, setSendPrescriptionSMS] = useState(false) // default OFF — doctor must opt in each session
 
   // ===== F5 ALERT 3: ANTIBIOTIC WITHOUT INFECTIOUS INDICATION — SOFT NUDGE =====
   // Shows a dismissable blue nudge when the doctor prescribes an antibiotic
@@ -415,7 +415,7 @@ export function SessionForm({ preselectedPatientId, queueId, appointmentId }: Se
   }, [radiology.length])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // ===== B03: BEFOREUNLOAD WARNING =====
-  const hasUnsavedData = medications.length > 0 || labs.length > 0 || radiology.length > 0 || doctorNotes.length > 0 || chiefComplaint.length > 0
+  const hasUnsavedData = medications.length > 0 || labs.length > 0 || radiology.length > 0 || doctorNotes.length > 0 || chiefComplaint.length > 0 || diagnosis.length > 0 || followUpDate.length > 0 || followUpNotes.length > 0
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
       if (hasUnsavedData) {
@@ -887,11 +887,22 @@ export function SessionForm({ preselectedPatientId, queueId, appointmentId }: Se
     { label: '3 أشهر', days: 90 },
   ]
 
+  /**
+   * Returns YYYY-MM-DD for today + `days`, using the browser's LOCAL date so it
+   * is correct in any timezone (including UTC+2/+3 Egypt) regardless of time of day.
+   * Using toISOString() directly would shift the date backwards in UTC+ timezones.
+   */
+  const localDatePlusDays = (days: number): string => {
+    const d = new Date()
+    d.setDate(d.getDate() + days)
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${y}-${m}-${day}`
+  }
+
   const setFollowUpFromChip = (days: number) => {
-    // Use Cairo time (UTC+3) so follow-up date is correct even after 9 PM Egypt time
-    const nowCairo = new Date(Date.now() + 3 * 60 * 60 * 1000)
-    const d = new Date(Date.UTC(nowCairo.getUTCFullYear(), nowCairo.getUTCMonth(), nowCairo.getUTCDate() + days))
-    setFollowUpDate(d.toISOString().split('T')[0])
+    setFollowUpDate(localDatePlusDays(days))
   }
 
   // ===== B13: CONFIRM BEFORE SAVE =====
@@ -992,9 +1003,28 @@ export function SessionForm({ preselectedPatientId, queueId, appointmentId }: Se
       }
 
       if (mode === 'print') {
-        // B05: Include full medication data with duration for print
+        // Fetch doctor profile so the print page never falls back to "طبيب"
+        let doctorPrintName = '', doctorPrintSpecialty = ''
+        try {
+          const pr = await fetch('/api/doctor/profile')
+          if (pr.ok) {
+            const p = await pr.json()
+            doctorPrintName = p.full_name || ''
+            doctorPrintSpecialty = p.specialty || ''
+          }
+        } catch { /* ignore — prescription page will retry */ }
+
+        // When printing with no medications, force notes visible so the
+        // prescription isn't a completely blank sheet
+        const printNotes = medications.length === 0 ? doctorNotes : (showNotesInPrint ? doctorNotes : '')
+
         sessionStorage.setItem('printOnlyData', JSON.stringify({
+          // Doctor identity — embedded so prescription page never has to re-fetch
+          doctorName: doctorPrintName,
+          doctorSpecialty: doctorPrintSpecialty,
+          // Patient
           patient: selectedPatient,
+          // Clinical data
           medications: medications.map(m => ({
             name: m.name,
             genericName: m.genericName,
@@ -1008,8 +1038,9 @@ export function SessionForm({ preselectedPatientId, queueId, appointmentId }: Se
           })),
           radiology,
           labs,
-          doctorNotes: showNotesInPrint ? doctorNotes : '',
+          doctorNotes: printNotes,
           chiefComplaint,
+          diagnosis,
           followUpDate,
           followUpNotes,
         }))
@@ -1159,6 +1190,7 @@ export function SessionForm({ preselectedPatientId, queueId, appointmentId }: Se
                   </div>
                   <button
                     onClick={() => {
+                      // ── Identity / verification state ─────────────────────
                       setSelectedPatient(null)
                       setAllergies([])
                       setChronicDiseases([])
@@ -1177,6 +1209,17 @@ export function SessionForm({ preselectedPatientId, queueId, appointmentId }: Se
                       setP3ShowInput(false)
                       setP3Upgraded(false)
                       setP3Error('')
+                      // ── Clinical state — must be cleared so it doesn't
+                      //    carry over to the next patient in the same session ──
+                      setMedications([])
+                      setDiagnosis([])
+                      setChiefComplaint('')
+                      setLabs([])
+                      setRadiology([])
+                      setFollowUpDate('')
+                      setFollowUpNotes('')
+                      setDoctorNotes('')
+                      setVisitType('new')
                     }}
                     className="font-cairo text-[12px] font-medium text-[#16A34A]"
                   >
@@ -1699,7 +1742,6 @@ export function SessionForm({ preselectedPatientId, queueId, appointmentId }: Se
             <div>
               <label className="block font-cairo text-[12px] font-semibold text-[#4B5563] mb-1.5">
                 العمر
-                {isCreatingNew && <span className="font-cairo text-[11px] font-normal text-[#9CA3AF] mr-1">(اختياري)</span>}
               </label>
               <div className="flex items-center gap-2">
                 <input
@@ -2569,7 +2611,7 @@ export function SessionForm({ preselectedPatientId, queueId, appointmentId }: Se
                 key={chip.label}
                 onClick={() => setFollowUpFromChip(chip.days)}
                 className={`px-3 py-1.5 font-cairo text-[12px] font-medium rounded-full border transition-colors bg-white ${
-                  followUpDate === (() => { const d = new Date(); d.setDate(d.getDate() + chip.days); return d.toISOString().split('T')[0] })()
+                  followUpDate === localDatePlusDays(chip.days)
                     ? 'border-[#16A34A] text-[#16A34A] bg-[#F0FDF4]'
                     : 'border-[#E5E7EB] text-[#4B5563] hover:border-[#16A34A] hover:text-[#16A34A]'
                 }`}
@@ -2610,8 +2652,8 @@ export function SessionForm({ preselectedPatientId, queueId, appointmentId }: Se
       {/* ===== ACTION BAR ===== */}
       <div className="sticky bottom-16 bg-white border-t border-[#E5E7EB] p-4 -mx-4">
 
-        {/* F4: SMS toggle — visible only when medications exist */}
-        {medications.length > 0 && selectedPatient?.phone && (
+        {/* F4: SMS toggle — visible only when medications exist AND patient has a real phone number */}
+        {medications.length > 0 && selectedPatient?.phone && !selectedPatient.phone.startsWith('DEP_') && (
           <button
             type="button"
             onClick={() => setSendPrescriptionSMS(p => !p)}
@@ -2733,10 +2775,20 @@ export function SessionForm({ preselectedPatientId, queueId, appointmentId }: Se
                 {showConfirmDialog === 'save' ? 'حفظ الجلسة؟' : showConfirmDialog === 'print' ? 'طباعة الروشتة؟' : 'إنهاء وطباعة؟'}
               </h3>
               <p className="font-cairo text-[13px] text-[#4B5563]">
-                {medications.length} دواء
-                {labs.length > 0 ? ` · ${labs.length} تحليل` : ''}
-                {radiology.length > 0 ? ` · ${radiology.length} أشعة` : ''}
+                {medications.length === 0 && labs.length === 0 && radiology.length === 0
+                  ? 'لا توجد أدوية أو تحاليل — ستُذكر الشكوى والتعليمات فقط'
+                  : [
+                      medications.length > 0 ? `${medications.length} دواء` : null,
+                      labs.length > 0 ? `${labs.length} تحليل` : null,
+                      radiology.length > 0 ? `${radiology.length} أشعة` : null,
+                    ].filter(Boolean).join(' · ')
+                }
               </p>
+              {medications.length === 0 && (showConfirmDialog === 'print' || showConfirmDialog === 'save_and_print') && (
+                <p className="font-cairo text-[11px] text-[#9CA3AF] mt-1">
+                  ستظهر على الروشتة: «لم يتم وصف أدوية في هذه الجلسة»
+                </p>
+              )}
             </div>
             <div className="flex border-t border-[#E5E7EB]">
               <button

@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MedAssist Dashboard — Redesign Blueprint</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+
+  /* ── PAGE LAYOUT ── */
+  .page { max-width: 1400px; margin: 0 auto; padding: 32px 24px; }
+  h1.page-title { font-size: 22px; font-weight: 700; color: #f8fafc; margin-bottom: 6px; }
+  .page-sub { font-size: 13px; color: #94a3b8; margin-bottom: 36px; }
+
+  /* ── SECTION TITLES ── */
+  .section-label {
+    font-size: 11px; font-weight: 700; letter-spacing: 1.5px;
+    text-transform: uppercase; color: #64748b; margin-bottom: 14px;
+  }
+
+  /* ── TWO-COLUMN LAYOUT ── */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; align-items: start; }
+  @media (max-width: 960px) { .two-col { grid-template-columns: 1fr; } }
+
+  /* ══════════════════════════════════════════
+     DASHBOARD MOCKUP
+  ══════════════════════════════════════════ */
+  .dashboard-frame {
+    background: #f8fafc;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.08), 0 24px 64px rgba(0,0,0,0.5);
+  }
+
+  /* Sidebar */
+  .db-shell { display: flex; height: 680px; }
+  .db-sidebar {
+    width: 200px; flex-shrink: 0;
+    background: #fff; border-right: 1px solid #e5e7eb;
+    display: flex; flex-direction: column; padding: 16px 0;
+  }
+  .db-logo { padding: 0 16px 16px; border-bottom: 1px solid #f1f5f9; margin-bottom: 12px; }
+  .db-logo-name { font-size: 14px; font-weight: 700; color: #0f172a; }
+  .db-logo-sub { font-size: 10px; color: #64748b; }
+  .db-nav-item {
+    padding: 8px 16px; font-size: 12px; color: #64748b;
+    display: flex; align-items: center; gap: 8px; cursor: pointer;
+    border-radius: 0;
+  }
+  .db-nav-item.active { background: #f0fdf4; color: #16a34a; font-weight: 600; border-right: 2px solid #16a34a; }
+  .db-nav-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+
+  /* Main content */
+  .db-main { flex: 1; overflow-y: auto; background: #f8fafc; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+
+  /* Greeting */
+  .db-greeting { font-size: 10px; color: #94a3b8; }
+  .db-doctor-name { font-size: 20px; font-weight: 700; color: #0f172a; line-height: 1.2; }
+  .db-clinic-badge {
+    display: inline-flex; align-items: center; gap-6px; background: #f0fdf4;
+    border: 1px solid #bbf7d0; border-radius: 20px; padding: 3px 10px;
+    font-size: 10px; color: #15803d; margin-top: 4px;
+  }
+
+  /* Stat cards */
+  .db-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .db-stat {
+    background: #fff; border-radius: 10px; padding: 12px;
+    border: 1px solid #e5e7eb;
+  }
+  .db-stat-num { font-size: 22px; font-weight: 700; color: #0f172a; }
+  .db-stat-num.orange { color: #ea580c; }
+  .db-stat-num.green { color: #16a34a; }
+  .db-stat-num.blue { color: #2563eb; }
+  .db-stat-label { font-size: 10px; color: #64748b; margin-top: 2px; }
+  .db-stat-badge {
+    display: inline-block; font-size: 9px; font-weight: 600;
+    padding: 1px 6px; border-radius: 8px; margin-top: 4px;
+  }
+  .badge-queue { background: #fff7ed; color: #c2410c; }
+  .badge-apt { background: #eff6ff; color: #1d4ed8; }
+  .badge-done { background: #f0fdf4; color: #15803d; }
+
+  /* Section headers */
+  .db-section-header {
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 12px; font-weight: 600; color: #374151;
+  }
+  .db-section-tag {
+    font-size: 9px; font-weight: 700; padding: 2px 8px; border-radius: 10px;
+  }
+  .tag-live { background: #fef3c7; color: #92400e; }
+  .tag-sched { background: #eff6ff; color: #1e40af; }
+
+  /* Patient card */
+  .db-patient-card {
+    background: #fff; border-radius: 10px; border: 1px solid #e5e7eb;
+    padding: 10px 12px; display: flex; flex-direction: column; gap: 6px;
+  }
+  .db-patient-card.urgent { border-left: 3px solid #ea580c; }
+  .db-patient-card.sched { border-left: 3px solid #3b82f6; }
+  .db-patient-card.done { border-left: 3px solid #16a34a; opacity: 0.6; }
+  .db-patient-top { display: flex; justify-content: space-between; align-items: flex-start; }
+  .db-patient-name { font-size: 13px; font-weight: 600; color: #0f172a; }
+  .db-patient-meta { font-size: 10px; color: #94a3b8; }
+  .db-patient-time { font-size: 10px; font-weight: 600; color: #374151; }
+  .db-patient-type {
+    font-size: 9px; font-weight: 700; padding: 2px 7px; border-radius: 8px;
+  }
+  .type-new { background: #f0fdf4; color: #15803d; }
+  .type-follow { background: #eff6ff; color: #1d4ed8; }
+  .type-emer { background: #fef2f2; color: #dc2626; }
+  .db-patient-actions { display: flex; gap: 6px; }
+  .db-btn {
+    flex: 1; padding: 6px 0; border-radius: 7px; font-size: 10px;
+    font-weight: 600; text-align: center; cursor: pointer; border: none;
+  }
+  .btn-primary { background: #16a34a; color: #fff; }
+  .btn-ghost { background: #f8fafc; color: #374151; border: 1px solid #e5e7eb; }
+  .db-divider { height: 1px; background: #f1f5f9; margin: 2px 0; }
+
+  /* Timeline apt */
+  .db-timeline { display: flex; flex-direction: column; gap: 6px; }
+  .db-apt-row {
+    display: flex; align-items: center; gap: 10px;
+    background: #fff; border-radius: 8px; padding: 8px 10px;
+    border: 1px solid #e5e7eb;
+  }
+  .db-apt-time { font-size: 11px; font-weight: 700; color: #2563eb; width: 36px; flex-shrink: 0; text-align: center; }
+  .db-apt-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .dot-waiting { background: #fbbf24; }
+  .dot-upcoming { background: #3b82f6; }
+  .dot-done { background: #16a34a; }
+  .db-apt-name { font-size: 12px; font-weight: 500; color: #0f172a; flex: 1; }
+  .db-apt-dur { font-size: 10px; color: #94a3b8; }
+  .db-apt-status {
+    font-size: 9px; font-weight: 600; padding: 2px 7px; border-radius: 8px;
+  }
+  .status-in { background: #fef3c7; color: #92400e; }
+  .status-up { background: #eff6ff; color: #1e40af; }
+  .status-done { background: #f0fdf4; color: #15803d; }
+
+  /* ══════════════════════════════════════════
+     DATA FLOW DIAGRAM
+  ══════════════════════════════════════════ */
+  .flow-diagram { display: flex; flex-direction: column; gap: 20px; }
+
+  .flow-layer {
+    border-radius: 12px; overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .flow-layer-header {
+    padding: 10px 16px; font-size: 11px; font-weight: 700;
+    letter-spacing: 1px; text-transform: uppercase;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .layer-db .flow-layer-header { background: #1e3a5f; color: #93c5fd; }
+  .layer-api .flow-layer-header { background: #1e3a2a; color: #6ee7b7; }
+  .layer-ui .flow-layer-header { background: #3b1f5f; color: #c4b5fd; }
+
+  .flow-layer-body { padding: 12px 16px; background: rgba(255,255,255,0.03); display: flex; flex-direction: column; gap: 8px; }
+
+  .flow-item {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 10px 12px; border-radius: 8px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.06);
+  }
+  .flow-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+  .flow-name { font-size: 12px; font-weight: 600; color: #f1f5f9; }
+  .flow-desc { font-size: 11px; color: #94a3b8; margin-top: 2px; line-height: 1.5; }
+  .flow-feeds { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .flow-feed-tag {
+    font-size: 9px; font-weight: 600; padding: 2px 7px; border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+  .feed-orange { background: rgba(234,88,12,0.15); color: #fb923c; border-color: rgba(234,88,12,0.3); }
+  .feed-blue { background: rgba(59,130,246,0.15); color: #60a5fa; border-color: rgba(59,130,246,0.3); }
+  .feed-green { background: rgba(22,163,74,0.15); color: #4ade80; border-color: rgba(22,163,74,0.3); }
+  .feed-gray { background: rgba(148,163,184,0.1); color: #94a3b8; border-color: rgba(148,163,184,0.2); }
+  .feed-purple { background: rgba(139,92,246,0.15); color: #a78bfa; border-color: rgba(139,92,246,0.3); }
+
+  /* Arrow between layers */
+  .flow-arrow {
+    display: flex; align-items: center; justify-content: center;
+    color: #475569; font-size: 20px; padding: 4px 0;
+  }
+
+  /* ── LEGEND ── */
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 8px; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #94a3b8; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
+  /* ── ANNOTATIONS ── */
+  .annotation-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 24px; }
+  .annotation-card {
+    background: rgba(255,255,255,0.04); border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.06); padding: 14px;
+  }
+  .annotation-num {
+    width: 22px; height: 22px; border-radius: 50%; background: #1e293b;
+    border: 1px solid #334155; display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; color: #94a3b8; flex-shrink: 0;
+  }
+  .annotation-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .annotation-title { font-size: 12px; font-weight: 600; color: #f1f5f9; }
+  .annotation-body { font-size: 11px; color: #94a3b8; line-height: 1.6; }
+  .annotation-rule {
+    margin-top: 8px; padding: 7px 10px; background: rgba(255,255,255,0.04);
+    border-radius: 6px; font-size: 10px; color: #64748b;
+    border-left: 2px solid #334155; font-family: monospace;
+  }
+
+  /* Full-width section */
+  .full-section { margin-top: 36px; }
+  .card-dark {
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px; padding: 20px;
+  }
+
+  /* State machine */
+  .state-flow { display: flex; align-items: center; flex-wrap: wrap; gap: 0; }
+  .state-box {
+    padding: 10px 16px; border-radius: 8px; font-size: 11px; font-weight: 600;
+    border: 1px solid rgba(255,255,255,0.1); text-align: center; min-width: 110px;
+  }
+  .state-arrow { padding: 0 8px; color: #475569; font-size: 18px; }
+  .s-booked { background: rgba(59,130,246,0.15); color: #60a5fa; border-color: rgba(59,130,246,0.3); }
+  .s-checkin { background: rgba(234,179,8,0.15); color: #fbbf24; border-color: rgba(234,179,8,0.3); }
+  .s-waiting { background: rgba(234,88,12,0.15); color: #fb923c; border-color: rgba(234,88,12,0.3); }
+  .s-active { background: rgba(139,92,246,0.15); color: #a78bfa; border-color: rgba(139,92,246,0.3); }
+  .s-done { background: rgba(22,163,74,0.15); color: #4ade80; border-color: rgba(22,163,74,0.3); }
+  .s-walkin { background: rgba(244,63,94,0.15); color: #fb7185; border-color: rgba(244,63,94,0.3); }
+
+  .actor-label { font-size: 9px; color: #64748b; margin-top: 3px; font-weight: 400; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <h1 class="page-title">MedAssist Doctor Dashboard — Redesign Blueprint</h1>
+  <p class="page-sub">Visual mockup + data flow architecture · Queue vs. Appointments separated correctly</p>
+
+  <div class="two-col">
+
+    <!-- ══════════════════════════════════════════
+         LEFT: DASHBOARD MOCKUP
+    ══════════════════════════════════════════ -->
+    <div>
+      <div class="section-label">Dashboard UI Mockup</div>
+      <div class="dashboard-frame">
+        <div class="db-shell">
+
+          <!-- Sidebar -->
+          <div class="db-sidebar">
+            <div class="db-logo">
+              <div class="db-logo-name">MedAssist</div>
+              <div class="db-logo-sub">عيادة د. ناصر حسن</div>
+            </div>
+            <div class="db-nav-item active"><div class="db-nav-dot"></div>لوحة التحكم</div>
+            <div class="db-nav-item"><div class="db-nav-dot"></div>المرضى</div>
+            <div class="db-nav-item"><div class="db-nav-dot"></div>المواعيد</div>
+            <div class="db-nav-item"><div class="db-nav-dot"></div>الرسائل</div>
+            <div class="db-nav-item"><div class="db-nav-dot"></div>الوصفات</div>
+          </div>
+
+          <!-- Main -->
+          <div class="db-main">
+
+            <!-- Greeting -->
+            <div>
+              <div class="db-greeting">صباح الخير</div>
+              <div class="db-doctor-name">د. ناصر حسن</div>
+              <div class="db-clinic-badge">● عيادة د. ناصر حسن</div>
+            </div>
+
+            <!-- Stats: 3 separate counters with clear labels -->
+            <div class="db-stats">
+              <div class="db-stat">
+                <div class="db-stat-num orange">2</div>
+                <div class="db-stat-label">في الانتظار الآن</div>
+                <div class="db-stat-badge badge-queue">طابور حي</div>
+              </div>
+              <div class="db-stat">
+                <div class="db-stat-num blue">4</div>
+                <div class="db-stat-label">مواعيد اليوم</div>
+                <div class="db-stat-badge badge-apt">مجدول</div>
+              </div>
+              <div class="db-stat">
+                <div class="db-stat-num green">1</div>
+                <div class="db-stat-label">مكتمل اليوم</div>
+                <div class="db-stat-badge badge-done">منجز</div>
+              </div>
+            </div>
+
+            <!-- Section A: Live Queue (walk-ins checked in by frontdesk) -->
+            <div class="db-section-header">
+              <span>🟠 في الانتظار الآن</span>
+              <span class="db-section-tag tag-live">LIVE — من الطابور</span>
+            </div>
+            <!-- Queue card 1 -->
+            <div class="db-patient-card urgent">
+              <div class="db-patient-top">
+                <div>
+                  <div class="db-patient-name">خالد مصطفى</div>
+                  <div class="db-patient-meta">50 سنة · ذكر · انتظر 23 دقيقة</div>
+                </div>
+                <div style="text-align:right">
+                  <div class="db-patient-type type-new">كشف جديد</div>
+                  <div class="db-patient-time" style="margin-top:4px;color:#ea580c">⏱ طويل</div>
+                </div>
+              </div>
+              <div class="db-patient-actions">
+                <div class="db-btn btn-primary">بدء الجلسة</div>
+                <div class="db-btn btn-ghost">عرض الملف</div>
+              </div>
+            </div>
+            <!-- Queue card 2 -->
+            <div class="db-patient-card urgent">
+              <div class="db-patient-top">
+                <div>
+                  <div class="db-patient-name">سارة أحمد</div>
+                  <div class="db-patient-meta">34 سنة · أنثى · انتظرت 7 دقائق</div>
+                </div>
+                <div style="text-align:right">
+                  <div class="db-patient-type type-emer">طارئ</div>
+                </div>
+              </div>
+              <div class="db-patient-actions">
+                <div class="db-btn btn-primary">بدء الجلسة</div>
+                <div class="db-btn btn-ghost">عرض الملف</div>
+              </div>
+            </div>
+
+            <div class="db-divider"></div>
+
+            <!-- Section B: Today's Appointments timeline -->
+            <div class="db-section-header">
+              <span>🔵 مواعيد اليوم</span>
+              <span class="db-section-tag tag-sched">من جدول المواعيد</span>
+            </div>
+            <div class="db-timeline">
+              <div class="db-apt-row">
+                <div class="db-apt-time">١٦:٠٠</div>
+                <div class="db-apt-dot dot-waiting"></div>
+                <div class="db-apt-name">محمود عبد الله</div>
+                <div class="db-apt-dur">١٥د</div>
+                <div class="db-apt-status status-in">وصل — لم يُستدعَ</div>
+              </div>
+              <div class="db-apt-row">
+                <div class="db-apt-time">١٦:٣٠</div>
+                <div class="db-apt-dot dot-upcoming"></div>
+                <div class="db-apt-name">أمير فاروق</div>
+                <div class="db-apt-dur">٣٠د</div>
+                <div class="db-apt-status status-up">قادم</div>
+              </div>
+              <div class="db-apt-row">
+                <div class="db-apt-time">١٧:٠٠</div>
+                <div class="db-apt-dot dot-upcoming"></div>
+                <div class="db-apt-name">رانيا حسين</div>
+                <div class="db-apt-dur">١٥د</div>
+                <div class="db-apt-status status-up">قادم</div>
+              </div>
+              <div class="db-apt-row" style="opacity:0.5">
+                <div class="db-apt-time">١٤:٠٠</div>
+                <div class="db-apt-dot dot-done"></div>
+                <div class="db-apt-name">علاء سلامة</div>
+                <div class="db-apt-dur">١٥د</div>
+                <div class="db-apt-status status-done">مكتمل</div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════
+         RIGHT: DATA FLOW
+    ══════════════════════════════════════════ -->
+    <div>
+      <div class="section-label">Data Flow — Where Each Section Gets Its Data</div>
+      <div class="flow-diagram">
+
+        <!-- Layer 1: Database -->
+        <div class="flow-layer layer-db">
+          <div class="flow-layer-header">🗄️ Database Layer — Supabase Tables</div>
+          <div class="flow-layer-body">
+
+            <div class="flow-item">
+              <div class="flow-icon">📋</div>
+              <div>
+                <div class="flow-name">queue</div>
+                <div class="flow-desc">Walk-in patients checked in by the frontdesk. Each row = a patient physically present at the clinic right now. Frontdesk adds them via the queue management screen. Includes: <code style="font-size:10px;color:#94a3b8">patient_id, doctor_id, checked_in_at, status, priority</code></div>
+                <div class="flow-feeds">
+                  <span class="flow-feed-tag feed-orange">→ في الانتظار الآن</span>
+                  <span class="flow-feed-tag feed-orange">→ عداد الطابور</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="flow-item">
+              <div class="flow-icon">📅</div>
+              <div>
+                <div class="flow-name">appointments</div>
+                <div class="flow-desc">Pre-scheduled bookings with a specific time slot. Filtered by <code style="font-size:10px;color:#94a3b8">doctor_id = me AND date = today</code>. Includes: <code style="font-size:10px;color:#94a3b8">patient_id, start_time, duration_minutes, status, appointment_type</code></div>
+                <div class="flow-feeds">
+                  <span class="flow-feed-tag feed-blue">→ مواعيد اليوم</span>
+                  <span class="flow-feed-tag feed-blue">→ عداد المواعيد</span>
+                  <span class="flow-feed-tag feed-green">→ عداد المكتمل</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="flow-item">
+              <div class="flow-icon">👤</div>
+              <div>
+                <div class="flow-name">patients</div>
+                <div class="flow-desc">Patient profile data. Joined into both queue and appointments queries to get name, age, sex, phone.</div>
+                <div class="flow-feeds">
+                  <span class="flow-feed-tag feed-gray">→ joined into both</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="flow-item">
+              <div class="flow-icon">🏥</div>
+              <div>
+                <div class="flow-name">doctor_availability + clinic_memberships</div>
+                <div class="flow-desc">Used for doctor name, clinic name, and working hours shown in header and badge.</div>
+                <div class="flow-feeds">
+                  <span class="flow-feed-tag feed-purple">→ header / greeting</span>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="flow-arrow">↓ API Routes</div>
+
+        <!-- Layer 2: API -->
+        <div class="flow-layer layer-api">
+          <div class="flow-layer-header">⚡ API Layer — Next.js Route Handlers</div>
+          <div class="flow-layer-body">
+
+            <div class="flow-item">
+              <div class="flow-icon">🔴</div>
+              <div>
+                <div class="flow-name">GET /api/doctor/queue</div>
+                <div class="flow-desc">Returns active queue for today: <code style="font-size:10px;color:#94a3b8">status IN ('waiting','called')</code>, joined with patients. Sorted by <code style="font-size:10px;color:#94a3b8">priority DESC, checked_in_at ASC</code>. Includes wait time in minutes.</div>
+                <div class="flow-feeds">
+                  <span class="flow-feed-tag feed-orange">feeds → في الانتظار الآن</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="flow-item">
+              <div class="flow-icon">🔵</div>
+              <div>
+                <div class="flow-name">GET /api/doctor/appointments?date=today</div>
+                <div class="flow-desc">Returns today's appointments sorted by <code style="font-size:10px;color:#94a3b8">start_time ASC</code>. Already exists — just needs filtering to today only and correct timezone.</div>
+                <div class="flow-feeds">
+                  <span class="flow-feed-tag feed-blue">feeds → مواعيد اليوم</span>
+                  <span class="flow-feed-tag feed-green">feeds → عداد المكتمل</span>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="flow-arrow">↓ UI Components</div>
+
+        <!-- Layer 3: UI -->
+        <div class="flow-layer layer-ui">
+          <div class="flow-layer-header">🖥️ UI Layer — Dashboard Sections</div>
+          <div class="flow-layer-body">
+
+            <div class="flow-item">
+              <div class="flow-icon">🟠</div>
+              <div>
+                <div class="flow-name">في الانتظار الآن (Live Queue)</div>
+                <div class="flow-desc">Patient cards sorted by wait time. Shows name, age, wait duration, priority badge. "بدء الجلسة" starts a session immediately. Refreshes every 30 seconds (polling) or via realtime subscription.</div>
+                <div class="flow-feeds">
+                  <span class="flow-feed-tag feed-orange">source: queue table</span>
+                  <span class="flow-feed-tag feed-orange">live / realtime</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="flow-item">
+              <div class="flow-icon">🔵</div>
+              <div>
+                <div class="flow-name">مواعيد اليوم (Today's Timeline)</div>
+                <div class="flow-desc">Compact time-sorted list. Status dots: yellow = arrived but not in queue yet, blue = upcoming, green = done. When frontdesk checks in an appointment holder, that appointment's status becomes "arrived" — it moves up, but stays in this section (not promoted to queue until doctor calls them).</div>
+                <div class="flow-feeds">
+                  <span class="flow-feed-tag feed-blue">source: appointments table</span>
+                  <span class="flow-feed-tag feed-blue">date = today</span>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div><!-- end two-col -->
+
+
+  <!-- ══════════════════════════════════════════
+       PATIENT STATE MACHINE
+  ══════════════════════════════════════════ -->
+  <div class="full-section">
+    <div class="section-label">Patient Journey — State Machine</div>
+    <div class="card-dark">
+      <div style="margin-bottom:14px;font-size:12px;color:#94a3b8">
+        Two entry paths merge into one active queue. The doctor only acts on <strong style="color:#f1f5f9">الانتظار الآن</strong> — appointments stay informational until the patient arrives.
+      </div>
+
+      <!-- Path A: Appointment -->
+      <div style="margin-bottom:16px">
+        <div style="font-size:10px;color:#64748b;margin-bottom:8px;font-weight:600">PATH A — Appointment Booking (مريض حجز موعد)</div>
+        <div class="state-flow">
+          <div class="state-box s-booked">مجدول<div class="actor-label">Patient books</div></div>
+          <div class="state-arrow">→</div>
+          <div class="state-box s-checkin">وصل — لم يُستدعَ<div class="actor-label">Frontdesk checks in</div></div>
+          <div class="state-arrow">→</div>
+          <div class="state-box s-waiting">في الانتظار الآن<div class="actor-label">Auto-enters queue</div></div>
+          <div class="state-arrow">→</div>
+          <div class="state-box s-active">جلسة جارية<div class="actor-label">Doctor starts</div></div>
+          <div class="state-arrow">→</div>
+          <div class="state-box s-done">مكتمل<div class="actor-label">Doctor ends</div></div>
+        </div>
+      </div>
+
+      <!-- Path B: Walk-in -->
+      <div>
+        <div style="font-size:10px;color:#64748b;margin-bottom:8px;font-weight:600">PATH B — Walk-in (مريض بدون موعد)</div>
+        <div class="state-flow">
+          <div class="state-box s-walkin">حضر بدون موعد<div class="actor-label">Walk-in arrives</div></div>
+          <div class="state-arrow">→</div>
+          <div class="state-box s-waiting">في الانتظار الآن<div class="actor-label">Frontdesk adds to queue</div></div>
+          <div class="state-arrow">→</div>
+          <div class="state-box s-active">جلسة جارية<div class="actor-label">Doctor starts</div></div>
+          <div class="state-arrow">→</div>
+          <div class="state-box s-done">مكتمل<div class="actor-label">Doctor ends</div></div>
+        </div>
+      </div>
+
+      <div style="margin-top:14px;padding:10px 14px;background:rgba(234,88,12,0.08);border:1px solid rgba(234,88,12,0.2);border-radius:8px;font-size:11px;color:#fb923c">
+        ⚡ <strong>Key rule:</strong> "في الانتظار الآن" on the doctor's dashboard = queue rows only. "مواعيد اليوم" = appointments rows. Never mix. An appointment patient crosses into the queue <em>only after</em> the frontdesk confirms they have physically arrived.
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ══════════════════════════════════════════
+       DESIGN DECISIONS
+  ══════════════════════════════════════════ -->
+  <div class="full-section">
+    <div class="section-label">Design Decisions Explained</div>
+    <div class="annotation-grid">
+
+      <div class="annotation-card">
+        <div class="annotation-header">
+          <div class="annotation-num">1</div>
+          <div class="annotation-title">3 separate counters, not 1</div>
+        </div>
+        <div class="annotation-body">Current dashboard shows one merged "مرضى اليوم: 2" that mixes queue + appointments. Splitting into <em>Waiting Now / Scheduled Today / Completed</em> gives the doctor instant situational awareness without reading cards.</div>
+        <div class="annotation-rule">queue.count(status='waiting') + appointments.count(date=today) + appointments.count(status='completed')</div>
+      </div>
+
+      <div class="annotation-card">
+        <div class="annotation-header">
+          <div class="annotation-num">2</div>
+          <div class="annotation-title">Wait time on queue cards</div>
+        </div>
+        <div class="annotation-body">Each queue card shows how long the patient has been waiting (<code>now - checked_in_at</code>). Color-codes to orange/red as wait time grows. This is not possible with appointments because they haven't arrived yet.</div>
+        <div class="annotation-rule">wait_minutes = floor((now - checked_in_at) / 60)</div>
+      </div>
+
+      <div class="annotation-card">
+        <div class="annotation-header">
+          <div class="annotation-num">3</div>
+          <div class="annotation-title">Appointments stay informational</div>
+        </div>
+        <div class="annotation-body">The appointment timeline section is read-only for the doctor. It tells them what's coming. The dot color changes from blue → yellow when the frontdesk marks the patient as "arrived" — but they only enter the action queue when the doctor is ready to call them.</div>
+        <div class="annotation-rule">yellow dot = status='arrived', blue = status='scheduled'</div>
+      </div>
+
+      <div class="annotation-card">
+        <div class="annotation-header">
+          <div class="annotation-num">4</div>
+          <div class="annotation-title">Realtime vs. polling</div>
+        </div>
+        <div class="annotation-body">Queue section uses Supabase Realtime subscription (<code>supabase.channel('queue')</code>) so new walk-ins appear instantly without refresh. Appointments section is fine with a 60-second poll since those don't change frequently.</div>
+        <div class="annotation-rule">supabase.channel('queue').on('postgres_changes', ...)</div>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

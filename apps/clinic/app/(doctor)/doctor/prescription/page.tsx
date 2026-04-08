@@ -341,24 +341,32 @@ function PrescriptionPageContent() {
       if (!stored) { setError('لا توجد بيانات للطباعة'); setLoading(false); return }
       const parsed = JSON.parse(stored)
       sessionStorage.removeItem('printOnlyData')
-      let doctorName = 'طبيب', doctorSpecialty = ''
-      try {
-        const pr = await fetch('/api/doctor/profile')
-        if (pr.ok) { const p = await pr.json(); doctorName = p.full_name || doctorName; doctorSpecialty = p.specialty || '' }
-      } catch { /* ignore */ }
+
+      // Use doctor name embedded in sessionStorage (set by SessionForm before navigating).
+      // Only call the profile API as a fallback when the name wasn't stored (e.g. older sessions).
+      let doctorName = parsed.doctorName || ''
+      let doctorSpecialty = parsed.doctorSpecialty || ''
+      if (!doctorName) {
+        try {
+          const pr = await fetch('/api/doctor/profile')
+          if (pr.ok) { const p = await pr.json(); doctorName = p.full_name || 'طبيب'; doctorSpecialty = p.specialty || '' }
+        } catch { /* ignore */ }
+      }
+      if (!doctorName) doctorName = 'طبيب'
+
       const medications = Array.isArray(parsed.medications)
         ? parsed.medications.map((m: any) => ({ ...m, type: m.type || m.form || 'أقراص' }))
         : []
       setData({
         doctorName, doctorSpecialty,
-        patientName: parsed.patient?.name || 'مريض',
+        patientName: parsed.patient?.name || parsed.patient?.full_name || 'مريض',
         patientAge: parsed.patient?.age,
         patientSex: parsed.patient?.sex,
         patientPhone: parsed.patient?.phone,
         prescriptionNumber: generateRefNumber(),
         prescriptionDate: new Date().toISOString().split('T')[0],
         medications,
-        diagnosis: Array.isArray(parsed.diagnosis) ? parsed.diagnosis.join(', ') : parsed.diagnosis,
+        diagnosis: Array.isArray(parsed.diagnosis) ? parsed.diagnosis.join(', ') : (parsed.diagnosis || ''),
         radiology: parsed.radiology,
         labs: parsed.labs,
         doctorNotes: parsed.doctorNotes,

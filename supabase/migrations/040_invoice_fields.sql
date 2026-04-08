@@ -29,11 +29,12 @@ CREATE SEQUENCE IF NOT EXISTS invoice_seq START 1;
 ALTER TABLE invoice_requests ENABLE ROW LEVEL SECURITY;
 
 -- Frontdesk: full access within their clinic
+-- front_desk_staff.id IS the user's id (FK to users.id)
 CREATE POLICY "frontdesk_invoice_requests" ON invoice_requests
   FOR ALL USING (
     clinic_id IN (
-      SELECT clinic_id FROM clinic_staff
-      WHERE user_id = auth.uid() AND role = 'frontdesk'
+      SELECT clinic_id FROM front_desk_staff
+      WHERE id = auth.uid()
     )
   );
 

@@ -103,7 +103,14 @@ function OTPVerificationPageInner() {
           sessionStorage.removeItem('pendingRegistration')
           if (loginRes.ok) {
             router.refresh()
-            await new Promise(r => setTimeout(r, 150))
+            // Wait for session cookie with exponential backoff instead of fixed delay
+            for (let i = 0; i < 6; i++) {
+              try {
+                const check = await fetch('/api/auth/check-session', { credentials: 'include' })
+                if (check.ok) break
+              } catch { /* retry */ }
+              await new Promise(r => setTimeout(r, 80 * (i + 1)))
+            }
             router.push('/')
             return
           }

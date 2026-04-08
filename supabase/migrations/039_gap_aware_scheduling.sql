@@ -57,7 +57,7 @@ BEGIN
   FROM   doctor_availability
   WHERE  doctor_id  = p_doctor_id
     AND  day_of_week = v_day_of_week
-    AND  is_available = TRUE
+    AND  is_active = TRUE
   LIMIT 1;
 
   -- Doctor not working this day
@@ -151,7 +151,7 @@ BEGIN
   FROM   doctor_availability
   WHERE  doctor_id   = p_doctor_id
     AND  day_of_week = v_day_of_week
-    AND  is_available = TRUE
+    AND  is_active = TRUE
   LIMIT 1;
 
   IF NOT FOUND THEN RETURN; END IF;

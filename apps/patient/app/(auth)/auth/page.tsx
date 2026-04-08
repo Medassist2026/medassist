@@ -1,5 +1,6 @@
 'use client'
 
+import { Suspense } from 'react'
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { ar } from '@shared/lib/i18n/ar'
@@ -49,7 +50,7 @@ const SPECIALTIES = [
 type Tab = 'login' | 'register'
 type UserRole = 'doctor' | 'frontdesk' | 'patient'
 
-export default function AuthPage() {
+function AuthContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const role = (searchParams.get('role') as UserRole) || 'doctor'
@@ -383,5 +384,17 @@ export default function AuthPage() {
         ← {ar.chooseYourRole}
       </button>
     </div>
+  )
+}
+
+export default function AuthPage() {
+  return (
+    <Suspense fallback={
+      <div dir="rtl" className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="w-8 h-8 border-4 border-primary-600 border-t-transparent rounded-full animate-spin" />
+      </div>
+    }>
+      <AuthContent />
+    </Suspense>
   )
 }

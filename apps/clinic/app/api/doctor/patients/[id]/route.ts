@@ -13,6 +13,24 @@ export async function GET(
     const { id: patientId } = await params
     const admin = createAdminClient('patient-details')
 
+    // ── Scope check: doctor must have a relationship with this patient ────────
+    // Prevents any authenticated doctor from fetching arbitrary patient records
+    // by guessing a UUID. RLS on the admin client doesn't enforce this, so we do
+    // it explicitly here before exposing any patient data.
+    const { data: relationship, error: relError } = await admin
+      .from('doctor_patient_relationships')
+      .select('access_level, doctor_entered_age')
+      .eq('doctor_id', user.id)
+      .eq('patient_id', patientId)
+      .maybeSingle()
+
+    if (relError) throw relError
+
+    if (!relationship) {
+      // Return 404 (not 403) to avoid disclosing that the patient record exists
+      return NextResponse.json({ error: 'Patient not found' }, { status: 404 })
+    }
+
     // Fetch patient info
     const { data: patient, error: patientError } = await admin
       .from('patients')
@@ -137,14 +155,6 @@ export async function GET(
 
     // Sort timeline by date descending
     timeline.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-
-    // P3: Fetch relationship — access_level for upgrade prompt + doctor_entered_age fallback
-    const { data: relationship } = await admin
-      .from('doctor_patient_relationships')
-      .select('access_level, doctor_entered_age')
-      .eq('doctor_id', user.id)
-      .eq('patient_id', patientId)
-      .maybeSingle()
 
     // Age: prefer patients.age (set at registration/creation), fall back to
     // doctor_entered_age stored on the relationship when a walk-in was created
