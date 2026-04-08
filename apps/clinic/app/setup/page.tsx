@@ -139,10 +139,11 @@ function SetupPageInner() {
       setError('أدخل كود الدعوة')
       return
     }
-    // Validate invite code format: XXXX-YY (4 chars + dash + 2 chars, uppercase alphanumeric)
+    // Validate invite code format: XXXX-XX (4+2 chars, uppercase alphanumeric)
+    // Strip the auto-inserted dash before checking length
     const normalizedForValidation = inviteCode.trim().toUpperCase().replace(/[\s-]/g, '')
-    if (!/^[A-Z2-9]{6}$/.test(normalizedForValidation)) {
-      setError('صيغة الكود غير صحيحة — الكود مكوّن من 6 أحرف وأرقام مثل: ABCD-EF')
+    if (normalizedForValidation.length !== 6 || !/^[A-Z0-9]{6}$/.test(normalizedForValidation)) {
+      setError('كود الدعوة يجب أن يكون 6 أحرف وأرقام — مثال: ABCD-EF')
       return
     }
     // Doctors must select specialty before joining
@@ -555,12 +556,23 @@ function SetupPageInner() {
                     <input
                       type="text"
                       value={inviteCode}
-                      onChange={(e) => setInviteCode(e.target.value.replace(/[\s-]/g, '').toUpperCase())}
-                      placeholder="أدخل كود الدعوة"
-                      className="flex-1 bg-transparent font-inter text-[17px] font-semibold text-[#030712] placeholder:text-[#9CA3AF] outline-none text-center tracking-widest"
+                      onChange={(e) => {
+                        // Strip non-alphanumeric, uppercase, max 6 chars
+                        const raw = e.target.value.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 6)
+                        // Auto-format as XXXX-XX while typing
+                        const formatted = raw.length > 4 ? raw.slice(0, 4) + '-' + raw.slice(4) : raw
+                        setInviteCode(formatted)
+                        setError('')
+                      }}
+                      placeholder="XXXX-XX"
+                      maxLength={7}
+                      className="flex-1 bg-transparent font-inter text-[20px] font-bold text-[#030712] placeholder:text-[#9CA3AF] placeholder:font-normal placeholder:text-[16px] outline-none text-center tracking-[0.25em]"
                       dir="ltr"
                     />
                   </div>
+                  <p className="font-cairo text-[12px] text-[#9CA3AF] text-center">
+                    الكود مكوّن من 6 أحرف وأرقام — مثال: <span dir="ltr" className="font-inter font-semibold tracking-wider">ABCD-EF</span>
+                  </p>
                 </div>
 
                 {error && (

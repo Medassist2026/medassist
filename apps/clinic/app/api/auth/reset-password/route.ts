@@ -7,6 +7,34 @@ import { createClient } from '@shared/lib/supabase/server'
 import { enforceRateLimit } from '@shared/lib/security/rate-limit'
 
 /**
+ * Build all plausible phone variants for an Egyptian number to handle
+ * format inconsistencies between OTP storage and user registration.
+ * e.g. +2001012345678, 01012345678, and 1012345678 all refer to the same number.
+ */
+function buildPhoneVariants(phone: string): string[] {
+  const variants = new Set<string>()
+  const digits = phone.replace(/\D/g, '')
+
+  variants.add(phone) // original as-is
+
+  if (phone.startsWith('+20')) {
+    // +2001... → 01... and 1...
+    variants.add(digits.slice(2))        // e.g. "01012345678"
+    variants.add(digits.slice(3))        // e.g. "1012345678"
+  } else if (phone.startsWith('0')) {
+    // 01... → +2001... and 1...
+    variants.add('+20' + digits.slice(1)) // e.g. "+2001012345678"
+    variants.add(digits.slice(1))         // e.g. "1012345678"
+  } else {
+    // 1... → +201... and 01...
+    variants.add('+20' + digits)          // e.g. "+201012345678"
+    variants.add('0' + digits)            // e.g. "01012345678"
+  }
+
+  return Array.from(variants)
+}
+
+/**
  * POST /api/auth/reset-password
  * Resets user password. REQUIRES a valid reset token (generated after OTP verification).
  * This prevents anyone from resetting passwords without completing OTP flow.
@@ -73,16 +101,24 @@ export async function POST(request: Request) {
       .update({ used: true, consumed_at: new Date().toISOString(), used_at: new Date().toISOString() })
       .eq('id', tokenRecord.id)
 
-    // Find user by phone
-    const { data: user, error: userError } = await admin
-      .from('users')
-      .select('id, email')
-      .eq('phone', phone)
-      .maybeSingle()
+    // Find user by phone — try all common Egyptian phone formats
+    // because the registration flow and OTP flow may store phones differently
+    // (+2001012345678 vs 01012345678 vs 1012345678)
+    const phoneVariants = buildPhoneVariants(phone)
 
-    if (userError || !user) {
+    let user: { id: string; email: string } | null = null
+    for (const variant of phoneVariants) {
+      const { data, error } = await admin
+        .from('users')
+        .select('id, email')
+        .eq('phone', variant)
+        .maybeSingle()
+      if (!error && data) { user = data; break }
+    }
+
+    if (!user) {
       return NextResponse.json(
-        { error: 'المستخدم غير موجود' },
+        { error: 'رمز التحقق غير مرتبط بهذا الرقم. أعد العملية من البداية.' },
         { status: 404 }
       )
     }
