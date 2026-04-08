@@ -56,7 +56,7 @@ export async function POST(request: Request) {
 
       const admin = createAdminClient('otp-verify-token')
       // Store reset token in otp_codes table with purpose 'reset_token'
-      await admin.from('otp_codes').insert({
+      const { error: tokenInsertError } = await admin.from('otp_codes').insert({
         phone,
         code_hash: tokenHash,
         otp_hash: tokenHash,
@@ -67,6 +67,14 @@ export async function POST(request: Request) {
         max_attempts: 1,
         created_at: new Date().toISOString(),
       })
+
+      if (tokenInsertError) {
+        console.error('[verify-otp] Failed to store reset token:', tokenInsertError.message)
+        return NextResponse.json(
+          { error: 'فشل في إنشاء رمز إعادة التعيين. حاول مرة أخرى.' },
+          { status: 500 }
+        )
+      }
     }
 
     return NextResponse.json({
