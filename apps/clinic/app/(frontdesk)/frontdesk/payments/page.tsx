@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import {
   ChevronRight, Plus, Search, X, Check, AlertTriangle, Loader2,
   Banknote, CreditCard, Building2, ArrowLeftRight, Coins, Clock, User,
-  Pencil, Ban, MoreVertical, Share2
+  Pencil, Ban, MoreVertical, Share2, FileText
 } from 'lucide-react'
 
 import type {
@@ -601,6 +601,20 @@ export default function PaymentsPage() {
                               </p>
                               <p className="font-cairo text-[11px] text-[#9CA3AF]">ج.م</p>
                             </div>
+
+                            {/* Invoice button — always visible for non-voided payments */}
+                            {!isVoided && (
+                              <button
+                                onClick={() => {
+                                  setActionMenuId(null)
+                                  router.push(`/frontdesk/invoice/${pay.id}`)
+                                }}
+                                title="إصدار فاتورة"
+                                className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-[#DCFCE7] transition-colors"
+                              >
+                                <FileText className="w-4 h-4 text-[#16A34A]" />
+                              </button>
+                            )}
 
                             {/* 3-dot menu for today's active payments */}
                             {isToday && !isVoided && (
