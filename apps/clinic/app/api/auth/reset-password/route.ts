@@ -95,18 +95,14 @@ export async function POST(request: Request) {
       )
     }
 
-    // Mark token as used (single-use)
-    await admin
-      .from('otp_codes')
-      .update({ used: true, consumed_at: new Date().toISOString(), used_at: new Date().toISOString() })
-      .eq('id', tokenRecord.id)
-
-    // Find user by phone — try all common Egyptian phone formats
-    // because the registration flow and OTP flow may store phones differently
-    // (+2001012345678 vs 01012345678 vs 1012345678)
+    // Find user by phone BEFORE marking token as used.
+    // If user lookup fails, the token must remain valid so the user can retry
+    // without having to restart the entire OTP flow from scratch.
     const phoneVariants = buildPhoneVariants(phone)
 
     let user: { id: string; email: string } | null = null
+
+    // Pass 1: exact variant match
     for (const variant of phoneVariants) {
       const { data, error } = await admin
         .from('users')
@@ -116,9 +112,47 @@ export async function POST(request: Request) {
       if (!error && data) { user = data; break }
     }
 
+    // Pass 2: last-10-digit suffix match — handles format inconsistencies
+    // e.g. "+2001012345678" vs "01012345678" stored without country code,
+    // or phone stored with spaces/dashes that weren't cleaned at registration
+    if (!user) {
+      const last10 = phone.replace(/\D/g, '').slice(-10)
+      if (last10.length === 10) {
+        const { data } = await admin
+          .from('users')
+          .select('id, email')
+          .ilike('phone', `%${last10}`)
+          .maybeSingle()
+        if (data) user = data
+      }
+    }
+
+    // Pass 3: fallback — look up via Supabase Auth users table by phone
+    // Covers accounts created via admin panel or different registration paths
+    if (!user) {
+      for (const variant of phoneVariants) {
+        const { data: authData } = await admin.auth.admin.listUsers({ perPage: 1000 })
+        const authUser = authData?.users?.find(u =>
+          u.phone && buildPhoneVariants(u.phone).includes(variant)
+        )
+        if (authUser?.email) {
+          // Verify this auth user also has a matching record in custom users table
+          const { data: customUser } = await admin
+            .from('users')
+            .select('id, email')
+            .eq('id', authUser.id)
+            .maybeSingle()
+          if (customUser) { user = customUser; break }
+          // If no custom users record, use auth user data directly
+          user = { id: authUser.id, email: authUser.email }
+          break
+        }
+      }
+    }
+
     if (!user) {
       return NextResponse.json(
-        { error: 'رمز التحقق غير مرتبط بهذا الرقم. أعد العملية من البداية.' },
+        { error: 'لم يتم العثور على حساب مرتبط بهذا الرقم. تأكد من رقم الهاتف وأعد المحاولة.' },
         { status: 404 }
       )
     }
@@ -131,10 +165,17 @@ export async function POST(request: Request) {
     if (updateError) {
       console.error('Password update error:', updateError)
       return NextResponse.json(
-        { error: 'فشل في تحديث كلمة المرور' },
+        { error: 'فشل في تحديث كلمة المرور. حاول مرة أخرى.' },
         { status: 500 }
       )
     }
+
+    // Mark token as used ONLY after successful password update.
+    // This ensures that if password update fails, the token remains valid for retry.
+    await admin
+      .from('otp_codes')
+      .update({ used: true, consumed_at: new Date().toISOString(), used_at: new Date().toISOString() })
+      .eq('id', tokenRecord.id)
 
     // Auto-login with new password
     const supabase = await createClient()
