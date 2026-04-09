@@ -151,7 +151,7 @@ export default function ReportsPage() {
                 <div className="flex items-center gap-2">
                   <Clock className="w-4 h-4 text-[#D97706]" />
                   <div>
-                    <p className="font-cairo text-[12px] text-[#6B7280]">متوسط الانتظار</p>
+                    <p className="font-cairo text-[12px] text-[#6B7280]">متوسط الانتظار (المكتملون)</p>
                     <p className="font-cairo text-[16px] font-bold text-[#030712]">{avgWait} دقيقة</p>
                   </div>
                 </div>

@@ -991,13 +991,23 @@ export default function FrontDeskDashboardPage() {
   }, [])
 
   useEffect(() => {
+    let cancelled = false
+    const controller = new AbortController()
+
     refreshData()
-    // Check for pending invites
-    fetch('/api/frontdesk/invite').then(res => {
-      if (res.ok) return res.json()
-    }).then(data => {
-      if (data?.invites) setPendingInviteCount(data.invites.length)
-    }).catch(() => {})
+
+    // Check for pending invites — abort on cleanup to prevent stale state updates
+    fetch('/api/frontdesk/invite', { signal: controller.signal })
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => {
+        if (!cancelled && data?.invites) setPendingInviteCount(data.invites.length)
+      })
+      .catch(() => {})
+
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
   }, [refreshData])
 
   // Poll every 30 seconds

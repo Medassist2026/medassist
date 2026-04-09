@@ -142,17 +142,23 @@ export default function CheckInPage() {
       } catch (fetchErr: any) {
         // If network error (offline/timeout), queue for later
         if (fetchErr.name === 'AbortError' || !navigator.onLine) {
-          // Store in localStorage offline queue
-          const offlineQueue = JSON.parse(localStorage.getItem('medassist_offline_queue') || '[]')
-          offlineQueue.push({
-            id: `offline_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-            url: '/api/frontdesk/checkin',
-            body: checkinBody,
-            createdAt: new Date().toISOString(),
-            retries: 0,
-            status: 'pending',
-          })
-          localStorage.setItem('medassist_offline_queue', JSON.stringify(offlineQueue))
+          // FD-002: Guard localStorage access against SSR/hydration mismatch
+          if (typeof window !== 'undefined') {
+            try {
+              const offlineQueue = JSON.parse(localStorage.getItem('medassist_offline_queue') || '[]')
+              offlineQueue.push({
+                id: `offline_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                url: '/api/frontdesk/checkin',
+                body: checkinBody,
+                createdAt: new Date().toISOString(),
+                retries: 0,
+                status: 'pending',
+              })
+              localStorage.setItem('medassist_offline_queue', JSON.stringify(offlineQueue))
+            } catch {
+              // localStorage unavailable (e.g. private mode) — proceed silently
+            }
+          }
 
           data = { queueNumber: '—', offline: true }
           wasOffline = true
@@ -233,7 +239,7 @@ export default function CheckInPage() {
     setPaymentAmount('')
     setPaymentMethod('cash')
     setSkipPayment(false)
-    setShowPayment(true)
+    setShowPayment(false) // FD-001: match initial state — payment section closed by default
     setInsuranceCompany('')
     setInsurancePolicyNumber('')
   }
@@ -353,6 +359,11 @@ export default function CheckInPage() {
                       </p>
                     </button>
                   ))}
+                  {searchResults.length > 5 && (
+                    <div className="px-4 py-2 bg-[#F9FAFB] text-center">
+                      <span className="font-cairo text-[12px] text-[#6B7280]">+{searchResults.length - 5} نتائج أخرى — أضف كلمات للتضييق</span>
+                    </div>
+                  )}
                 </div>
               )}
               {searching && searchQuery.length >= 1 && <p className="font-cairo text-[12px] text-[#9CA3AF] mt-2 text-center">جاري البحث...</p>}
@@ -460,7 +471,17 @@ export default function CheckInPage() {
                       type="text"
                       inputMode="numeric"
                       value={paymentAmount}
-                      onChange={(e) => setPaymentAmount(e.target.value.replace(/[^\d.]/g, ''))}
+                      onChange={(e) => {
+                        // FD-033: allow only valid monetary format (digits + one decimal point + up to 2 decimals)
+                        const raw = e.target.value.replace(/[^\d.]/g, '')
+                        const parts = raw.split('.')
+                        const formatted = parts.length > 2
+                          ? parts[0] + '.' + parts.slice(1).join('')
+                          : parts[1]?.length > 2
+                            ? parts[0] + '.' + parts[1].slice(0, 2)
+                            : raw
+                        setPaymentAmount(formatted)
+                      }}
                       placeholder="٣٠٠"
                       className="w-full h-12 px-4 rounded-[10px] border-[0.8px] border-[#E5E7EB] font-cairo text-[20px] font-bold text-center text-[#030712] placeholder:text-[#D1D5DB] focus:outline-none focus:border-[#16A34A] bg-[#F9FAFB]"
                     />

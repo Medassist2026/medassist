@@ -23,7 +23,10 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url)
     const range = searchParams.get('range') || 'today'
-    const methodFilter = searchParams.get('method')
+    const rawMethodFilter = searchParams.get('method')
+    // FD-018: validate method filter against allowed values
+    const ALLOWED_METHODS = ['cash', 'card', 'insurance', 'transfer', 'other']
+    const methodFilter = rawMethodFilter && ALLOWED_METHODS.includes(rawMethodFilter) ? rawMethodFilter : null
     const doctorFilter = searchParams.get('doctorId')
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10))
     const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '50', 10)))

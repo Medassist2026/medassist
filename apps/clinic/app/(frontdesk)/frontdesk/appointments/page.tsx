@@ -148,6 +148,7 @@ function AppointmentCard({
       {/* Row 1: Patient Name + Time */}
       <div className="flex items-center justify-between mb-1.5">
         <h4
+          title={appointment.patient.full_name || 'مريض'}
           className={`font-cairo text-[14px] font-semibold text-[#030712] truncate flex-1 min-w-0 ${
             isCancelled ? 'line-through text-[#9CA3AF]' : ''
           }`}
@@ -290,7 +291,7 @@ function CancelDialog({
 
         {/* Patient info */}
         <div className="bg-[#FEF2F2] rounded-xl p-3 mb-4">
-          <p className="font-cairo text-[13px] font-bold text-[#030712] text-center truncate">
+          <p title={appointment.patient.full_name || 'مريض'} className="font-cairo text-[13px] font-bold text-[#030712] text-center truncate">
             {appointment.patient.full_name || 'مريض'}
           </p>
           <p className="font-cairo text-[12px] text-[#6B7280] text-center mt-0.5">
@@ -420,10 +421,14 @@ export default function AppointmentsPage() {
   const handleTouchEnd = async (e: React.TouchEvent) => {
     const diff = e.changedTouches[0].clientY - touchStartY.current
     const container = scrollContainerRef.current
-    if (diff > 80 && container && container.scrollTop <= 0) {
+    // FD-009: guard against concurrent refreshes
+    if (diff > 80 && container && container.scrollTop <= 0 && !refreshing) {
       setRefreshing(true)
-      await fetchAppointments(false)
-      setRefreshing(false)
+      try {
+        await fetchAppointments(false)
+      } finally {
+        setRefreshing(false)
+      }
     }
   }
 
