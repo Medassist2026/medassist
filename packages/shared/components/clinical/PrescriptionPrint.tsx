@@ -431,7 +431,7 @@ export default function PrescriptionPrint({
         {/* FOOTER — Signature + Stamp                                   */}
         {/* ============================================================ */}
         <div
-          className="flex items-end justify-between"
+          className="flex items-end justify-end"
           style={{
             position: 'absolute',
             bottom: '10mm',
@@ -441,12 +441,6 @@ export default function PrescriptionPrint({
             paddingTop: '8px',
           }}
         >
-          {/* Left: validity note */}
-          <div className="text-[10px] text-[#94a3b8]" style={{ maxWidth: '45%' }}>
-            <div>الروشتة صالحة لمدة شهر</div>
-            <div>من تاريخ الإصدار</div>
-          </div>
-
           {/* Right: Stamp box */}
           <div style={{ textAlign: 'center' }}>
             <div

@@ -1,9 +1,10 @@
 export const dynamic = 'force-dynamic'
 
 import { redirect } from 'next/navigation'
-import { requireRole, getAssignedDoctors } from '@shared/lib/auth/session'
+import { requireRole } from '@shared/lib/auth/session'
 import { getUserClinicId } from '@shared/lib/data/frontdesk-scope'
 import { getClinicContext } from '@shared/lib/data/clinic-context'
+import { createAdminClient } from '@shared/lib/supabase/admin'
 import { FrontdeskBottomNav } from '@ui-clinic/components/frontdesk/FrontdeskBottomNav'
 import { FrontdeskDesktopWrapper } from '@ui-clinic/components/frontdesk/FrontdeskDesktopWrapper'
 import { OfflineIndicator } from '@ui-clinic/components/frontdesk/OfflineIndicator'
@@ -22,13 +23,24 @@ export default async function FrontDeskLayout({
     redirect('/setup?role=frontdesk')
   }
 
-  const clinicContext = await getClinicContext(user.id, 'frontdesk')
+  // Fetch frontdesk staff name in parallel with clinic context
+  const supabaseAdmin = createAdminClient('frontdesk-layout')
+  const [clinicContext, staffResult] = await Promise.all([
+    getClinicContext(user.id, 'frontdesk'),
+    supabaseAdmin
+      .from('front_desk_staff')
+      .select('full_name')
+      .eq('id', user.id)
+      .single(),
+  ])
+
+  const displayName = (staffResult as any)?.data?.full_name || user.phone
 
   return (
     <div className="min-h-screen bg-[#F9FAFB]" dir="rtl">
       {/* Desktop sidebar wrapper — client component */}
       <FrontdeskDesktopWrapper
-        userName={user.phone}
+        userName={displayName}
         clinicName={clinicContext?.clinic?.name}
       />
 
