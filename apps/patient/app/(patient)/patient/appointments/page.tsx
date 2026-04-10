@@ -1,7 +1,19 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
+import {
+  Calendar,
+  Clock,
+  MapPin,
+  User,
+  AlertCircle,
+  RefreshCw,
+  ChevronLeft,
+  Phone,
+  Stethoscope,
+} from 'lucide-react'
+import { PatientHeader } from '@ui-clinic/components/patient/PatientHeader'
 
 // ============================================================================
 // TYPES
@@ -18,284 +30,572 @@ interface Appointment {
 }
 
 // ============================================================================
-// STATUS BADGE COMPONENT
+// ARABIC SPECIALTY TRANSLATION
 // ============================================================================
 
-function StatusBadge({ status }: { status: string }) {
-  const statusConfig: Record<string, { bg: string; text: string; label: string }> = {
-    scheduled: {
-      bg: 'bg-blue-100',
-      text: 'text-blue-700',
-      label: 'مجدول'
-    },
-    completed: {
-      bg: 'bg-green-100',
-      text: 'text-green-700',
-      label: 'مكتمل'
-    },
-    cancelled: {
-      bg: 'bg-red-100',
-      text: 'text-red-700',
-      label: 'ملغي'
-    },
-    no_show: {
-      bg: 'bg-gray-100',
-      text: 'text-gray-700',
-      label: 'لم يحضر'
-    }
+const SPECIALTY_AR: Record<string, string> = {
+  'general-practitioner': 'طب عام',
+  general: 'طب عام',
+  'internal-medicine': 'باطنة',
+  pediatrics: 'أطفال',
+  cardiology: 'قلب وأوعية دموية',
+  endocrinology: 'غدد صماء وسكر',
+  dermatology: 'جلدية',
+  neurology: 'مخ وأعصاب',
+  orthopedics: 'عظام',
+  ent: 'أنف وأذن وحنجرة',
+  ophthalmology: 'عيون',
+  dentistry: 'أسنان',
+  psychiatry: 'طب نفسي',
+  surgery: 'جراحة',
+  'general-surgery': 'جراحة عامة',
+  'obstetrics-gynecology': 'نساء وتوليد',
+  urology: 'مسالك بولية',
+  nephrology: 'كلى',
+  pulmonology: 'صدر',
+  gastroenterology: 'جهاز هضمي',
+}
+
+function toArabicSpecialty(slug?: string) {
+  if (!slug) return 'طبيب'
+  return SPECIALTY_AR[slug] || SPECIALTY_AR[slug.toLowerCase()] || slug
+}
+
+// ============================================================================
+// ARABIC DATE & TIME HELPERS
+// ============================================================================
+
+function formatArabicDate(iso: string) {
+  try {
+    const d = new Date(iso)
+    return d.toLocaleDateString('ar-EG', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    })
+  } catch {
+    return iso
   }
+}
 
-  const config = statusConfig[status as keyof typeof statusConfig] || statusConfig.scheduled
+function formatArabicTime(iso: string) {
+  try {
+    const d = new Date(iso)
+    return d.toLocaleTimeString('ar-EG', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    })
+  } catch {
+    return ''
+  }
+}
 
+function formatRelativeDay(iso: string): string {
+  try {
+    const d = new Date(iso)
+    const now = new Date()
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    const startOfTarget = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+    const diffDays = Math.round(
+      (startOfTarget.getTime() - startOfToday.getTime()) / (1000 * 60 * 60 * 24),
+    )
+    if (diffDays === 0) return 'اليوم'
+    if (diffDays === 1) return 'غداً'
+    if (diffDays === -1) return 'أمس'
+    if (diffDays > 1 && diffDays <= 7) return `بعد ${diffDays} أيام`
+    if (diffDays < -1 && diffDays >= -7) return `منذ ${Math.abs(diffDays)} أيام`
+    return ''
+  } catch {
+    return ''
+  }
+}
+
+// ============================================================================
+// STATUS CONFIG
+// ============================================================================
+
+const STATUS_CONFIG: Record<
+  string,
+  { label: string; bg: string; border: string; text: string }
+> = {
+  scheduled: {
+    label: 'مجدول',
+    bg: '#DBEAFE',
+    border: '#93C5FD',
+    text: '#1D4ED8',
+  },
+  completed: {
+    label: 'مكتمل',
+    bg: '#DCFCE7',
+    border: '#86EFAC',
+    text: '#15803D',
+  },
+  cancelled: {
+    label: 'ملغي',
+    bg: '#FEE2E2',
+    border: '#FCA5A5',
+    text: '#B91C1C',
+  },
+  no_show: {
+    label: 'لم يحضر',
+    bg: '#F3F4F6',
+    border: '#D1D5DB',
+    text: '#4B5563',
+  },
+}
+
+function StatusPill({ status }: { status: string }) {
+  const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.scheduled
   return (
-    <span className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${config.bg} ${config.text}`}>
-      {config.label}
+    <span
+      className="inline-flex items-center px-2.5 py-1 rounded-full font-cairo text-[11px] font-medium border-[0.8px]"
+      style={{
+        backgroundColor: cfg.bg,
+        borderColor: cfg.border,
+        color: cfg.text,
+      }}
+    >
+      {cfg.label}
     </span>
   )
 }
 
 // ============================================================================
-// APPOINTMENT CARD COMPONENT
+// APPOINTMENT CARD
 // ============================================================================
 
-function AppointmentCard({ appointment }: { appointment: Appointment }) {
-  const appointmentDate = new Date(appointment.start_time)
-  const formattedDate = appointmentDate.toLocaleDateString('ar-EG', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric'
-  })
-  const formattedTime = appointmentDate.toLocaleTimeString('ar-EG', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: true
-  })
+function AppointmentCard({
+  appointment,
+  highlight = false,
+}: {
+  appointment: Appointment
+  highlight?: boolean
+}) {
+  const relativeLabel = formatRelativeDay(appointment.start_time)
+  const specialty = toArabicSpecialty(appointment.doctor_specialty)
 
-  // Get specialty badge color
-  const getSpecialtyColor = (specialty: string) => {
-    switch (specialty) {
-      case 'general-practitioner':
-        return 'bg-blue-50'
-      case 'pediatrics':
-        return 'bg-pink-50'
-      case 'cardiology':
-        return 'bg-red-50'
-      case 'endocrinology':
-        return 'bg-primary-50'
-      default:
-        return 'bg-gray-50'
-    }
-  }
+  if (highlight) {
+    return (
+      <div
+        dir="rtl"
+        className="rounded-[12px] overflow-hidden shadow-[0px_8px_28px_rgba(45,190,92,0.15)]"
+        style={{
+          background:
+            'linear-gradient(135deg, #16A34A 0%, #15803D 100%)',
+        }}
+      >
+        <div className="p-5 text-white">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center">
+                <Calendar className="w-4 h-4 text-white" strokeWidth={2} />
+              </div>
+              <span className="font-cairo text-[13px] font-medium text-white/90">
+                موعدك القادم
+              </span>
+            </div>
+            {relativeLabel && (
+              <span className="font-cairo text-[11px] font-medium text-white bg-white/20 px-2.5 py-1 rounded-full">
+                {relativeLabel}
+              </span>
+            )}
+          </div>
 
-  const getSpecialtyLabel = (specialty: string) => {
-    const labels: Record<string, string> = {
-      'general-practitioner': 'طب عام / باطنة',
-      'pediatrics': 'أطفال',
-      'cardiology': 'قلب وأوعية دموية',
-      'endocrinology': 'غدد صماء وسكر',
-      'dermatology': 'جلدية',
-      'ophthalmology': 'عيون',
-      'ent': 'أنف وأذن وحنجرة',
-      'orthopedics': 'عظام',
-      'neurology': 'مخ وأعصاب',
-      'psychiatry': 'طب نفسي',
-      'obstetrics-gynecology': 'نساء وتوليد',
-      'general-surgery': 'جراحة عامة',
-      'urology': 'مسالك بولية',
-      'nephrology': 'كلى',
-      'pulmonology': 'صدر',
-      'gastroenterology': 'جهاز هضمي',
-    }
-    return labels[specialty] || specialty
+          <h3 className="font-cairo text-[18px] font-bold text-white mb-1">
+            د. {appointment.doctor_name}
+          </h3>
+          <p className="font-cairo text-[13px] text-white/80 mb-4">{specialty}</p>
+
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 font-cairo text-[13px] text-white/90">
+              <Clock className="w-4 h-4 text-white/80" strokeWidth={1.8} />
+              <span>
+                {formatArabicDate(appointment.start_time)} —{' '}
+                {formatArabicTime(appointment.start_time)}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 font-cairo text-[13px] text-white/90">
+              <MapPin className="w-4 h-4 text-white/80" strokeWidth={1.8} />
+              <span>{appointment.clinic_name}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (
-    <div dir="rtl" className="bg-white rounded-lg border border-gray-200 p-4 hover:border-gray-300 transition-colors">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex-1">
-          {/* Date and Time */}
-          <div className="flex items-center gap-2 mb-3">
-            <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-            </svg>
-            <span className="font-medium text-gray-900">
-              {formattedDate} — {formattedTime}
-            </span>
+    <div
+      dir="rtl"
+      className="bg-white rounded-[12px] border-[0.8px] border-[#E5E7EB] p-4 hover:border-[#D1D5DB] transition-colors"
+    >
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div className="flex items-start gap-3 min-w-0 flex-1">
+          <div className="w-10 h-10 rounded-full bg-[#F0FDF4] flex items-center justify-center flex-shrink-0">
+            <Stethoscope
+              className="w-5 h-5 text-[#16A34A]"
+              strokeWidth={1.8}
+            />
           </div>
-
-          {/* Doctor Information */}
-          <div className="mb-3">
-            <div className="flex items-center gap-2 mb-1">
-              <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-              </svg>
-              <div>
-                <p className="font-medium text-gray-900">د. {appointment.doctor_name}</p>
-                <p className="text-sm text-gray-500">{getSpecialtyLabel(appointment.doctor_specialty)}</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Clinic Information */}
-          <div className="flex items-center gap-2 text-sm text-gray-600">
-            <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" />
-            </svg>
-            <span>{appointment.clinic_name}</span>
-          </div>
-
-          {/* Duration */}
-          <div className="flex items-center gap-2 text-sm text-gray-600 mt-1">
-            <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <span>{appointment.duration_minutes} دقيقة</span>
+          <div className="min-w-0 flex-1">
+            <h3 className="font-cairo text-[15px] font-semibold text-[#030712] truncate">
+              د. {appointment.doctor_name}
+            </h3>
+            <p className="font-cairo text-[12px] text-[#6B7280] truncate">
+              {specialty}
+            </p>
           </div>
         </div>
+        <StatusPill status={appointment.status} />
+      </div>
 
-        {/* Status Badge */}
-        <div className="flex flex-col items-end gap-3">
-          <StatusBadge status={appointment.status} />
-
-          {/* Action Button */}
-          {appointment.status === 'scheduled' && (
-            <button className="text-sm px-3 py-1 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors">
-              إعادة جدولة
-            </button>
-          )}
+      <div className="space-y-1.5 mb-3">
+        <div className="flex items-center gap-2 font-cairo text-[12px] text-[#4B5563]">
+          <Calendar className="w-3.5 h-3.5 text-[#9CA3AF]" strokeWidth={2} />
+          <span>{formatArabicDate(appointment.start_time)}</span>
+        </div>
+        <div className="flex items-center gap-2 font-cairo text-[12px] text-[#4B5563]">
+          <Clock className="w-3.5 h-3.5 text-[#9CA3AF]" strokeWidth={2} />
+          <span>
+            {formatArabicTime(appointment.start_time)} · {appointment.duration_minutes}{' '}
+            دقيقة
+          </span>
+        </div>
+        <div className="flex items-center gap-2 font-cairo text-[12px] text-[#4B5563]">
+          <MapPin className="w-3.5 h-3.5 text-[#9CA3AF]" strokeWidth={2} />
+          <span className="truncate">{appointment.clinic_name}</span>
         </div>
       </div>
+
+      {appointment.status === 'scheduled' && (
+        <div className="flex gap-2 pt-3 border-t-[0.8px] border-[#F3F4F6]">
+          <button
+            type="button"
+            className="flex-1 h-[36px] rounded-[10px] border-[0.8px] border-[#E5E7EB] bg-white font-cairo text-[12px] font-medium text-[#4B5563] hover:bg-[#F9FAFB] transition-colors"
+          >
+            إعادة جدولة
+          </button>
+          <button
+            type="button"
+            className="flex-1 h-[36px] rounded-[10px] border-[0.8px] border-[#FECACA] bg-white font-cairo text-[12px] font-medium text-[#B91C1C] hover:bg-[#FEF2F2] transition-colors"
+          >
+            إلغاء
+          </button>
+        </div>
+      )}
     </div>
   )
 }
 
 // ============================================================================
-// MAIN APPOINTMENTS PAGE
+// SECTION HEADER
+// ============================================================================
+
+function SectionHeader({ title, count }: { title: string; count?: number }) {
+  return (
+    <div className="flex items-center justify-between mb-3">
+      <h2 className="font-cairo text-[15px] font-semibold text-[#030712]">
+        {title}
+      </h2>
+      {typeof count === 'number' && count > 0 && (
+        <span className="font-cairo text-[12px] text-[#6B7280]">{count}</span>
+      )}
+    </div>
+  )
+}
+
+// ============================================================================
+// LOADING SKELETON
+// ============================================================================
+
+function LoadingSkeleton() {
+  return (
+    <div className="space-y-4 animate-pulse">
+      <div className="h-32 bg-[#F3F4F6] rounded-[12px]" />
+      <div className="h-5 w-32 bg-[#F3F4F6] rounded" />
+      <div className="h-28 bg-[#F3F4F6] rounded-[12px]" />
+      <div className="h-28 bg-[#F3F4F6] rounded-[12px]" />
+    </div>
+  )
+}
+
+// ============================================================================
+// ERROR STATE
+// ============================================================================
+
+function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div
+      dir="rtl"
+      className="bg-white rounded-[12px] border-[0.8px] border-[#FECACA] p-5 text-center"
+    >
+      <div className="w-12 h-12 rounded-full bg-[#FEE2E2] mx-auto mb-3 flex items-center justify-center">
+        <AlertCircle className="w-6 h-6 text-[#B91C1C]" strokeWidth={1.8} />
+      </div>
+      <h3 className="font-cairo text-[15px] font-semibold text-[#030712] mb-1">
+        تعذر تحميل المواعيد
+      </h3>
+      <p className="font-cairo text-[12px] text-[#6B7280] mb-4">{message}</p>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="inline-flex items-center gap-2 h-[40px] px-5 rounded-[10px] border-[0.8px] border-[#E5E7EB] bg-white font-cairo text-[13px] font-medium text-[#030712] hover:bg-[#F9FAFB] transition-colors"
+      >
+        <RefreshCw className="w-4 h-4" strokeWidth={2} />
+        إعادة المحاولة
+      </button>
+    </div>
+  )
+}
+
+// ============================================================================
+// EMPTY STATE
+// ============================================================================
+
+function EmptyState() {
+  return (
+    <div
+      dir="rtl"
+      className="bg-white rounded-[12px] border-[0.8px] border-[#E5E7EB] p-8 text-center"
+    >
+      <div className="w-14 h-14 rounded-full bg-[#F0FDF4] mx-auto mb-4 flex items-center justify-center">
+        <Calendar className="w-7 h-7 text-[#16A34A]" strokeWidth={1.8} />
+      </div>
+      <h3 className="font-cairo text-[15px] font-semibold text-[#030712] mb-1">
+        لا توجد مواعيد بعد
+      </h3>
+      <p className="font-cairo text-[12px] text-[#6B7280] mb-5">
+        ليس لديك أي مواعيد مجدولة حالياً. تواصل مع العيادة لحجز موعد جديد.
+      </p>
+      <Link
+        href="/patient/dashboard"
+        className="inline-flex items-center gap-2 h-[44px] px-6 rounded-[10px] bg-[#16A34A] font-cairo text-[13px] font-semibold text-white hover:bg-[#15803D] transition-colors shadow-[0px_6px_24px_rgba(45,190,92,0.3)]"
+      >
+        <ChevronLeft className="w-4 h-4" strokeWidth={2} />
+        العودة للرئيسية
+      </Link>
+    </div>
+  )
+}
+
+// ============================================================================
+// FILTER TABS
+// ============================================================================
+
+type FilterTab = 'all' | 'upcoming' | 'past'
+
+function FilterTabs({
+  active,
+  onChange,
+  counts,
+}: {
+  active: FilterTab
+  onChange: (tab: FilterTab) => void
+  counts: { all: number; upcoming: number; past: number }
+}) {
+  const tabs: { key: FilterTab; label: string; count: number }[] = [
+    { key: 'all', label: 'الكل', count: counts.all },
+    { key: 'upcoming', label: 'القادمة', count: counts.upcoming },
+    { key: 'past', label: 'السابقة', count: counts.past },
+  ]
+
+  return (
+    <div
+      dir="rtl"
+      className="flex gap-1.5 p-1 bg-white rounded-[12px] border-[0.8px] border-[#E5E7EB]"
+    >
+      {tabs.map((tab) => {
+        const isActive = active === tab.key
+        return (
+          <button
+            key={tab.key}
+            type="button"
+            onClick={() => onChange(tab.key)}
+            className={`flex-1 h-[38px] rounded-[10px] font-cairo text-[12px] font-medium transition-all ${
+              isActive
+                ? 'bg-[#16A34A] text-white shadow-[0px_4px_12px_-2px_rgba(45,190,92,0.25)]'
+                : 'bg-transparent text-[#6B7280] hover:bg-[#F9FAFB]'
+            }`}
+          >
+            {tab.label}
+            {tab.count > 0 && (
+              <span
+                className={`mr-1 text-[10px] ${
+                  isActive ? 'text-white/80' : 'text-[#9CA3AF]'
+                }`}
+              >
+                ({tab.count})
+              </span>
+            )}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+// ============================================================================
+// MAIN PAGE
 // ============================================================================
 
 export default function AppointmentsPage() {
   const [appointments, setAppointments] = useState<Appointment[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [filter, setFilter] = useState<FilterTab>('upcoming')
 
-  useEffect(() => {
-    const loadAppointments = async () => {
-      try {
-        const res = await fetch('/api/patient/appointments')
-        if (!res.ok) {
-          throw new Error('Failed to load appointments')
-        }
-        const data = await res.json()
-        setAppointments(data.appointments || [])
-      } catch (err) {
-        console.error('Error loading appointments:', err)
-        setError(err instanceof Error ? err.message : 'An error occurred')
-      } finally {
-        setLoading(false)
-      }
+  const loadAppointments = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/patient/appointments')
+      if (!res.ok) throw new Error('Failed to load appointments')
+      const data = await res.json()
+      setAppointments(data.appointments || [])
+    } catch (err) {
+      console.error('Error loading appointments:', err)
+      setError(err instanceof Error ? err.message : 'حدث خطأ غير متوقع')
+    } finally {
+      setLoading(false)
     }
-
-    loadAppointments()
   }, [])
 
-  // Separate appointments into upcoming and past
-  const now = new Date()
-  const upcomingAppointments = appointments.filter(
-    apt => new Date(apt.start_time) >= now && apt.status === 'scheduled'
-  )
-  const pastAppointments = appointments.filter(
-    apt => new Date(apt.start_time) < now || apt.status !== 'scheduled'
-  )
+  useEffect(() => {
+    loadAppointments()
+  }, [loadAppointments])
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
-      </div>
+  // Separate into upcoming / past
+  const now = new Date()
+  const upcoming = appointments
+    .filter(
+      (apt) =>
+        new Date(apt.start_time) >= now && apt.status === 'scheduled',
     )
+    .sort(
+      (a, b) =>
+        new Date(a.start_time).getTime() - new Date(b.start_time).getTime(),
+    )
+  const past = appointments
+    .filter(
+      (apt) =>
+        new Date(apt.start_time) < now || apt.status !== 'scheduled',
+    )
+    .sort(
+      (a, b) =>
+        new Date(b.start_time).getTime() - new Date(a.start_time).getTime(),
+    )
+
+  const nextUp = upcoming[0]
+  const counts = {
+    all: appointments.length,
+    upcoming: upcoming.length,
+    past: past.length,
   }
 
+  const filtered: Appointment[] =
+    filter === 'all'
+      ? [...upcoming, ...past]
+      : filter === 'upcoming'
+      ? upcoming
+      : past
+
+  // Skip hero from list if we show it above
+  const listItems =
+    filter === 'upcoming' && nextUp
+      ? filtered.filter((a) => a.id !== nextUp.id)
+      : filtered
+
   return (
-    <div dir="rtl" className="space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">مواعيدي</h1>
-        <p className="text-gray-600 mt-1">عرض وإدارة زياراتك للطبيب</p>
+    <>
+      <PatientHeader title="مواعيدي" />
+      <div dir="rtl" className="px-4 py-5 space-y-5">
+        {/* Intro */}
+        <div>
+          <h2 className="font-cairo text-[20px] font-bold text-[#030712] leading-tight">
+            مواعيدك الطبية
+          </h2>
+          <p className="font-cairo text-[13px] text-[#6B7280] mt-1">
+            عرض وإدارة زياراتك القادمة والسابقة
+          </p>
+        </div>
+
+        {loading ? (
+          <LoadingSkeleton />
+        ) : error ? (
+          <ErrorState message={error} onRetry={loadAppointments} />
+        ) : appointments.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <>
+            {/* Filter tabs */}
+            <FilterTabs active={filter} onChange={setFilter} counts={counts} />
+
+            {/* Next appointment hero (only on "upcoming" tab) */}
+            {filter === 'upcoming' && nextUp && (
+              <AppointmentCard appointment={nextUp} highlight />
+            )}
+
+            {/* List */}
+            {listItems.length > 0 ? (
+              <div className="space-y-3">
+                <SectionHeader
+                  title={
+                    filter === 'all'
+                      ? 'كل المواعيد'
+                      : filter === 'upcoming'
+                      ? 'باقي المواعيد القادمة'
+                      : 'المواعيد السابقة'
+                  }
+                  count={listItems.length}
+                />
+                {listItems.map((apt) => (
+                  <AppointmentCard key={apt.id} appointment={apt} />
+                ))}
+              </div>
+            ) : filter === 'upcoming' && nextUp ? null : (
+              <div
+                className="bg-white rounded-[12px] border-[0.8px] border-[#E5E7EB] p-6 text-center"
+              >
+                <p className="font-cairo text-[13px] text-[#6B7280]">
+                  {filter === 'upcoming'
+                    ? 'لا توجد مواعيد قادمة'
+                    : filter === 'past'
+                    ? 'لا توجد مواعيد سابقة'
+                    : 'لا توجد مواعيد'}
+                </p>
+              </div>
+            )}
+
+            {/* Quick actions */}
+            <div className="grid grid-cols-2 gap-3">
+              <Link
+                href="/patient/dashboard"
+                className="flex flex-col items-center gap-2 bg-white rounded-[12px] border-[0.8px] border-[#E5E7EB] p-4 hover:border-[#16A34A] transition-colors"
+              >
+                <div className="w-10 h-10 rounded-full bg-[#F0FDF4] flex items-center justify-center">
+                  <User className="w-5 h-5 text-[#16A34A]" strokeWidth={1.8} />
+                </div>
+                <span className="font-cairo text-[12px] font-medium text-[#030712]">
+                  الرئيسية
+                </span>
+              </Link>
+              <Link
+                href="/patient/messages"
+                className="flex flex-col items-center gap-2 bg-white rounded-[12px] border-[0.8px] border-[#E5E7EB] p-4 hover:border-[#16A34A] transition-colors"
+              >
+                <div className="w-10 h-10 rounded-full bg-[#F0FDF4] flex items-center justify-center">
+                  <Phone className="w-5 h-5 text-[#16A34A]" strokeWidth={1.8} />
+                </div>
+                <span className="font-cairo text-[12px] font-medium text-[#030712]">
+                  مراسلة العيادة
+                </span>
+              </Link>
+            </div>
+          </>
+        )}
       </div>
-
-      {/* Error Message */}
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
-          <p className="text-sm">{error}</p>
-        </div>
-      )}
-
-      {/* No Appointments */}
-      {appointments.length === 0 && !error && (
-        <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
-          <svg className="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-          </svg>
-          <h3 className="text-lg font-medium text-gray-900 mb-2">لا توجد مواعيد بعد</h3>
-          <p className="text-gray-600 text-sm mb-4">ليس لديك أي مواعيد مجدولة</p>
-          <Link
-            href="/patient/dashboard"
-            className="inline-block px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
-          >
-            العودة للرئيسية
-          </Link>
-        </div>
-      )}
-
-      {/* Upcoming Appointments */}
-      {upcomingAppointments.length > 0 && (
-        <div>
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">المواعيد القادمة</h2>
-          <div className="space-y-3">
-            {upcomingAppointments.map(apt => (
-              <AppointmentCard key={apt.id} appointment={apt} />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Past Appointments */}
-      {pastAppointments.length > 0 && (
-        <div>
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">المواعيد السابقة</h2>
-          <div className="space-y-3">
-            {pastAppointments.map(apt => (
-              <AppointmentCard key={apt.id} appointment={apt} />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Quick Links */}
-      {appointments.length > 0 && (
-        <div className="grid grid-cols-2 gap-4 mt-6">
-          <Link
-            href="/patient/dashboard"
-            className="bg-white rounded-lg border border-gray-200 p-4 text-center hover:border-primary-300 transition-colors"
-          >
-            <svg className="w-6 h-6 text-primary-600 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-3m0 0l7-4 7 4M5 9v10a1 1 0 001 1h12a1 1 0 001-1V9m-9 11l4-4m-9-8l7-4 7 4" />
-            </svg>
-            <span className="text-sm font-medium text-gray-700">الرئيسية</span>
-          </Link>
-
-          <Link
-            href="/patient/messages"
-            className="bg-white rounded-lg border border-gray-200 p-4 text-center hover:border-primary-300 transition-colors"
-          >
-            <svg className="w-6 h-6 text-primary-600 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-            </svg>
-            <span className="text-sm font-medium text-gray-700">الرسائل</span>
-          </Link>
-        </div>
-      )}
-    </div>
+    </>
   )
 }

@@ -5,6 +5,7 @@ const config = {
   content: [
     './app/**/*.{ts,tsx}',
     '../../packages/shared/components/**/*.{ts,tsx}',
+    '../../packages/ui-clinic/components/**/*.{ts,tsx}',
   ],
   prefix: "",
   theme: {
