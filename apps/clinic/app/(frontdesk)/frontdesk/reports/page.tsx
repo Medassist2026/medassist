@@ -3,8 +3,9 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ChevronRight, Users, Banknote, Clock, TrendingUp, User, Bell, Building2, LogOut } from 'lucide-react'
+import { ChevronRight, Users, Banknote, Clock, TrendingUp, User, Bell, Building2, LogOut, Stethoscope } from 'lucide-react'
 import type { CheckInQueueItem, Payment as SharedPayment } from '@shared/lib/data/frontdesk'
+import { translateSpecialty } from '@shared/lib/utils/specialty-labels'
 
 // ============================================================================
 // TYPES
@@ -69,6 +70,46 @@ export default function ReportsPage() {
         return sum + (new Date(q.called_at!).getTime() - new Date(q.checked_in_at).getTime()) / 60000
       }, 0) / completedWithTimes.length)
     : 0
+
+  // Doctor breakdown
+  const doctorBreakdown = (() => {
+    const map = new Map<string, {
+      name: string; specialty: string; patients: number; completed: number; revenue: number; avgWait: number; waitCount: number
+    }>()
+
+    for (const q of queue) {
+      const docId = q.doctor_id
+      const docName = (q as any).doctor?.full_name || 'طبيب'
+      const docSpec = translateSpecialty((q as any).doctor?.specialty) || ''
+      if (!map.has(docId)) {
+        map.set(docId, { name: docName, specialty: docSpec, patients: 0, completed: 0, revenue: 0, avgWait: 0, waitCount: 0 })
+      }
+      const doc = map.get(docId)!
+      doc.patients++
+      if (q.status === 'completed') {
+        doc.completed++
+        if (q.checked_in_at && q.called_at) {
+          doc.avgWait += (new Date(q.called_at).getTime() - new Date(q.checked_in_at).getTime()) / 60000
+          doc.waitCount++
+        }
+      }
+    }
+
+    // Add revenue per doctor from payments
+    for (const p of payments) {
+      const docId = (p as any).doctor_id
+      if (docId && map.has(docId)) {
+        map.get(docId)!.revenue += Number(p.amount || 0)
+      }
+    }
+
+    // Finalize avg wait
+    for (const doc of map.values()) {
+      doc.avgWait = doc.waitCount > 0 ? Math.round(doc.avgWait / doc.waitCount) : 0
+    }
+
+    return Array.from(map.values())
+  })()
 
   const tabs: { key: TabFilter; label: string }[] = [
     { key: 'today', label: 'اليوم' },
@@ -164,6 +205,42 @@ export default function ReportsPage() {
               )}
             </div>
 
+            {/* Doctor Breakdown */}
+            {doctorBreakdown.length > 0 && (
+              <div className="space-y-2">
+                <h2 className="font-cairo text-[14px] font-semibold text-[#030712] px-1">تفاصيل الأطباء</h2>
+                {doctorBreakdown.map((doc, i) => (
+                  <div key={i} className="bg-white rounded-[12px] border-[0.8px] border-[#E5E7EB] p-4">
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="w-9 h-9 rounded-full bg-[#F0FDF4] flex items-center justify-center">
+                        <Stethoscope className="w-4.5 h-4.5 text-[#16A34A]" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-cairo text-[14px] font-bold text-[#030712] truncate">د. {doc.name}</h3>
+                        {doc.specialty && (
+                          <p className="font-cairo text-[11px] text-[#6B7280]">{doc.specialty}</p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="text-center">
+                        <p className="font-cairo text-[16px] font-bold text-[#030712]">{doc.patients}</p>
+                        <p className="font-cairo text-[10px] text-[#9CA3AF]">مرضى</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="font-cairo text-[16px] font-bold text-[#16A34A]">{(doc.revenue ?? 0).toLocaleString('ar-EG')} <span className="text-[12px]">ج.م</span></p>
+                        <p className="font-cairo text-[10px] text-[#9CA3AF]">إيرادات</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="font-cairo text-[16px] font-bold text-[#D97706]">{doc.avgWait}<span className="text-[12px]">د</span></p>
+                        <p className="font-cairo text-[10px] text-[#9CA3AF]">متوسط انتظار</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {/* Settings Section */}
             <div className="pt-2">
               <div className="flex items-center gap-3 mb-2">
@@ -173,15 +250,15 @@ export default function ReportsPage() {
               </div>
 
               <div className="bg-white rounded-[12px] border-[0.8px] border-[#E5E7EB] overflow-hidden divide-y divide-[#F3F4F6]">
-                <Link href="/frontdesk/dashboard" className="flex items-center gap-3 px-4 py-3.5">
+                <Link href="/frontdesk/profile" className="flex items-center gap-3 px-4 py-3.5">
                   <User className="w-5 h-5 text-[#6B7280]" />
                   <span className="font-cairo text-[14px] text-[#030712]">الحساب</span>
                 </Link>
-                <Link href="/frontdesk/dashboard" className="flex items-center gap-3 px-4 py-3.5">
+                <Link href="/frontdesk/invitations" className="flex items-center gap-3 px-4 py-3.5">
                   <Bell className="w-5 h-5 text-[#6B7280]" />
-                  <span className="font-cairo text-[14px] text-[#030712]">الإشعارات</span>
+                  <span className="font-cairo text-[14px] text-[#030712]">الدعوات</span>
                 </Link>
-                <Link href="/frontdesk/dashboard" className="flex items-center gap-3 px-4 py-3.5">
+                <Link href="/frontdesk/profile" className="flex items-center gap-3 px-4 py-3.5">
                   <Building2 className="w-5 h-5 text-[#6B7280]" />
                   <span className="font-cairo text-[14px] text-[#030712]">العيادة</span>
                 </Link>

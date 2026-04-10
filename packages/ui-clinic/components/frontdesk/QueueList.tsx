@@ -1,7 +1,12 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { Users, ArrowUp } from 'lucide-react'
+
+// ============================================================================
+// TYPES
+// ============================================================================
 
 interface QueueItem {
   id: string
@@ -9,6 +14,7 @@ interface QueueItem {
   queue_type: string
   status: string
   checked_in_at: string
+  called_at?: string | null
   patient: {
     full_name: string | null
     phone: string
@@ -25,226 +31,157 @@ interface QueueListProps {
   queue: QueueItem[]
 }
 
+// ============================================================================
+// HELPERS
+// ============================================================================
+
+function getStatusConfig(status: string) {
+  switch (status) {
+    case 'in_progress':
+      return { label: 'مع الطبيب', bg: 'bg-blue-50 text-blue-700' }
+    case 'waiting':
+      return { label: 'انتظار', bg: 'bg-yellow-50 text-yellow-700' }
+    case 'completed':
+      return { label: 'مكتمل', bg: 'bg-green-50 text-green-700' }
+    case 'cancelled':
+      return { label: 'ملغي', bg: 'bg-gray-50 text-gray-500' }
+    default:
+      return { label: status, bg: 'bg-gray-50 text-gray-500' }
+  }
+}
+
+function formatElapsed(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime()
+  const mins = Math.max(0, Math.floor(diff / 60000))
+  return `${mins} د`
+}
+
+// ============================================================================
+// QUEUE LIST (Mobile-first, RTL Arabic)
+// ============================================================================
+
 export default function QueueList({ queue }: QueueListProps) {
   const router = useRouter()
   const [updating, setUpdating] = useState<string | null>(null)
-  const [doctorFilter, setDoctorFilter] = useState<string>('all')
 
-  // Get unique doctors from queue for filter tabs
-  const uniqueDoctors = Array.from(
-    new Map(
-      queue.map(item => [
-        item.doctor?.full_name || 'Unknown',
-        { name: item.doctor?.full_name || 'Unknown', specialty: item.doctor?.specialty || '' }
-      ])
-    ).entries()
-  ).map(([name, info]) => ({ name, specialty: info.specialty }))
-
-  // Filter queue by selected doctor
-  const filteredQueue = doctorFilter === 'all'
-    ? queue
-    : queue.filter(item => (item.doctor?.full_name || 'Unknown') === doctorFilter)
-
-  // Count waiting per doctor
-  const getWaitingCount = (doctorName: string) =>
-    queue.filter(item =>
-      (item.doctor?.full_name || 'Unknown') === doctorName && item.status === 'waiting'
-    ).length
+  const activeQueue = queue.filter(
+    (q) => q.status === 'waiting' || q.status === 'in_progress'
+  )
 
   const updateStatus = async (queueId: string, status: string) => {
     setUpdating(queueId)
     try {
-      const response = await fetch('/api/frontdesk/queue/update', {
+      const res = await fetch('/api/frontdesk/queue/update', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ queueId, status })
+        body: JSON.stringify({ queueId, status }),
       })
-
-      if (!response.ok) {
-        throw new Error('Failed to update status')
-      }
-
+      if (!res.ok) throw new Error('فشل التحديث')
       router.refresh()
-    } catch (error) {
-      console.error('Update error:', error)
-      alert('Failed to update status')
+    } catch {
+      // no-op — parent should handle errors
     } finally {
       setUpdating(null)
     }
   }
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'waiting':
-        return 'bg-yellow-100 text-yellow-800'
-      case 'in_progress':
-        return 'bg-blue-100 text-blue-800'
-      case 'completed':
-        return 'bg-green-100 text-green-800'
-      default:
-        return 'bg-gray-100 text-gray-800'
-    }
-  }
-
-  const getTypeColor = (type: string) => {
-    switch (type) {
-      case 'appointment':
-        return 'bg-primary-100 text-primary-800'
-      case 'walkin':
-        return 'bg-primary-100 text-primary-800'
-      case 'emergency':
-        return 'bg-red-100 text-red-800'
-      default:
-        return 'bg-gray-100 text-gray-800'
-    }
-  }
-
-  if (queue.length === 0) {
+  if (activeQueue.length === 0) {
     return (
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
-        <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-          <svg className="w-8 h-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-          </svg>
+      <div className="text-center py-10" dir="rtl">
+        <div className="w-14 h-14 rounded-full bg-[#F3F4F6] flex items-center justify-center mx-auto mb-3">
+          <Users className="w-7 h-7 text-[#D1D5DB]" />
         </div>
-        <h3 className="text-lg font-semibold text-gray-900 mb-2">
-          No Patients in Queue
-        </h3>
-        <p className="text-gray-600">
-          Check in patients to see them here
+        <p className="font-cairo text-[15px] font-semibold text-[#030712] mb-1">
+          لا يوجد مرضى في الانتظار
+        </p>
+        <p className="font-cairo text-[13px] text-[#6B7280]">
+          سجل وصول المرضى لإضافتهم للقائمة
         </p>
       </div>
     )
   }
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200">
-      {/* Header */}
-      <div className="px-6 py-4 border-b border-gray-200">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold text-gray-900">
-            Check-In Queue
-          </h2>
-          <span className="px-3 py-1 bg-primary-100 text-primary-700 rounded-full text-sm font-medium">
-            {filteredQueue.length} patients
-          </span>
-        </div>
+    <div className="space-y-2" dir="rtl">
+      {activeQueue.map((item) => {
+        const statusConfig = getStatusConfig(item.status)
+        const elapsed = formatElapsed(item.called_at || item.checked_in_at)
 
-        {/* Doctor Filter Tabs */}
-        {uniqueDoctors.length > 1 && (
-          <div className="flex gap-2 overflow-x-auto pb-1">
-            <button
-              onClick={() => setDoctorFilter('all')}
-              className={`px-3 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
-                doctorFilter === 'all'
-                  ? 'bg-primary-600 text-white'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
-            >
-              All ({queue.filter(q => q.status === 'waiting').length})
-            </button>
-            {uniqueDoctors.map(doc => (
-              <button
-                key={doc.name}
-                onClick={() => setDoctorFilter(doc.name)}
-                className={`px-3 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
-                  doctorFilter === doc.name
-                    ? 'bg-primary-600 text-white'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+        return (
+          <div
+            key={item.id}
+            className="bg-white rounded-[12px] border-[0.8px] border-[#E5E7EB] p-3.5"
+          >
+            <div className="flex items-center gap-3">
+              {/* Queue Number */}
+              <div
+                className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
+                  item.status === 'in_progress'
+                    ? 'bg-blue-500 text-white'
+                    : 'bg-[#F3F4F6] text-[#030712]'
                 }`}
               >
-                Dr. {doc.name.replace(/^Dr\.?\s*/i, '')} ({getWaitingCount(doc.name)})
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+                <span className="font-cairo text-[14px] font-bold">
+                  #{item.queue_number}
+                </span>
+              </div>
 
-      {/* Queue List */}
-      <div className="divide-y divide-gray-100">
-        {filteredQueue.map((item) => (
-          <div key={item.id} className="p-6 hover:bg-gray-50 transition-colors">
-            <div className="flex items-start justify-between">
-              {/* Left: Patient Info */}
-              <div className="flex items-start gap-4 flex-1">
-                {/* Queue Number */}
-                <div className="w-12 h-12 bg-primary-600 text-white rounded-lg flex items-center justify-center font-bold text-lg">
-                  {item.queue_number}
+              {/* Patient Info */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h4 className="font-cairo text-[14px] font-semibold text-[#030712] truncate">
+                    {item.patient?.full_name || 'مريض'}
+                  </h4>
+                  {item.queue_type === 'emergency' && (
+                    <span className="font-cairo text-[10px] font-bold bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full">
+                      🔴 طوارئ
+                    </span>
+                  )}
                 </div>
-
-                {/* Patient Details */}
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-2">
-                    <h3 className="font-semibold text-gray-900">
-                      {item.patient.full_name || 'Unnamed Patient'}
-                    </h3>
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getTypeColor(item.queue_type)}`}>
-                      {item.queue_type.toUpperCase()}
-                    </span>
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getStatusColor(item.status)}`}>
-                      {item.status.replace('_', ' ').toUpperCase()}
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4 text-sm text-gray-600 mb-3">
-                    <div>
-                      <span className="font-medium">Phone:</span> {item.patient.phone}
-                    </div>
-                    {item.patient.age && (
-                      <div>
-                        <span className="font-medium">Age:</span> {item.patient.age} years
-                      </div>
-                    )}
-                    {item.patient.sex && (
-                      <div>
-                        <span className="font-medium">Sex:</span> {item.patient.sex}
-                      </div>
-                    )}
-                    <div>
-                      <span className="font-medium">Doctor:</span> {item.doctor.full_name || 'Dr. Unknown'}
-                    </div>
-                  </div>
-
-                  <div className="text-xs text-gray-500">
-                    Checked in: {new Date(item.checked_in_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
-                  </div>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <span className="font-cairo text-[12px] text-[#6B7280]">
+                    د.{' '}
+                    {(item.doctor?.full_name || '').replace(/^د\.\s*/, '')}
+                  </span>
+                  <span className="text-[#D1D5DB]">·</span>
+                  <span className="font-cairo text-[12px] text-[#9CA3AF]">
+                    {elapsed}
+                  </span>
                 </div>
               </div>
 
-              {/* Right: Actions */}
-              <div className="flex gap-2 ml-4">
+              {/* Status + Actions */}
+              <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+                <span
+                  className={`font-cairo text-[11px] font-medium px-2 py-0.5 rounded-full ${statusConfig.bg}`}
+                >
+                  {statusConfig.label}
+                </span>
+
                 {item.status === 'waiting' && (
                   <button
                     onClick={() => updateStatus(item.id, 'in_progress')}
                     disabled={updating === item.id}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+                    className="font-cairo text-[11px] font-medium text-[#16A34A] disabled:opacity-40"
                   >
-                    {updating === item.id ? 'Calling...' : 'Call Next'}
+                    {updating === item.id ? '...' : 'استدعاء'}
                   </button>
                 )}
+
                 {item.status === 'in_progress' && (
                   <button
                     onClick={() => updateStatus(item.id, 'completed')}
                     disabled={updating === item.id}
-                    className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+                    className="font-cairo text-[11px] font-medium text-[#2563EB] disabled:opacity-40"
                   >
-                    {updating === item.id ? 'Completing...' : 'Complete'}
-                  </button>
-                )}
-                {item.status !== 'completed' && item.status !== 'cancelled' && (
-                  <button
-                    onClick={() => updateStatus(item.id, 'cancelled')}
-                    disabled={updating === item.id}
-                    className="px-4 py-2 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg text-sm font-medium disabled:opacity-50"
-                  >
-                    Cancel
+                    {updating === item.id ? '...' : 'إنهاء'}
                   </button>
                 )}
               </div>
             </div>
           </div>
-        ))}
-      </div>
+        )
+      })}
     </div>
   )
 }

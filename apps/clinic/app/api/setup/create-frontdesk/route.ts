@@ -90,7 +90,7 @@ export async function GET(request: Request) {
 
     // ── clinic_memberships ──────────────────────────────────────────────
     const { error: cmErr } = await admin.from('clinic_memberships').upsert(
-      { clinic_id: clinic.id, user_id: userId, role: 'ASSISTANT', status: 'ACTIVE' },
+      { clinic_id: clinic.id, user_id: userId, role: 'FRONT_DESK', status: 'ACTIVE' },
       { onConflict: 'clinic_id,user_id' }
     )
     log.push(`  clinic_memberships: ${cmErr?.message || 'OK'}`)

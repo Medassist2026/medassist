@@ -16,9 +16,13 @@ import {
   Banknote,
   BarChart3,
   Stethoscope,
+  Home,
+  Pill,
+  HeartPulse,
+  MoreHorizontal,
 } from 'lucide-react'
 
-export type SidebarRole = 'doctor' | 'frontdesk'
+export type SidebarRole = 'doctor' | 'frontdesk' | 'patient'
 
 interface NavItem {
   label: string
@@ -44,6 +48,15 @@ const frontdeskNav: NavItem[] = [
   { label: 'التقارير', href: '/frontdesk/reports', icon: BarChart3 },
 ]
 
+const patientNav: NavItem[] = [
+  { label: 'الرئيسية', href: '/patient/dashboard', icon: Home },
+  { label: 'الوصفات', href: '/patient/prescriptions', icon: Pill },
+  { label: 'المواعيد', href: '/patient/appointments', icon: Calendar },
+  { label: 'صحتي', href: '/patient/health', icon: HeartPulse },
+  { label: 'الرسائل', href: '/patient/messages', icon: MessageSquare },
+  { label: 'المزيد', href: '/patient/more', icon: MoreHorizontal },
+]
+
 interface DesktopSidebarProps {
   role: SidebarRole
   userName?: string
@@ -52,16 +65,26 @@ interface DesktopSidebarProps {
 
 export function DesktopSidebar({ role, userName, clinicName }: DesktopSidebarProps) {
   const pathname = usePathname()
-  const navItems = role === 'doctor' ? doctorNav : frontdeskNav
+  const navItems =
+    role === 'doctor'
+      ? doctorNav
+      : role === 'frontdesk'
+        ? frontdeskNav
+        : patientNav
   const [unreadCount, setUnreadCount] = useState(0)
 
   useEffect(() => {
-    if (role !== 'doctor') return
+    if (role !== 'doctor' && role !== 'patient') return
     let cancelled = false
+
+    const endpoint =
+      role === 'doctor'
+        ? '/api/doctor/messages/unread-count'
+        : '/api/patient/messages/unread-count'
 
     async function fetchUnread() {
       try {
-        const res = await fetch('/api/doctor/messages/unread-count')
+        const res = await fetch(endpoint)
         if (!res.ok || cancelled) return
         const data = await res.json()
         if (!cancelled) setUnreadCount(data.total_unread || 0)
@@ -109,11 +132,13 @@ export function DesktopSidebar({ role, userName, clinicName }: DesktopSidebarPro
                 >
                   <Icon className="w-[20px] h-[20px] flex-shrink-0" strokeWidth={1.8} />
                   <span className="flex-1">{item.label}</span>
-                  {item.href === '/doctor/messages' && unreadCount > 0 && !isActive && (
-                    <span className="min-w-[20px] h-[20px] bg-[#EF4444] text-white font-cairo text-[10px] font-bold rounded-full flex items-center justify-center px-1">
-                      {unreadCount > 99 ? '99+' : unreadCount}
-                    </span>
-                  )}
+                  {(item.href === '/doctor/messages' || item.href === '/patient/messages') &&
+                    unreadCount > 0 &&
+                    !isActive && (
+                      <span className="min-w-[20px] h-[20px] bg-[#EF4444] text-white font-cairo text-[10px] font-bold rounded-full flex items-center justify-center px-1">
+                        {unreadCount > 99 ? '99+' : unreadCount}
+                      </span>
+                    )}
                 </Link>
               </li>
             )
@@ -135,7 +160,7 @@ export function DesktopSidebar({ role, userName, clinicName }: DesktopSidebarPro
                 {userName}
               </span>
               <span className="font-cairo text-[11px] text-[#6B7280]">
-                {role === 'doctor' ? 'طبيب' : 'استقبال'}
+                {role === 'doctor' ? 'طبيب' : role === 'frontdesk' ? 'استقبال' : 'مريض'}
               </span>
             </div>
           </div>
