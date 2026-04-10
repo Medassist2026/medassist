@@ -6,6 +6,29 @@ import { ConfirmDialog } from '@shared/components/ui/ConfirmDialog'
 import { HelpIcon, HelpPanel } from '@shared/components/ui/HelpTooltips'
 
 // ============================================================================
+// CONSTANTS
+// ============================================================================
+
+const PATIENTS_PER_PAGE = 50
+
+// ============================================================================
+// HOOKS
+// ============================================================================
+
+/**
+ * useDebounce - delays updating a value until the user stops changing it.
+ * Used to avoid re-filtering the patient list on every keystroke.
+ */
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value)
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedValue(value), delay)
+    return () => clearTimeout(timer)
+  }, [value, delay])
+  return debouncedValue
+}
+
+// ============================================================================
 // TYPES
 // ============================================================================
 
@@ -505,13 +528,17 @@ export default function MyPatientsPage() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [filter, setFilter] = useState<'all' | 'active' | 'walkin'>('all')
   const [searchQuery, setSearchQuery] = useState('')
+  const [page, setPage] = useState(1)
 
-  // Load patients
+  // Debounce search input so we don't re-filter the list on every keystroke
+  const debouncedSearch = useDebounce(searchQuery, 300)
+
+  // Load patients (cap the payload so we never pull an unbounded list)
   const loadPatients = async () => {
     setLoading(true)
     setLoadError('')
     try {
-      const res = await fetch('/api/doctor/patients')
+      const res = await fetch(`/api/doctor/patients?limit=${PATIENTS_PER_PAGE * 20}`)
       if (!res.ok) throw new Error('فشل تحميل قائمة المرضى')
       const data = await res.json()
       setPatients(data.patients || [])
@@ -524,20 +551,34 @@ export default function MyPatientsPage() {
 
   useEffect(() => { loadPatients() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Filter patients
+  // Reset to first page whenever the filter or search changes
+  useEffect(() => {
+    setPage(1)
+  }, [debouncedSearch, filter])
+
+  // Filter patients (uses debounced search to avoid re-filtering per keystroke)
   const filteredPatients = patients.filter(p => {
     const matchesFilter =
       filter === 'all' ||
       (filter === 'active' && p.relationship_status === 'active') ||
       (filter === 'walkin' && p.is_walkin)
 
+    const q = debouncedSearch.trim().toLowerCase()
     const matchesSearch =
-      !searchQuery ||
-      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.phone.includes(searchQuery)
+      !q ||
+      p.name.toLowerCase().includes(q) ||
+      p.phone.includes(debouncedSearch.trim())
 
     return matchesFilter && matchesSearch
   })
+
+  // Client-side pagination over the filtered set
+  const totalPages = Math.max(1, Math.ceil(filteredPatients.length / PATIENTS_PER_PAGE))
+  const safePage = Math.min(page, totalPages)
+  const paginatedPatients = filteredPatients.slice(
+    (safePage - 1) * PATIENTS_PER_PAGE,
+    safePage * PATIENTS_PER_PAGE
+  )
 
   // Start session (UX-D006)
   const handleStartSession = (patient: Patient) => {
@@ -639,9 +680,9 @@ export default function MyPatientsPage() {
         <div className="text-center py-12 bg-gray-50 rounded-xl border border-gray-100">
           <span className="text-4xl">👥</span>
           <p className="text-gray-600 mt-3">
-            {searchQuery ? 'لا يوجد مرضى مطابقين' : 'لا يوجد مرضى'}
+            {debouncedSearch ? 'لا يوجد مرضى مطابقين' : 'لا يوجد مرضى'}
           </p>
-          {!searchQuery && (
+          {!debouncedSearch && (
             <button
               onClick={() => setShowAddModal(true)}
               className="mt-4 text-primary-600 hover:text-primary-700 font-medium"
@@ -651,16 +692,43 @@ export default function MyPatientsPage() {
           )}
         </div>
       ) : (
-        <div className="space-y-3">
-          {filteredPatients.map(patient => (
-            <PatientCard
-              key={patient.id}
-              patient={patient}
-              onStartSession={() => handleStartSession(patient)}
-              onViewDetails={() => handleViewDetails(patient)}
-            />
-          ))}
-        </div>
+        <>
+          <div className="space-y-3">
+            {paginatedPatients.map(patient => (
+              <PatientCard
+                key={patient.id}
+                patient={patient}
+                onStartSession={() => handleStartSession(patient)}
+                onViewDetails={() => handleViewDetails(patient)}
+              />
+            ))}
+          </div>
+
+          {/* Pagination Controls */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between gap-3 pt-2" dir="rtl">
+              <button
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={safePage <= 1}
+                className="px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                السابق
+              </button>
+              <p className="font-cairo text-[13px] text-gray-500">
+                صفحة {safePage} من {totalPages}
+                {' • '}
+                {filteredPatients.length} مريض
+              </p>
+              <button
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                disabled={safePage >= totalPages}
+                className="px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                التالي
+              </button>
+            </div>
+          )}
+        </>
       )}
 
       {/* Add Patient Modal */}
