@@ -1,15 +1,5 @@
-import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
-import { getPatientMedications } from '@shared/lib/data/medications'
-import { NextResponse } from 'next/server'
+export const dynamic = 'force-dynamic'
 
-export async function GET() {
-  try {
-    const user = await requireApiRole('patient')
-    const medications = await getPatientMedications(user.id)
+// Re-exported from shared handler — single source of truth
+export { GET } from '@shared/lib/api/handlers/patient/medication-reminders/handler'
 
-    return NextResponse.json({ success: true, medications: medications || [] })
-  } catch (error: any) {
-    console.error('Get medication reminders error:', error)
-    return toApiErrorResponse(error, 'Failed to fetch medications')
-  }
-}

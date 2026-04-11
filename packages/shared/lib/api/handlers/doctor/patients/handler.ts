@@ -1,0 +1,184 @@
+export const dynamic = 'force-dynamic'
+
+import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
+import { createClient } from '@shared/lib/supabase/server'
+import { createAdminClient } from '@shared/lib/supabase/admin'
+import { logAuditEvent } from '@shared/lib/data/audit'
+import { getActiveClinicIdFromCookies } from '@shared/lib/data/clinic-context'
+import { NextResponse } from 'next/server'
+
+export async function GET() {
+  try {
+    const user = await requireApiRole('doctor')
+    const supabase = await createClient()
+    const admin = createAdminClient('patient-privacy-checks')
+
+    // Primary source: explicit doctor-patient relationships
+    const { data: relationships, error: relError } = await admin
+      .from('doctor_patient_relationships')
+      .select('status, relationship_type, patient_id, created_at')
+      .eq('doctor_id', user.id)
+      .order('created_at', { ascending: false })
+
+    if (relError) {
+      throw relError
+    }
+
+    const relationshipRows = (relationships || []) as any[]
+    const relationshipPatients = relationshipRows
+      .map((r) => ({
+        relationship_status: (r.status || 'active') as 'active' | 'pending' | 'inactive',
+        relationship_type: r.relationship_type || null,
+        patient_id: r.patient_id as string
+      }))
+      .filter((r) => r.patient_id)
+
+    const relationshipPatientIds = relationshipPatients.map((r) => r.patient_id)
+    const relationshipPatientMap = new Map<string, any>()
+    if (relationshipPatientIds.length > 0) {
+      const { data: patientRows, error: patientRowsError } = await admin
+        .from('patients')
+        .select('id, full_name, phone, sex, registered, created_at')
+        .in('id', relationshipPatientIds)
+
+      if (patientRowsError) throw patientRowsError
+      ;(patientRows || []).forEach((p: any) => relationshipPatientMap.set(p.id, p))
+    }
+
+    // Shared-with-me source: patients shared by another doctor via patient_visibility
+    const clinicId = await getActiveClinicIdFromCookies()
+    if (clinicId) {
+      try {
+        const { data: sharedRows } = await admin
+          .from('patient_visibility')
+          .select('patient_id')
+          .eq('clinic_id', clinicId)
+          .eq('grantee_user_id', user.id)
+          .eq('mode', 'SHARED_BY_CONSENT')
+
+        const sharedIds = (sharedRows || [])
+          .map((r: any) => r.patient_id as string)
+          .filter(id => id && !relationshipPatientIds.includes(id)) // no duplicates
+
+        if (sharedIds.length > 0) {
+          const { data: sharedPatients } = await admin
+            .from('patients')
+            .select('id, full_name, phone, sex, registered, created_at')
+            .in('id', sharedIds)
+
+          ;(sharedPatients || []).forEach((p: any) => {
+            relationshipPatientMap.set(p.id, p)
+            relationshipPatients.push({
+              relationship_status: 'active',
+              relationship_type: 'shared',
+              patient_id: p.id,
+            })
+          })
+        }
+      } catch { /* patient_visibility may not exist — non-fatal */ }
+    }
+
+    // Fallback source for legacy doctors without relationship rows:
+    // patients inferred from clinical notes.
+    let basePatients = relationshipPatients
+    if (basePatients.length === 0) {
+      const { data: notes, error: notesError } = await supabase
+        .from('clinical_notes')
+        .select('patient_id')
+        .eq('doctor_id', user.id)
+
+      if (notesError) throw notesError
+
+      const inferredPatientIds = Array.from(new Set((notes || []).map((n) => n.patient_id)))
+      if (inferredPatientIds.length > 0) {
+        const { data: inferredPatients, error: inferredError } = await admin
+          .from('patients')
+          .select('id, full_name, phone, sex, registered, created_at')
+          .in('id', inferredPatientIds)
+
+        if (inferredError) throw inferredError
+
+        basePatients = (inferredPatients || []).map((p) => ({
+          relationship_status: 'active' as const,
+          relationship_type: null,
+          patient_id: p.id
+        }))
+
+        ;(inferredPatients || []).forEach((p: any) => relationshipPatientMap.set(p.id, p))
+      }
+    }
+
+    if (basePatients.length === 0) {
+      return NextResponse.json({ success: true, patients: [] })
+    }
+
+    const patientIds = basePatients
+      .map((r) => r.patient_id)
+      .filter((id): id is string => !!id)
+
+    // Build visit stats from clinical notes
+    const { data: noteStats, error: noteStatsError } = await supabase
+      .from('clinical_notes')
+      .select('patient_id, created_at')
+      .eq('doctor_id', user.id)
+      .in('patient_id', patientIds)
+      .order('created_at', { ascending: false })
+
+    if (noteStatsError) throw noteStatsError
+
+    const statsByPatient: Record<string, { count: number; lastVisit: string | null }> = {}
+    ;(noteStats || []).forEach((note) => {
+      if (!statsByPatient[note.patient_id]) {
+        statsByPatient[note.patient_id] = { count: 0, lastVisit: note.created_at || null }
+      }
+      statsByPatient[note.patient_id].count += 1
+    })
+
+    const patients = basePatients
+      .map((row) => {
+        const patient = relationshipPatientMap.get(row.patient_id)
+        if (!patient) return null
+        const stats = statsByPatient[patient.id]
+        return {
+          id: patient.id,
+          name: patient.full_name || 'مريض',
+          phone: patient.phone,
+          gender: patient.sex ? patient.sex.toLowerCase() : undefined,
+          relationship_status: row.relationship_status,
+          is_walkin: patient.registered === false,
+          last_visit: stats?.lastVisit || null,
+          visit_count: stats?.count || 0,
+          created_at: patient.created_at
+        }
+      })
+      .filter((p): p is {
+        id: string
+        name: string
+        phone: string
+        gender: string | undefined
+        relationship_status: 'active' | 'pending' | 'inactive'
+        is_walkin: boolean
+        last_visit: string | null
+        visit_count: number
+        created_at: string
+      } => !!p)
+      .sort((a, b) => {
+        const aTime = a.last_visit ? new Date(a.last_visit).getTime() : 0
+        const bTime = b.last_visit ? new Date(b.last_visit).getTime() : 0
+        return bTime - aTime
+      })
+
+    // Audit: doctor viewed patient list (clinicId already resolved above)
+    logAuditEvent({
+      clinicId: clinicId || undefined,
+      actorUserId: user.id,
+      action: 'VIEW_PATIENT',
+      entityType: 'patient_list',
+      metadata: { count: patients.length }
+    })
+
+    return NextResponse.json({ success: true, patients })
+  } catch (error: any) {
+    return toApiErrorResponse(error, 'Failed to fetch patients')
+  }
+}

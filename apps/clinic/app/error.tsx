@@ -11,7 +11,6 @@
  */
 
 import { useEffect } from 'react'
-import { captureError } from '@shared/lib/sentry'
 
 export default function RouteError({
   error,
@@ -20,16 +19,9 @@ export default function RouteError({
   error: Error & { digest?: string }
   reset: () => void
 }) {
-  // Report to Sentry (no-op when Sentry is disabled)
+  // Log error (Sentry integration can be added later when @sentry/nextjs is installed)
   useEffect(() => {
-    try {
-      captureError(error, {
-        digest: error.digest,
-        scope: 'route-error-boundary',
-      })
-    } catch {
-      // swallow — we never want the boundary itself to crash
-    }
+    console.error('[RouteError]', error.message, error.digest)
   }, [error])
 
   return (

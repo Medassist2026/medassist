@@ -1,18 +1,5 @@
 export const dynamic = 'force-dynamic'
 
-import { createClient } from '@shared/lib/supabase/server'
-import { NextResponse } from 'next/server'
+// Re-exported from shared handler — single source of truth
+export { POST } from '@shared/lib/api/handlers/auth/logout/handler'
 
-export async function POST() {
-  try {
-    const supabase = await createClient()
-    await supabase.auth.signOut()
-    
-    return NextResponse.json({ success: true })
-  } catch (error: any) {
-    return NextResponse.json(
-      { error: error.message || 'Logout failed' },
-      { status: 500 }
-    )
-  }
-}

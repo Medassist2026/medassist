@@ -1,22 +1,5 @@
 export const dynamic = 'force-dynamic'
 
-import { getLabTestsCatalog } from '@shared/lib/data/clinical'
-import { NextResponse } from 'next/server'
+// Re-exported from shared handler — single source of truth
+export { GET } from '@shared/lib/api/handlers/clinical/lab-tests/handler'
 
-export async function GET() {
-  try {
-    const tests = await getLabTestsCatalog()
-
-    return NextResponse.json({
-      success: true,
-      tests
-    })
-
-  } catch (error: any) {
-    console.error('Lab tests error:', error)
-    return NextResponse.json(
-      { error: error.message || 'Failed to load lab tests' },
-      { status: 500 }
-    )
-  }
-}

@@ -14,7 +14,6 @@
  */
 
 import { useEffect } from 'react'
-import { captureError } from '@shared/lib/sentry'
 
 export default function GlobalError({
   error,
@@ -23,15 +22,9 @@ export default function GlobalError({
   error: Error & { digest?: string }
   reset: () => void
 }) {
+  // Log error (Sentry integration can be added later when @sentry/nextjs is installed)
   useEffect(() => {
-    try {
-      captureError(error, {
-        digest: error.digest,
-        scope: 'global-error-boundary',
-      })
-    } catch {
-      // boundary must never throw
-    }
+    console.error('[GlobalError]', error.message, error.digest)
   }, [error])
 
   return (
