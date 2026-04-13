@@ -4,25 +4,22 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
-  Bell,
-  ChevronRight,
-  RefreshCw,
-  UserCheck,
-  CalendarPlus,
-  Banknote,
-  UserPlus,
-  Users,
   User,
   Clock,
   Stethoscope,
   Search,
   X,
   Loader2,
-  Plus,
-  ArrowUp,
+  UserCheck,
   Zap,
+  ArrowUp,
 } from 'lucide-react'
 import { DoctorStatusCard } from '@ui-clinic/components/frontdesk/DoctorStatusCard'
+import { DoctorTabStrip } from '@ui-clinic/components/frontdesk/DoctorTabStrip'
+import { QueuePatientCard } from '@ui-clinic/components/frontdesk/QueuePatientCard'
+import { EmptyQueueState } from '@ui-clinic/components/frontdesk/EmptyQueueState'
+import { FrontdeskDashboardStats } from '@ui-clinic/components/frontdesk/FrontdeskDashboardStats'
+import { subscribeToQueue } from '@shared/lib/realtime/queue-subscription'
 import type { CheckInQueueItem } from '@shared/lib/data/frontdesk'
 import { translateSpecialty } from '@shared/lib/utils/specialty-labels'
 
@@ -32,56 +29,57 @@ import { translateSpecialty } from '@shared/lib/utils/specialty-labels'
 
 type QueueItem = CheckInQueueItem
 
-interface DoctorStatus {
+interface DoctorStatusDerived {
   doctorId: string
   doctorName: string
-  specialty: string
+  status: 'in_session' | 'available' | 'away'
   currentPatient?: {
     name: string
     queueNumber: number
-    startedAt: string
   }
+  sessionStartedAt?: string
   waitingCount: number
-  nextPatient?: {
-    name: string
-    queueNumber: number
-  }
+  nextPatientName?: string
+  isActive: boolean
 }
 
 // ============================================================================
 // HELPERS
 // ============================================================================
 
-function deriveDoctorStatuses(queue: QueueItem[]): DoctorStatus[] {
-  const doctorMap = new Map<string, DoctorStatus>()
+function deriveDoctorStatuses(queue: QueueItem[]): DoctorStatusDerived[] {
+  const doctorMap = new Map<
+    string,
+    DoctorStatusDerived
+  >()
 
   for (const item of queue) {
     const doctorId = item.doctor_id
     if (!doctorMap.has(doctorId)) {
       doctorMap.set(doctorId, {
         doctorId,
-        doctorName: item.doctor?.full_name || 'طبيب',
-        specialty: translateSpecialty(item.doctor?.specialty) || '',
+        doctorName: `د. ${(item.doctor?.full_name || 'طبيب').replace(/^د\.\s*/, '')}`,
+        status: 'available',
         waitingCount: 0,
+        isActive: false,
       })
     }
 
     const doc = doctorMap.get(doctorId)!
 
-    if ((item as QueueItem).status === 'in_progress') {
+    if (item.status === 'in_progress') {
+      doc.status = 'in_session'
       doc.currentPatient = {
         name: item.patient?.full_name || 'مريض',
         queueNumber: item.queue_number,
-        startedAt: item.called_at || item.checked_in_at,
       }
+      doc.sessionStartedAt = item.called_at || item.checked_in_at
+      doc.isActive = true
     } else if (item.status === 'waiting') {
       doc.waitingCount++
-      // First waiting patient = next patient
-      if (!doc.nextPatient) {
-        doc.nextPatient = {
-          name: item.patient?.full_name || 'مريض',
-          queueNumber: item.queue_number,
-        }
+      doc.isActive = true
+      if (!doc.nextPatientName) {
+        doc.nextPatientName = item.patient?.full_name || 'مريض'
       }
     }
   }
@@ -89,31 +87,46 @@ function deriveDoctorStatuses(queue: QueueItem[]): DoctorStatus[] {
   return Array.from(doctorMap.values())
 }
 
-function getStatusConfig(status: string) {
-  switch (status) {
-    case 'in_progress':
-      return { label: 'مع الطبيب', dot: 'bg-blue-500', bg: 'bg-blue-50 text-blue-700' }
-    case 'waiting':
-      return { label: 'انتظار', dot: 'bg-yellow-500', bg: 'bg-yellow-50 text-yellow-700' }
-    case 'completed':
-      return { label: 'مكتمل', dot: 'bg-green-500', bg: 'bg-green-50 text-green-700' }
-    default:
-      return { label: status, dot: 'bg-gray-400', bg: 'bg-gray-50 text-gray-700' }
+function sortQueueEntries(entries: QueueItem[]): QueueItem[] {
+  const statusOrder: Record<string, number> = {
+    in_progress: 0,
+    waiting: 1,
+    completed: 2,
+    no_show: 3,
+    cancelled: 4,
   }
+
+  return [...entries].sort((a, b) => {
+    const aOrder = statusOrder[a.status] ?? 99
+    const bOrder = statusOrder[b.status] ?? 99
+    if (aOrder !== bOrder) return aOrder - bOrder
+
+    // Within waiting: by effective time
+    if (a.status === 'waiting' && b.status === 'waiting') {
+      const aTime = a.queue_type === 'appointment' && a.appointment_id
+        ? a.checked_in_at
+        : a.checked_in_at
+      const bTime = b.queue_type === 'appointment' && b.appointment_id
+        ? b.checked_in_at
+        : b.checked_in_at
+      // Priority first (emergency > appointment > walkin)
+      if (a.priority !== b.priority) return b.priority - a.priority
+      return new Date(aTime).getTime() - new Date(bTime).getTime()
+    }
+
+    return 0
+  })
 }
 
-function getTypeLabel(type: string) {
-  switch (type) {
-    case 'walkin': return 'حضور'
-    case 'appointment': return 'موعد'
-    case 'emergency': return 'طوارئ'
-    default: return type
-  }
-}
-
-function formatElapsedMinutes(dateStr: string) {
-  const diff = Date.now() - new Date(dateStr).getTime()
-  return Math.max(0, Math.floor(diff / 60000))
+function computeAvgWaitMinutes(queue: QueueItem[]): number | null {
+  const waitingItems = queue.filter((q) => q.status === 'waiting')
+  if (waitingItems.length === 0) return null
+  const now = Date.now()
+  const totalMs = waitingItems.reduce(
+    (sum, q) => sum + (now - new Date(q.checked_in_at).getTime()),
+    0
+  )
+  return Math.round(totalMs / waitingItems.length / 60000)
 }
 
 // ============================================================================
@@ -147,12 +160,10 @@ function WalkInSheet({ onClose, onSuccess }: WalkInSheetProps) {
   const [queueType, setQueueType] = useState<'walkin' | 'emergency'>('walkin')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
-  // Gap-aware schedule state
   const [gapSchedule, setGapSchedule] = useState<GapSchedule | null>(null)
   const [loadingGap, setLoadingGap] = useState(false)
   const searchTimer = useRef<NodeJS.Timeout>()
 
-  // Load clinic doctors once
   useEffect(() => {
     fetch('/api/doctors/list')
       .then(r => r.ok ? r.json() : null)
@@ -165,7 +176,6 @@ function WalkInSheet({ onClose, onSuccess }: WalkInSheetProps) {
       .catch(() => {})
   }, [])
 
-  // Fetch gap schedule when doctor changes or walk-in type selected
   useEffect(() => {
     if (!selectedDoctorId || queueType !== 'walkin') {
       setGapSchedule(null)
@@ -181,7 +191,6 @@ function WalkInSheet({ onClose, onSuccess }: WalkInSheetProps) {
       .finally(() => setLoadingGap(false))
   }, [selectedDoctorId, queueType])
 
-  // Debounced patient search
   useEffect(() => {
     clearTimeout(searchTimer.current)
     if (!query.trim() || selectedPatient) return
@@ -218,9 +227,10 @@ function WalkInSheet({ onClose, onSuccess }: WalkInSheetProps) {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'فشل تسجيل الوصول')
-      onSuccess(data.queueItem?.queue_number || '?', selectedPatient.full_name || 'المريض')
-    } catch (e: any) {
-      setError(e.message || 'حدث خطأ')
+      onSuccess(data.queueItem?.queue_number || 0, selectedPatient.full_name || 'المريض')
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'حدث خطأ'
+      setError(msg)
     } finally {
       setSubmitting(false)
     }
@@ -233,7 +243,6 @@ function WalkInSheet({ onClose, onSuccess }: WalkInSheetProps) {
         onClick={e => e.stopPropagation()}
         dir="rtl"
       >
-        {/* Handle + header */}
         <div className="w-10 h-1 bg-[#E5E7EB] rounded-full mx-auto mb-4" />
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-cairo text-[17px] font-bold text-[#030712]">تسجيل وصول مريض</h3>
@@ -267,7 +276,7 @@ function WalkInSheet({ onClose, onSuccess }: WalkInSheetProps) {
                   value={query}
                   onChange={e => setQuery(e.target.value)}
                   placeholder="الاسم أو رقم الهاتف..."
-                  className="w-full h-11 pr-9 pl-3 rounded-xl border-[0.8px] border-[#E5E7EB] bg-[#F9FAFB] font-cairo text-[14px] outline-none focus:border-[#16A34A]"
+                  className="w-full h-11 pe-9 ps-3 rounded-xl border-[0.8px] border-[#E5E7EB] bg-[#F9FAFB] font-cairo text-[14px] outline-none focus:border-[#16A34A]"
                   autoFocus
                 />
                 {searching && (
@@ -342,7 +351,7 @@ function WalkInSheet({ onClose, onSuccess }: WalkInSheetProps) {
           </div>
         </div>
 
-        {/* ── Gap-aware slot preview (walk-in only) ─────────────────────────── */}
+        {/* Gap-aware slot preview (walk-in only) */}
         {queueType === 'walkin' && (
           <div className="mb-4">
             {loadingGap ? (
@@ -352,13 +361,11 @@ function WalkInSheet({ onClose, onSuccess }: WalkInSheetProps) {
               </div>
             ) : gapSchedule ? (
               gapSchedule.nextAvailableSlot === null ? (
-                /* No free slot today */
                 <div className="px-3 py-2.5 rounded-xl bg-[#FEF2F2] border-[0.8px] border-[#EF4444]/30">
                   <p className="font-cairo text-[13px] font-semibold text-[#EF4444]">لا توجد فترات متاحة اليوم</p>
                   <p className="font-cairo text-[11px] text-[#9CA3AF] mt-0.5">الجدول ممتلئ — يمكنك إضافة المريض آخر الطابور</p>
                 </div>
               ) : gapSchedule.gapTooSmall ? (
-                /* Gap exists but smaller than slot duration */
                 <div className="px-3 py-2.5 rounded-xl bg-[#FFFBEB] border-[0.8px] border-[#F59E0B]/40">
                   <div className="flex items-start gap-2">
                     <Clock className="w-4 h-4 text-[#F59E0B] flex-shrink-0 mt-0.5" />
@@ -376,7 +383,6 @@ function WalkInSheet({ onClose, onSuccess }: WalkInSheetProps) {
                   </div>
                 </div>
               ) : (
-                /* Normal: free slot found */
                 <div className="px-3 py-2.5 rounded-xl bg-[#F0FDF4] border-[0.8px] border-[#16A34A]/30">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -402,12 +408,10 @@ function WalkInSheet({ onClose, onSuccess }: WalkInSheetProps) {
           </div>
         )}
 
-        {/* Error */}
         {error && (
           <p className="font-cairo text-[12px] text-[#EF4444] text-center mb-3">{error}</p>
         )}
 
-        {/* Submit */}
         <button
           onClick={handleSubmit}
           disabled={!selectedPatient || !selectedDoctorId || submitting}
@@ -428,7 +432,7 @@ function WalkInSheet({ onClose, onSuccess }: WalkInSheetProps) {
 }
 
 // ============================================================================
-// PULL-UP SHEET — manually move a patient earlier in the queue (A1)
+// PULL-UP SHEET
 // ============================================================================
 
 interface PullUpSheetProps {
@@ -455,8 +459,9 @@ function PullUpSheet({ item, maxPosition, onClose, onSuccess }: PullUpSheetProps
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'فشل إعادة الترتيب')
       onSuccess(item.patient?.full_name || 'المريض', item.queue_number, targetPosition)
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'حدث خطأ'
+      setError(msg)
     } finally {
       setSubmitting(false)
     }
@@ -474,13 +479,11 @@ function PullUpSheet({ item, maxPosition, onClose, onSuccess }: PullUpSheetProps
           </button>
         </div>
 
-        {/* Patient info */}
         <div className="bg-[#F9FAFB] rounded-xl px-3 py-2.5 mb-4 border-[0.8px] border-[#E5E7EB]">
           <p className="font-cairo text-[13px] font-bold text-[#030712]">{item.patient?.full_name || 'مريض'}</p>
           <p className="font-cairo text-[12px] text-[#6B7280]">الترتيب الحالي: #{item.queue_number}</p>
         </div>
 
-        {/* Position picker */}
         <label className="font-cairo text-[12px] text-[#6B7280] mb-2 block">الترتيب الجديد</label>
         <div className="flex items-center gap-3 mb-5">
           <button
@@ -522,7 +525,7 @@ function PullUpSheet({ item, maxPosition, onClose, onSuccess }: PullUpSheetProps
 }
 
 // ============================================================================
-// URGENT BOOKING SHEET — حجز مستعجل at specific time (A2)
+// URGENT BOOKING SHEET
 // ============================================================================
 
 interface UrgentBookingSheetProps {
@@ -537,7 +540,7 @@ function UrgentBookingSheet({ onClose, onSuccess }: UrgentBookingSheetProps) {
   const [doctors, setDoctors] = useState<Array<{ id: string; full_name: string | null; specialty: string }>>([])
   const [selectedDoctorId, setSelectedDoctorId] = useState('')
   const [time, setTime] = useState(() => {
-    const now = new Date(Date.now() + 2 * 60 * 60 * 1000) // Cairo
+    const now = new Date(Date.now() + 2 * 60 * 60 * 1000)
     const h = now.getHours().toString().padStart(2, '0')
     const m = (Math.ceil(now.getMinutes() / 15) * 15 % 60).toString().padStart(2, '0')
     return `${h}:${m}`
@@ -586,14 +589,14 @@ function UrgentBookingSheet({ onClose, onSuccess }: UrgentBookingSheetProps) {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'فشل الحجز')
       onSuccess(data.message || `حجز مستعجل: ${selectedPatient.full_name} — ${time}`)
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'حدث خطأ'
+      setError(msg)
     } finally {
       setSubmitting(false)
     }
   }
 
-  // Generate 15-min time slots from 8am to 10pm
   const timeSlots = Array.from({ length: 57 }, (_, i) => {
     const totalMin = 8 * 60 + i * 15
     const h = Math.floor(totalMin / 60).toString().padStart(2, '0')
@@ -638,7 +641,7 @@ function UrgentBookingSheet({ onClose, onSuccess }: UrgentBookingSheetProps) {
                 <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
                 <input type="text" value={query} onChange={e => setQuery(e.target.value)}
                   placeholder="الاسم أو الهاتف..." autoFocus
-                  className="w-full h-11 pr-9 pl-3 rounded-xl border-[0.8px] border-[#E5E7EB] bg-[#F9FAFB] font-cairo text-[14px] outline-none focus:border-[#D97706]" />
+                  className="w-full h-11 pe-9 ps-3 rounded-xl border-[0.8px] border-[#E5E7EB] bg-[#F9FAFB] font-cairo text-[14px] outline-none focus:border-[#D97706]" />
               </div>
               {results.length > 0 && (
                 <div className="mt-1.5 bg-white rounded-xl border-[0.8px] border-[#E5E7EB] overflow-hidden max-h-[140px] overflow-y-auto">
@@ -728,195 +731,7 @@ function UrgentBookingSheet({ onClose, onSuccess }: UrgentBookingSheetProps) {
 }
 
 // ============================================================================
-// QUICK ACTIONS GRID
-// ============================================================================
-
-function QuickActionsGrid() {
-  const actions = [
-    { href: '/frontdesk/checkin', label: 'تسجيل وصول', icon: UserCheck, color: 'text-[#16A34A]', bg: 'bg-[#F0FDF4]' },
-    { href: '/frontdesk/appointments/new', label: 'حجز موعد', icon: CalendarPlus, color: 'text-[#2563EB]', bg: 'bg-[#EFF6FF]' },
-    { href: '/frontdesk/payments/new', label: 'تحصيل دفع', icon: Banknote, color: 'text-[#D97706]', bg: 'bg-[#FFFBEB]' },
-    { href: '/frontdesk/patients/register', label: 'تسجيل مريض', icon: UserPlus, color: 'text-[#7C3AED]', bg: 'bg-[#F5F3FF]' },
-  ]
-
-  return (
-    <div className="grid grid-cols-2 gap-3">
-      {actions.map((action) => {
-        const Icon = action.icon
-        return (
-          <Link
-            key={action.href}
-            href={action.href}
-            className="flex flex-col items-center gap-2 py-4 px-3 bg-white rounded-[12px] border-[0.8px] border-[#E5E7EB] active:scale-[0.97] transition-transform"
-          >
-            <div className={`w-11 h-11 rounded-full flex items-center justify-center ${action.bg}`}>
-              <Icon className={`w-5 h-5 ${action.color}`} />
-            </div>
-            <span className="font-cairo text-[13px] font-semibold text-[#030712]">
-              {action.label}
-            </span>
-          </Link>
-        )
-      })}
-    </div>
-  )
-}
-
-// ============================================================================
-// TODAY STATS ROW
-// ============================================================================
-
-function TodayStatsRow({
-  arrivals,
-  waiting,
-  revenue,
-}: {
-  arrivals: number
-  waiting: number
-  revenue: number
-}) {
-  return (
-    <div className="flex gap-3">
-      <div className="flex-1 bg-white rounded-[12px] border-[0.8px] border-[#E5E7EB] p-3 text-center">
-        <p className="font-cairo text-[20px] font-bold text-[#030712]">{arrivals}</p>
-        <p className="font-cairo text-[11px] text-[#6B7280]">وصول</p>
-      </div>
-      <div className="flex-1 bg-white rounded-[12px] border-[0.8px] border-[#E5E7EB] p-3 text-center">
-        <p className="font-cairo text-[20px] font-bold text-[#D97706]">{waiting}</p>
-        <p className="font-cairo text-[11px] text-[#6B7280]">انتظار</p>
-      </div>
-      <div className="flex-1 bg-white rounded-[12px] border-[0.8px] border-[#E5E7EB] p-3 text-center">
-        <p className="font-cairo text-[20px] font-bold text-[#16A34A]">{(revenue ?? 0).toLocaleString('ar-EG')}</p>
-        <p className="font-cairo text-[11px] text-[#6B7280]">ج.م</p>
-      </div>
-    </div>
-  )
-}
-
-// ============================================================================
-// QUEUE LIST (Mobile)
-// ============================================================================
-
-function MobileQueueList({
-  queue,
-  onUpdateStatus,
-  onPullUp,
-  updating,
-}: {
-  queue: QueueItem[]
-  onUpdateStatus: (id: string, status: string) => void
-  onPullUp: (item: QueueItem) => void
-  updating: string | null
-}) {
-  const activeQueue = queue.filter(q => q.status === 'waiting' || q.status === 'in_progress')
-
-  if (activeQueue.length === 0) {
-    return (
-      <div className="text-center py-10">
-        <div className="w-14 h-14 rounded-full bg-[#F3F4F6] flex items-center justify-center mx-auto mb-3">
-          <Users className="w-7 h-7 text-[#D1D5DB]" />
-        </div>
-        <p className="font-cairo text-[15px] font-semibold text-[#030712] mb-1">
-          لا يوجد مرضى في الانتظار
-        </p>
-        <p className="font-cairo text-[13px] text-[#6B7280]">
-          سجل وصول المرضى لإضافتهم للقائمة
-        </p>
-      </div>
-    )
-  }
-
-  return (
-    <div className="space-y-2">
-      {activeQueue.map((item) => {
-        const statusConfig = getStatusConfig(item.status)
-        const elapsed = formatElapsedMinutes(item.called_at || item.checked_in_at)
-
-        return (
-          <div
-            key={item.id}
-            className="bg-white rounded-[12px] border-[0.8px] border-[#E5E7EB] p-3.5"
-          >
-            <div className="flex items-center gap-3">
-              {/* Queue Number */}
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
-                item.status === 'in_progress' ? 'bg-blue-500 text-white' : 'bg-[#F3F4F6] text-[#030712]'
-              }`}>
-                <span className="font-cairo text-[14px] font-bold">#{item.queue_number}</span>
-              </div>
-
-              {/* Patient Info */}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <h4 className="font-cairo text-[14px] font-semibold text-[#030712] truncate">
-                    {item.patient?.full_name || 'مريض'}
-                  </h4>
-                  {item.queue_type === 'emergency' && (
-                    <span className="font-cairo text-[10px] font-bold bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full">
-                      🔴 طوارئ
-                    </span>
-                  )}
-                  {item.priority === 3 && item.queue_type !== 'emergency' && (
-                    <span className="font-cairo text-[10px] font-bold bg-[#FEF3C7] text-[#92400E] px-1.5 py-0.5 rounded-full">
-                      ⚡ مستعجل
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 mt-0.5">
-                  <span className="font-cairo text-[12px] text-[#6B7280]">
-                    د. {(item.doctor?.full_name || '').replace(/^د\.\s*/, '')}
-                  </span>
-                  <span className="text-[#D1D5DB]">·</span>
-                  <span className="font-cairo text-[12px] text-[#9CA3AF]">
-                    {elapsed} د
-                  </span>
-                </div>
-              </div>
-
-              {/* Status + Action */}
-              <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
-                <span className={`font-cairo text-[11px] font-medium px-2 py-0.5 rounded-full ${statusConfig.bg}`}>
-                  {statusConfig.label}
-                </span>
-
-                {item.status === 'waiting' && (
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => onPullUp(item)}
-                      className="font-cairo text-[11px] font-medium text-[#6B7280]"
-                      title="تقديم في الترتيب"
-                    >
-                      <ArrowUp className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => onUpdateStatus(item.id, 'in_progress')}
-                      disabled={updating === item.id}
-                      className="font-cairo text-[11px] font-medium text-[#16A34A] disabled:opacity-40"
-                    >
-                      {updating === item.id ? '...' : 'استدعاء'}
-                    </button>
-                  </div>
-                )}
-                {item.status === 'in_progress' && (
-                  <button
-                    onClick={() => onUpdateStatus(item.id, 'completed')}
-                    disabled={updating === item.id}
-                    className="font-cairo text-[11px] font-medium text-[#2563EB] disabled:opacity-40"
-                  >
-                    {updating === item.id ? '...' : 'إنهاء'}
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-// ============================================================================
-// WINDOW ALERT BANNER — shown when a walk-in is carrying an open apt window
+// WINDOW ALERT BANNER
 // ============================================================================
 
 function WindowAlertBanner({ patientName }: { patientName: string }) {
@@ -944,77 +759,117 @@ function WindowAlertBanner({ patientName }: { patientName: string }) {
 export default function FrontDeskDashboardPage() {
   const router = useRouter()
   const [queue, setQueue] = useState<QueueItem[]>([])
-  const [revenue, setRevenue] = useState(0)
+  const [revenue, setRevenue] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [updating, setUpdating] = useState<string | null>(null)
-  const [lastUpdate, setLastUpdate] = useState<Date>(new Date())
-  const [pendingInviteCount, setPendingInviteCount] = useState(0)
+  const [isLive, setIsLive] = useState(true)
+  const [clinicId, setClinicId] = useState<string | null>(null)
+  const [selectedDoctorId, setSelectedDoctorId] = useState<string | 'all'>('all')
+
+  // Sheet states
   const [showWalkIn, setShowWalkIn] = useState(false)
   const [walkInToast, setWalkInToast] = useState<string | null>(null)
-  // Window event toasts
   const [windowToast, setWindowToast] = useState<{
     type: 'opened' | 'expired'
     patientName: string
   } | null>(null)
-  // Pull-up sheet
   const [pullUpItem, setPullUpItem] = useState<QueueItem | null>(null)
-  // Urgent booking sheet
   const [showUrgent, setShowUrgent] = useState(false)
 
-  const refreshData = useCallback(async () => {
+  // ── Data fetching ──
+
+  const refreshQueue = useCallback(async () => {
     try {
-      const [queueRes, paymentsRes] = await Promise.all([
-        fetch('/api/frontdesk/queue/today'),
-        fetch('/api/frontdesk/payments?today=true').catch(() => null),
-      ])
-
-      if (queueRes.ok) {
-        const queueData = await queueRes.json()
-        setQueue(queueData.queue || [])
+      const res = await fetch('/api/frontdesk/queue/today')
+      if (res.ok) {
+        const data = await res.json()
+        setQueue(data.queue || [])
+        if (data.clinicId) setClinicId(data.clinicId)
       }
-
-      if (paymentsRes?.ok) {
-        const payData = await paymentsRes.json()
-        const total = (payData.payments || []).reduce(
-          (sum: number, p: any) => sum + Number(p.amount || 0),
-          0
-        )
-        setRevenue(total)
-      }
-
-      setLastUpdate(new Date())
     } catch (err) {
-      console.error('Dashboard refresh error:', err)
-    } finally {
-      setLoading(false)
+      console.error('Queue refresh error:', err)
     }
   }, [])
 
+  const refreshRevenue = useCallback(async () => {
+    try {
+      const res = await fetch('/api/frontdesk/payments?today=true')
+      if (res.ok) {
+        const data = await res.json()
+        setRevenue(data.totals?.total ?? 0)
+      }
+    } catch {
+      // non-critical
+    }
+  }, [])
+
+  const refreshData = useCallback(async () => {
+    try {
+      await Promise.all([refreshQueue(), refreshRevenue()])
+    } finally {
+      setLoading(false)
+    }
+  }, [refreshQueue, refreshRevenue])
+
+  // Initial load
   useEffect(() => {
-    let cancelled = false
-    const controller = new AbortController()
-
     refreshData()
+  }, [refreshData])
 
-    // Check for pending invites — abort on cleanup to prevent stale state updates
-    fetch('/api/frontdesk/invite', { signal: controller.signal })
-      .then(res => (res.ok ? res.json() : null))
-      .then(data => {
-        if (!cancelled && data?.invites) setPendingInviteCount(data.invites.length)
-      })
-      .catch(() => {})
+  // Realtime subscription for queue
+  useEffect(() => {
+    if (!clinicId) return
+
+    const unsubscribe = subscribeToQueue(clinicId, () => {
+      refreshQueue()
+    })
+
+    setIsLive(true)
 
     return () => {
-      cancelled = true
-      controller.abort()
+      unsubscribe()
+      setIsLive(false)
     }
-  }, [refreshData])
+  }, [clinicId, refreshQueue])
 
-  // Poll every 30 seconds
+  // Polling fallback when not live — 5 second interval
   useEffect(() => {
-    const interval = setInterval(refreshData, 30000)
+    if (isLive) return
+    const interval = setInterval(refreshQueue, 5000)
     return () => clearInterval(interval)
-  }, [refreshData])
+  }, [isLive, refreshQueue])
+
+  // Revenue polling — every 60 seconds
+  useEffect(() => {
+    const interval = setInterval(refreshRevenue, 60000)
+    return () => clearInterval(interval)
+  }, [refreshRevenue])
+
+  // ── Derived data ──
+
+  const doctorStatuses = deriveDoctorStatuses(queue)
+  const waitingCount = queue.filter(q => q.status === 'waiting').length
+  const arrivedToday = queue.filter(q => q.status !== 'cancelled').length
+  const avgWaitMinutes = computeAvgWaitMinutes(queue)
+
+  // Filter queue by selected doctor
+  const filteredQueue = selectedDoctorId === 'all'
+    ? queue
+    : queue.filter(q => q.doctor_id === selectedDoctorId)
+
+  const sortedQueue = sortQueueEntries(filteredQueue)
+
+  // Find first waiting entry for isNextInQueue
+  const firstWaitingId = sortedQueue.find(q => q.status === 'waiting')?.id
+
+  // Doctor tab strip data
+  const doctorTabData = doctorStatuses.map(d => ({
+    id: d.doctorId,
+    name: d.doctorName,
+    isActive: d.isActive,
+  }))
+
+  // ── Actions ──
 
   const showWindowToast = (type: 'opened' | 'expired', patientName: string) => {
     setWindowToast({ type, patientName })
@@ -1032,7 +887,6 @@ export default function FrontDeskDashboardPage() {
       if (!res.ok) throw new Error('فشل التحديث')
       const data = await res.json()
 
-      // Handle window state events returned from session completion
       if (status === 'completed') {
         if (data.windowOpened && data.swappedPatientName) {
           showWindowToast('opened', data.swappedPatientName)
@@ -1041,7 +895,7 @@ export default function FrontDeskDashboardPage() {
         }
       }
 
-      refreshData()
+      refreshQueue()
     } catch (err) {
       console.error('Update error:', err)
     } finally {
@@ -1049,12 +903,7 @@ export default function FrontDeskDashboardPage() {
     }
   }
 
-  // Derive doctor statuses from queue
-  const doctorStatuses = deriveDoctorStatuses(queue)
-  const totalArrivals = queue.length
-  const waitingCount = queue.filter(q => q.status === 'waiting').length
-
-  const handleWalkInSuccess = (queueNumber: number | string, patientName: string) => {
+  const handleWalkInSuccess = (queueNumber: number, patientName: string) => {
     setShowWalkIn(false)
     setWalkInToast(`✓ ${patientName} — رقم ${queueNumber}`)
     setTimeout(() => setWalkInToast(null), 4000)
@@ -1065,7 +914,7 @@ export default function FrontDeskDashboardPage() {
     setPullUpItem(null)
     setWalkInToast(`↑ ${patientName} — من #${from} إلى #${to}`)
     setTimeout(() => setWalkInToast(null), 4000)
-    refreshData()
+    refreshQueue()
   }
 
   const handleUrgentSuccess = (msg: string) => {
@@ -1075,25 +924,32 @@ export default function FrontDeskDashboardPage() {
     refreshData()
   }
 
+  // ── Render ──
 
   return (
     <div dir="rtl">
-      {/* Walk-in sheet */}
+      {/* Sheets */}
       {showWalkIn && (
-        <WalkInSheet
-          onClose={() => setShowWalkIn(false)}
-          onSuccess={handleWalkInSuccess}
+        <WalkInSheet onClose={() => setShowWalkIn(false)} onSuccess={handleWalkInSuccess} />
+      )}
+      {pullUpItem && (
+        <PullUpSheet
+          item={pullUpItem}
+          maxPosition={queue.filter(q => q.status === 'waiting').length}
+          onClose={() => setPullUpItem(null)}
+          onSuccess={handlePullUpSuccess}
         />
       )}
+      {showUrgent && (
+        <UrgentBookingSheet onClose={() => setShowUrgent(false)} onSuccess={handleUrgentSuccess} />
+      )}
 
-      {/* Walk-in success toast */}
+      {/* Toast notifications */}
       {walkInToast && (
         <div className="fixed top-4 left-4 right-4 z-50 mx-auto max-w-sm px-4 py-2.5 rounded-xl shadow-lg font-cairo text-[13px] font-bold text-center bg-[#F0FDF4] text-[#16A34A] border border-[#16A34A]/20">
           {walkInToast}
         </div>
       )}
-
-      {/* Window event toast */}
       {windowToast && (
         <div className={`fixed top-4 left-4 right-4 z-50 mx-auto max-w-sm px-4 py-2.5 rounded-xl shadow-lg font-cairo text-[13px] font-bold text-center border ${
           windowToast.type === 'opened'
@@ -1106,7 +962,7 @@ export default function FrontDeskDashboardPage() {
         </div>
       )}
 
-      {/* Sticky Header */}
+      {/* ═══ TOP APP BAR ═══ */}
       <div className="sticky top-0 z-40 bg-white border-b-[0.8px] border-[#E5E7EB]">
         <div className="flex items-center justify-between px-4 py-3">
           <div>
@@ -1114,21 +970,22 @@ export default function FrontDeskDashboardPage() {
             <p className="font-cairo text-[12px] text-[#6B7280]">استقبال</p>
           </div>
           <div className="flex items-center gap-2">
-            {/* Live indicator */}
-            <div className="flex items-center gap-1.5 bg-[#F0FDF4] rounded-full px-2.5 py-1">
-              <div className="w-1.5 h-1.5 bg-[#16A34A] rounded-full animate-pulse" />
-              <span className="font-cairo text-[11px] text-[#16A34A] font-medium">مباشر</span>
+            {/* Live/Disconnected indicator */}
+            <div className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 ${
+              isLive ? 'bg-[#F0FDF4]' : 'bg-[#F3F4F6]'
+            }`}>
+              <div className={`w-1.5 h-1.5 rounded-full ${
+                isLive ? 'bg-[#16A34A] animate-pulse' : 'bg-[#9CA3AF]'
+              }`} />
+              <span className={`font-cairo text-[11px] font-medium ${
+                isLive ? 'text-[#16A34A]' : 'text-[#9CA3AF]'
+              }`}>
+                {isLive ? 'مباشر' : 'غير متصل'}
+              </span>
             </div>
-            <button
-              onClick={refreshData}
-              className="w-[36px] h-[36px] rounded-full border-[0.8px] border-[#E5E7EB] bg-white flex items-center justify-center"
-            >
-              <RefreshCw className="w-[18px] h-[18px] text-[#6B7280]" />
-            </button>
             <Link
               href="/frontdesk/profile"
               className="w-[36px] h-[36px] rounded-full bg-[#16A34A] flex items-center justify-center"
-              title="الملف الشخصي"
             >
               <User className="w-[18px] h-[18px] text-white" strokeWidth={2} />
             </Link>
@@ -1136,135 +993,106 @@ export default function FrontDeskDashboardPage() {
         </div>
       </div>
 
-      {/* Pull-up sheet */}
-      {pullUpItem && (
-        <PullUpSheet
-          item={pullUpItem}
-          maxPosition={queue.filter(q => q.status === 'waiting').length}
-          onClose={() => setPullUpItem(null)}
-          onSuccess={handlePullUpSuccess}
-        />
-      )}
+      {/* ═══ DOCTOR TAB STRIP ═══ */}
+      <DoctorTabStrip
+        doctors={doctorTabData}
+        selectedDoctorId={selectedDoctorId}
+        onSelect={setSelectedDoctorId}
+      />
 
-      {/* Urgent booking sheet */}
-      {showUrgent && (
-        <UrgentBookingSheet
-          onClose={() => setShowUrgent(false)}
-          onSuccess={handleUrgentSuccess}
-        />
-      )}
-
-      {/* Walk-in FAB — bottom right, above nav bar */}
-      <button
-        onClick={() => setShowWalkIn(true)}
-        className="fixed bottom-24 left-4 z-30 w-14 h-14 rounded-full bg-[#16A34A] shadow-lg shadow-[#16A34A]/30 flex items-center justify-center active:scale-95 transition-transform"
-        title="تسجيل وصول مريض"
-      >
-        <UserCheck className="w-6 h-6 text-white" strokeWidth={2} />
-      </button>
-
-      {/* Urgent booking FAB — above walk-in FAB */}
-      <button
-        onClick={() => setShowUrgent(true)}
-        className="fixed bottom-40 left-4 z-30 w-12 h-12 rounded-full bg-[#D97706] shadow-lg shadow-[#D97706]/30 flex items-center justify-center active:scale-95 transition-transform"
-        title="حجز مستعجل"
-      >
-        <Zap className="w-5 h-5 text-white" strokeWidth={2} />
-      </button>
-
-      {/* Content */}
-      <div className="px-4 pt-4 pb-6 space-y-5">
+      {/* ═══ CONTENT ═══ */}
+      <div className="px-4 pt-2 pb-6 space-y-4">
         {loading ? (
-          <div className="text-center py-16">
-            <div className="w-10 h-10 border-2 border-[#16A34A] border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-            <p className="font-cairo text-[14px] text-[#6B7280]">جاري التحميل...</p>
-          </div>
+          <EmptyQueueState variant="loading" />
         ) : (
           <>
-            {/* Pending Invitations Banner */}
-            {pendingInviteCount > 0 && (
-              <Link
-                href="/frontdesk/invitations"
-                className="flex items-center gap-3 bg-[#EFF6FF] rounded-[12px] border-[0.8px] border-[#BFDBFE] p-3.5 active:scale-[0.98] transition-transform"
-              >
-                <div className="w-10 h-10 rounded-full bg-[#DBEAFE] flex items-center justify-center flex-shrink-0">
-                  <Bell className="w-5 h-5 text-[#2563EB]" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-cairo text-[14px] font-semibold text-[#1E40AF]">
-                    لديك {pendingInviteCount} {pendingInviteCount === 1 ? 'دعوة' : 'دعوات'} معلقة
-                  </p>
-                  <p className="font-cairo text-[12px] text-[#3B82F6]">اضغط للمراجعة والقبول</p>
-                </div>
-                <ChevronRight className="w-5 h-5 text-[#93C5FD] rotate-180 flex-shrink-0" />
-              </Link>
-            )}
-
             {/* Doctor Status Cards */}
             {doctorStatuses.length > 0 ? (
               <div className="space-y-3">
-                {doctorStatuses.map((doc) => (
-                  <DoctorStatusCard key={doc.doctorId} doctor={doc} />
-                ))}
+                {doctorStatuses
+                  .filter(d => selectedDoctorId === 'all' || d.doctorId === selectedDoctorId)
+                  .map((doc) => (
+                    <DoctorStatusCard
+                      key={doc.doctorId}
+                      doctorName={doc.doctorName}
+                      status={doc.status}
+                      currentPatient={doc.currentPatient}
+                      sessionStartedAt={doc.sessionStartedAt}
+                      waitingCount={doc.waitingCount}
+                      nextPatientName={doc.nextPatientName}
+                    />
+                  ))}
               </div>
             ) : (
-              <div className="bg-[#F0FDF4] rounded-[12px] p-4 text-center">
-                <Stethoscope className="w-8 h-8 text-[#16A34A] mx-auto mb-2" />
-                <p className="font-cairo text-[14px] font-medium text-[#030712]">
-                  لا يوجد أطباء نشطون حالياً
-                </p>
-                <p className="font-cairo text-[12px] text-[#6B7280] mt-1">
-                  سيظهر حالة الأطباء عند تسجيل وصول المرضى
-                </p>
-              </div>
+              <EmptyQueueState
+                variant="no_doctors"
+                onCheckIn={() => router.push('/frontdesk/checkin')}
+              />
             )}
 
-            {/* Today Stats */}
-            <div>
-              <h2 className="font-cairo text-[14px] font-semibold text-[#4B5563] mb-2">
-                إحصائيات اليوم
-              </h2>
-              <TodayStatsRow
-                arrivals={totalArrivals}
-                waiting={waitingCount}
-                revenue={revenue}
-              />
-            </div>
+            {/* Stats Grid */}
+            <FrontdeskDashboardStats
+              waitingCount={waitingCount}
+              arrivedToday={arrivedToday}
+              avgWaitMinutes={avgWaitMinutes}
+              revenueToday={revenue}
+              isLoading={loading}
+            />
 
-            {/* Quick Actions */}
-            <div>
-              <h2 className="font-cairo text-[14px] font-semibold text-[#4B5563] mb-2">
-                إجراءات سريعة
-              </h2>
-              <QuickActionsGrid />
-            </div>
-
-            {/* Window Alert Banners — one per open window in active queue */}
+            {/* Window Alert Banners */}
             {queue
               .filter(q => q.apt_window_status === 'open' && q.swapped_patient_name)
               .map(q => (
-                <WindowAlertBanner
-                  key={q.id}
-                  patientName={q.swapped_patient_name!}
-                />
+                <WindowAlertBanner key={q.id} patientName={q.swapped_patient_name!} />
               ))}
 
-            {/* Live Queue List */}
+            {/* Queue List */}
             <div>
-              <div className="flex items-center justify-between mb-2">
-                <h2 className="font-cairo text-[14px] font-semibold text-[#4B5563]">
-                  قائمة الانتظار
-                </h2>
-                <span className="font-cairo text-[11px] text-[#9CA3AF]">
-                  آخر تحديث {lastUpdate.toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit' })}
-                </span>
-              </div>
-              <MobileQueueList
-                queue={queue}
-                onUpdateStatus={updateStatus}
-                onPullUp={setPullUpItem}
-                updating={updating}
-              />
+              <h2 className="font-cairo text-[14px] font-semibold text-[#4B5563] mb-2">
+                قائمة الانتظار
+              </h2>
+
+              {sortedQueue.length === 0 ? (
+                <EmptyQueueState variant="no_patients" />
+              ) : (
+                <div className="space-y-2">
+                  {sortedQueue.map((item) => (
+                    <QueuePatientCard
+                      key={item.id}
+                      queueNumber={item.queue_number}
+                      patientName={item.patient?.full_name || 'مريض'}
+                      doctorName={
+                        selectedDoctorId === 'all'
+                          ? `د. ${(item.doctor?.full_name || '').replace(/^د\.\s*/, '')}`
+                          : undefined
+                      }
+                      status={
+                        item.status === 'cancelled'
+                          ? 'no_show'
+                          : item.status === 'completed'
+                            ? 'completed'
+                            : item.status === 'in_progress'
+                              ? 'in_progress'
+                              : 'waiting'
+                      }
+                      visitType={item.queue_type === 'walkin' || item.queue_type === 'emergency' ? 'walk_in' : 'appointment'}
+                      appointmentTime={item.queue_type === 'appointment' ? item.checked_in_at : undefined}
+                      checkedInAt={item.checked_in_at}
+                      onCallPatient={() => updateStatus(item.id, 'in_progress')}
+                      onCollectPayment={() => router.push(`/frontdesk/payments/new?patientId=${item.patient_id}&doctorId=${item.doctor_id}`)}
+                      onMarkNoShow={() => updateStatus(item.id, 'cancelled')}
+                      onReschedule={() => {
+                        if (item.appointment_id) {
+                          router.push(`/frontdesk/appointments/${item.appointment_id}/edit`)
+                        } else {
+                          router.push('/frontdesk/appointments/new')
+                        }
+                      }}
+                      isNextInQueue={item.id === firstWaitingId}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           </>
         )}

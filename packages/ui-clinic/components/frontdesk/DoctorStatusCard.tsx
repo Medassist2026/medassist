@@ -1,8 +1,24 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Stethoscope, Clock, Users } from 'lucide-react'
 
+// ============================================================================
+// TYPES
+// ============================================================================
+
+interface DoctorStatusCardProps {
+  doctorName: string
+  status: 'in_session' | 'available' | 'away'
+  currentPatient?: {
+    name: string
+    queueNumber: number
+  }
+  sessionStartedAt?: string
+  waitingCount: number
+  nextPatientName?: string
+}
+
+// Re-export old interface for backward compat with dashboard deriveDoctorStatuses
 interface DoctorStatus {
   doctorId: string
   doctorName: string
@@ -10,7 +26,7 @@ interface DoctorStatus {
   currentPatient?: {
     name: string
     queueNumber: number
-    startedAt: string // ISO timestamp
+    startedAt: string
   }
   waitingCount: number
   nextPatient?: {
@@ -19,91 +35,146 @@ interface DoctorStatus {
   }
 }
 
-export function DoctorStatusCard({ doctor }: { doctor: DoctorStatus }) {
+// ============================================================================
+// HELPERS
+// ============================================================================
+
+function formatSecondsArabic(totalSeconds: number): string {
+  const mins = Math.floor(totalSeconds / 60)
+  const secs = totalSeconds % 60
+  const mStr = mins.toLocaleString('ar-EG').padStart(2, '٠')
+  const sStr = secs.toLocaleString('ar-EG').padStart(2, '٠')
+  return `${mStr}:${sStr}`
+}
+
+function getProgressColor(seconds: number): string {
+  if (seconds > 1200) return '#DC2626'    // over 20 min → red
+  if (seconds >= 900) return '#F59E0B'    // 15–20 min → orange
+  return '#16A34A'                         // under 15 min → green
+}
+
+// ============================================================================
+// COMPONENT
+// ============================================================================
+
+export function DoctorStatusCard({
+  doctorName,
+  status,
+  currentPatient,
+  sessionStartedAt,
+  waitingCount,
+  nextPatientName,
+}: DoctorStatusCardProps) {
   const [elapsed, setElapsed] = useState(0)
 
-  // Live session timer
+  // Live session timer — updates every second
   useEffect(() => {
-    if (!doctor.currentPatient?.startedAt) return
+    if (status !== 'in_session' || !sessionStartedAt) return
 
-    const started = new Date(doctor.currentPatient.startedAt).getTime()
-    const update = () => setElapsed(Math.floor((Date.now() - started) / 60000))
+    const started = new Date(sessionStartedAt).getTime()
+    const update = () => {
+      const secs = Math.max(0, Math.floor((Date.now() - started) / 1000))
+      setElapsed(secs)
+    }
     update()
-    const interval = setInterval(update, 30000)
+    const interval = setInterval(update, 1000)
     return () => clearInterval(interval)
-  }, [doctor.currentPatient?.startedAt])
+  }, [status, sessionStartedAt])
 
-  const isBusy = !!doctor.currentPatient
-  const statusColor = isBusy ? '#3B82F6' : '#16A34A'
-  const statusBg = isBusy ? 'bg-blue-50' : 'bg-green-50'
-  const statusDot = isBusy ? 'bg-blue-500' : 'bg-green-500'
+  const progressPercent = Math.min((elapsed / 1200) * 100, 100)
+  const progressColor = getProgressColor(elapsed)
 
-  // Estimate ~15 min per patient for progress bar
-  const avgSession = 15
-  const progress = isBusy ? Math.min((elapsed / avgSession) * 100, 100) : 0
+  const isAway = status === 'away'
+  const cardOpacity = isAway ? 'opacity-60' : ''
 
   return (
-    <div className={`rounded-[12px] border-[0.8px] border-[#E5E7EB] overflow-hidden ${statusBg}`}>
-      {/* Doctor Header */}
-      <div className="flex items-center gap-3 px-4 pt-3 pb-2">
-        <div className="relative">
-          <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center border-[0.8px] border-[#E5E7EB]">
-            <Stethoscope className="w-5 h-5" style={{ color: statusColor }} />
-          </div>
-          <div className={`absolute -bottom-0.5 -left-0.5 w-3 h-3 rounded-full border-2 border-white ${statusDot}`} />
+    <div className={`bg-white rounded-[12px] shadow-sm p-4 ${cardOpacity}`}>
+      {/* Row 1: Doctor name + Status badge */}
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <span
+            className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
+              status === 'away' ? 'bg-[#9CA3AF]' : 'bg-[#16A34A]'
+            }`}
+          />
+          <span className="font-cairo text-[15px] font-bold text-[#030712]">
+            {doctorName}
+          </span>
         </div>
-        <div className="flex-1 min-w-0">
-          <h3 className="font-cairo text-[15px] font-bold text-[#030712] truncate">
-            د. {doctor.doctorName}
-          </h3>
-          <p className="font-cairo text-[12px] text-[#6B7280]">{doctor.specialty}</p>
-        </div>
-        <div className="flex items-center gap-1.5 bg-white rounded-full px-2.5 py-1 border-[0.8px] border-[#E5E7EB]">
-          <Users className="w-3.5 h-3.5 text-[#6B7280]" />
-          <span className="font-cairo text-[12px] font-bold text-[#030712]">{doctor.waitingCount}</span>
-        </div>
+        {status === 'in_session' && (
+          <span className="font-cairo text-[11px] font-medium px-2 py-0.5 rounded-full bg-[#DCFCE7] text-[#16A34A]">
+            في جلسة
+          </span>
+        )}
+        {status === 'available' && (
+          <span className="font-cairo text-[11px] font-medium px-2 py-0.5 rounded-full bg-[#DCFCE7] text-[#16A34A]">
+            متاح
+          </span>
+        )}
+        {status === 'away' && (
+          <span className="font-cairo text-[11px] font-medium px-2 py-0.5 rounded-full bg-[#F3F4F6] text-[#9CA3AF]">
+            غير متاح
+          </span>
+        )}
       </div>
 
-      {/* Current Patient / Available */}
-      <div className="px-4 pb-3">
-        {isBusy ? (
-          <>
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="font-cairo text-[13px] text-[#4B5563]">
-                المريض الحالي: <span className="font-semibold text-[#030712]">{doctor.currentPatient!.name}</span>
-                <span className="text-[#9CA3AF]"> #{doctor.currentPatient!.queueNumber}</span>
-              </span>
-            </div>
-            {/* Progress bar */}
-            <div className="w-full h-[6px] bg-white rounded-full overflow-hidden mb-1.5">
-              <div
-                className="h-full rounded-full bg-blue-500 transition-all duration-1000"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-            <div className="flex items-center gap-1">
-              <Clock className="w-3 h-3 text-[#9CA3AF]" />
-              <span className="font-cairo text-[11px] text-[#9CA3AF]">{elapsed} دقيقة</span>
-            </div>
-          </>
-        ) : (
-          <div className="py-1">
-            <span className="font-cairo text-[13px] font-medium text-[#16A34A]">
-              متاح — لا يوجد مريض حالياً
+      {/* Row 2: Current patient + Timer (in_session only) */}
+      {status === 'in_session' && currentPatient && (
+        <>
+          <div className="flex items-center justify-between mb-2">
+            <span className="font-cairo text-[13px] text-[#4B5563]">
+              {currentPatient.name} · #{currentPatient.queueNumber.toLocaleString('ar-EG')}
+            </span>
+            <span className="font-cairo text-[13px] font-medium text-[#030712]">
+              {formatSecondsArabic(elapsed)} ⏱
             </span>
           </div>
-        )}
 
-        {/* Next patient */}
-        {doctor.nextPatient && (
-          <div className="mt-2 pt-2 border-t border-white/60">
-            <span className="font-cairo text-[12px] text-[#6B7280]">
-              التالي: <span className="font-medium text-[#030712]">{doctor.nextPatient.name}</span>
-              <span className="text-[#9CA3AF]"> #{doctor.nextPatient.queueNumber}</span>
-            </span>
+          {/* Progress bar */}
+          <div className="w-full h-1.5 rounded-full bg-[#E5E7EB] mb-2">
+            <div
+              className="h-full rounded-full transition-all duration-1000"
+              style={{
+                width: `${progressPercent}%`,
+                backgroundColor: progressColor,
+              }}
+            />
           </div>
+        </>
+      )}
+
+      {/* Footer: Waiting count + Next patient */}
+      <div className="flex items-center justify-between">
+        <span className="font-cairo text-[12px] text-[#9CA3AF]">
+          {waitingCount.toLocaleString('ar-EG')} في الانتظار
+        </span>
+        {nextPatientName && (
+          <span className="font-cairo text-[12px] text-[#9CA3AF]">
+            التالي: {nextPatientName}
+          </span>
         )}
       </div>
     </div>
+  )
+}
+
+// Legacy adapter — keeps existing dashboard import working during transition
+export function DoctorStatusCardLegacy({ doctor }: { doctor: DoctorStatus }) {
+  const isBusy = !!doctor.currentPatient
+  const derivedStatus: 'in_session' | 'available' | 'away' = isBusy ? 'in_session' : 'available'
+
+  return (
+    <DoctorStatusCard
+      doctorName={`د. ${doctor.doctorName}`}
+      status={derivedStatus}
+      currentPatient={
+        doctor.currentPatient
+          ? { name: doctor.currentPatient.name, queueNumber: doctor.currentPatient.queueNumber }
+          : undefined
+      }
+      sessionStartedAt={doctor.currentPatient?.startedAt}
+      waitingCount={doctor.waitingCount}
+      nextPatientName={doctor.nextPatient?.name}
+    />
   )
 }

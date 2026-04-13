@@ -124,7 +124,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Calculate totals
-    const totalAmount = list.reduce((s, p) => s + Number(p.amount), 0)
+    const totalAmount = list.reduce((s, p) => s + Number(p.amount ?? 0), 0)
     const byMethod: Record<string, number> = {}
     list.forEach(p => {
       const method = p.payment_method || 'other'
