@@ -21,7 +21,9 @@ interface DoctorStats {
   stats: {
     totalPatients: number
     totalSessions: number
+    patientsThisMonth: number
     sessionsThisMonth: number
+    feesThisMonth: number
     totalFees: number
   }
   clinic: {
@@ -331,14 +333,14 @@ export default function ProfilePage() {
                 <div className="flex gap-3">
                   <StatCard
                     icon={<Users className="w-5 h-5 text-[#16A34A]" />}
-                    value={formatNumber(data.stats.totalPatients)}
-                    label="مريض"
+                    value={formatNumber(data.stats.patientsThisMonth)}
+                    label="مريض جديد"
                     color="bg-[#DCFCE7]"
                   />
                   <StatCard
                     icon={<FileText className="w-5 h-5 text-[#3B82F6]" />}
-                    value={formatNumber(data.stats.totalSessions)}
-                    label="جلسة مكتملة"
+                    value={formatNumber(data.stats.sessionsThisMonth)}
+                    label="جلسة"
                     color="bg-[#DBEAFE]"
                   />
                 </div>

@@ -17,6 +17,15 @@
  */
 
 import { createAdminClient } from '@shared/lib/supabase/admin'
+import { isCollectedPayment } from '@shared/lib/data/payments'
+import {
+  cairoDateKey,
+  cairoMonthKey,
+  cairoMonthStart,
+  cairoNMonthsAgoStart,
+  cairoTodayEnd,
+  cairoTodayStart,
+} from '@shared/lib/date/cairo-date'
 
 // ============================================================================
 // TYPES
@@ -62,25 +71,40 @@ export interface WeeklyComparison {
 
 // ── Income types ─────────────────────────────────────────────────────────────
 
+/**
+ * "Income" in this context means the money view of a doctor's work.
+ *   - income fields (today / thisMonth / income on chart points) come
+ *     from the `payments` table, restricted to collected payments
+ *     (see isCollectedPayment).
+ *   - visit fields (visitsToday / visitsThisMonth / visits on chart
+ *     points) come from the `clinical_notes` table — one clinical
+ *     note = one visit (i.e. "زيارة" == "جلسة"). This matches what
+ *     the profile page displays, so the same doctor cannot see a
+ *     different visit count on two screens.
+ *
+ * All day/month boundaries are evaluated in Africa/Cairo, so the
+ * numbers match the wall clock a clinic in Egypt reads off its
+ * screen (critical for the late-evening / near-midnight drift case).
+ */
 export interface IncomeSummary {
-  /** Total income collected today (Egyptian date, clinic timezone) */
+  /** Total income collected today (Cairo date boundary) */
   today:          number
-  /** Total income collected in the current calendar month */
+  /** Total income collected in the current Cairo calendar month */
   thisMonth:      number
-  /** Number of completed (paid) visits today */
+  /** Number of clinical notes (visits) authored today (Cairo) */
   visitsToday:    number
-  /** Number of completed (paid) visits this month */
+  /** Number of clinical notes (visits) authored this month (Cairo) */
   visitsThisMonth: number
 }
 
 export interface IncomeDayPoint {
-  date:     string   // YYYY-MM-DD
-  income:   number   // EGP
-  visits:   number
+  date:     string   // YYYY-MM-DD in Cairo
+  income:   number   // EGP, from payments
+  visits:   number   // count of clinical_notes that day
 }
 
 export interface IncomeMonthPoint {
-  month:    string   // YYYY-MM
+  month:    string   // YYYY-MM in Cairo
   income:   number
   visits:   number
 }
@@ -132,6 +156,11 @@ function topN<T extends { count: number }>(items: T[], n: number): T[] {
 /**
  * Fetch analytics_events for the doctor in the given period.
  * Returns raw event rows.
+ *
+ * Note: analytics_events has no clinic_id column today, so this is
+ * doctor-scoped only — timing KPIs (avgDuration, under45sRate) reflect
+ * the doctor's performance across ALL their clinics. A future migration
+ * adding analytics_events.clinic_id would let us scope this further.
  */
 async function fetchSessionEvents(doctorId: string, startDate: string | null) {
   const admin = createAdminClient('doctor-stats-events')
@@ -152,8 +181,13 @@ async function fetchSessionEvents(doctorId: string, startDate: string | null) {
 /**
  * Fetch clinical_notes for the doctor in the given period.
  * Only selects columns needed for analytics — not full note content.
+ * Scoped to the active clinic when `clinicId` is provided (mig 016/023).
  */
-async function fetchClinicalNotes(doctorId: string, startDate: string | null) {
+async function fetchClinicalNotes(
+  doctorId: string,
+  startDate: string | null,
+  clinicId: string | null,
+) {
   const admin = createAdminClient('doctor-stats-notes')
   let q = admin
     .from('clinical_notes')
@@ -161,6 +195,7 @@ async function fetchClinicalNotes(doctorId: string, startDate: string | null) {
     .eq('doctor_id', doctorId)
     .order('created_at', { ascending: true })
 
+  if (clinicId) q = q.eq('clinic_id', clinicId)
   if (startDate) q = q.gte('created_at', startDate)
 
   const { data, error } = await q
@@ -362,10 +397,15 @@ function computeWeeklyComparison(events: any[], notes: any[]): WeeklyComparison 
 // ============================================================================
 
 /**
- * Fetch payments for the doctor — scoped strictly to doctor's own ID.
- * Used only for income analytics; never cross-doctor.
+ * Fetch payments for the doctor — scoped to doctor_id + (optionally)
+ * active clinic_id. Used only for income analytics; never cross-doctor.
+ * payments.clinic_id exists (mig 019) so scoping is safe.
  */
-async function fetchDoctorPayments(doctorId: string, startDate: string | null) {
+async function fetchDoctorPayments(
+  doctorId: string,
+  startDate: string | null,
+  clinicId: string | null,
+) {
   const admin = createAdminClient('doctor-income-stats')
   let q = admin
     .from('payments')
@@ -373,6 +413,7 @@ async function fetchDoctorPayments(doctorId: string, startDate: string | null) {
     .eq('doctor_id', doctorId)
     .order('created_at', { ascending: true })
 
+  if (clinicId) q = q.eq('clinic_id', clinicId)
   if (startDate) q = q.gte('created_at', startDate)
 
   const { data, error } = await q
@@ -380,71 +421,100 @@ async function fetchDoctorPayments(doctorId: string, startDate: string | null) {
   return data || []
 }
 
-function computeIncomeStats(payments: any[]): DoctorIncomeStats {
-  const now = new Date()
+/**
+ * Aggregate doctor income (from payments) and visits (from clinical
+ * notes) into the shape the analytics page renders.
+ *
+ * Two independent data sources:
+ *  - `payments`: contribute the EGP figures (summary.today, summary.thisMonth,
+ *    byDay[i].income, byMonth[i].income). Only collected payments count
+ *    (see isCollectedPayment).
+ *  - `notes` (clinical_notes rows): contribute the visit counts
+ *    (summary.visitsToday, summary.visitsThisMonth, byDay[i].visits,
+ *    byMonth[i].visits). This matches the profile page's "جلسة" count,
+ *    so one doctor sees one number for both screens.
+ *
+ * All date boundaries are evaluated in Africa/Cairo so a payment or
+ * note timestamped at 23:30 Cairo on the last day of the month ends
+ * up in "this month" regardless of what server TZ Vercel runs in.
+ *
+ * Exported for unit-testing — see
+ * packages/shared/lib/analytics/__tests__/doctor-stats.test.ts
+ */
+export function computeIncomeStats(
+  payments: any[],
+  notes: any[] = [],
+  now: Date = new Date(),
+): DoctorIncomeStats {
+  const todayStart = cairoTodayStart(now)
+  const todayEnd   = cairoTodayEnd(now)
+  const monthStart = cairoMonthStart(now)
 
-  // Today boundaries (local midnight)
-  const todayStart = new Date(now)
-  todayStart.setHours(0, 0, 0, 0)
-  const todayEnd = new Date(now)
-  todayEnd.setHours(23, 59, 59, 999)
-
-  // This month boundaries
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-  const monthEnd   = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999)
-
-  // Summary
-  let incomeToday = 0; let visitsToday = 0
-  let incomeThisMonth = 0; let visitsThisMonth = 0
-
-  // Aggregation maps
-  const byDayMap   = new Map<string, { income: number; visits: number }>()
-  const byMonthMap = new Map<string, { income: number; visits: number }>()
+  // ── Income (EGP) from payments ──────────────────────────────────────────
+  let incomeToday       = 0
+  let incomeThisMonth   = 0
+  const incomeByDayMap   = new Map<string, number>()  // YYYY-MM-DD → EGP
+  const incomeByMonthMap = new Map<string, number>()  // YYYY-MM    → EGP
 
   for (const p of payments) {
+    if (!isCollectedPayment(p)) continue
+    if (!p.created_at) continue
+
     const amount = Number(p.amount || 0)
     const d = new Date(p.created_at)
-    const dayKey   = p.created_at.slice(0, 10)       // YYYY-MM-DD
-    const monthKey = p.created_at.slice(0, 7)         // YYYY-MM
+    const dayKey   = cairoDateKey(d)
+    const monthKey = cairoMonthKey(d)
 
-    // Only count paid payments
-    if (p.payment_status !== 'paid' && p.payment_status !== null) continue
+    if (d >= todayStart && d <= todayEnd) incomeToday += amount
+    if (d >= monthStart)                   incomeThisMonth += amount
 
-    // Today / this-month summaries
-    if (d >= todayStart && d <= todayEnd) {
-      incomeToday += amount
-      visitsToday++
-    }
-    if (d >= monthStart && d <= monthEnd) {
-      incomeThisMonth += amount
-      visitsThisMonth++
-    }
-
-    // By-day bucket
-    const dayEntry = byDayMap.get(dayKey) || { income: 0, visits: 0 }
-    dayEntry.income += amount
-    dayEntry.visits++
-    byDayMap.set(dayKey, dayEntry)
-
-    // By-month bucket
-    const monthEntry = byMonthMap.get(monthKey) || { income: 0, visits: 0 }
-    monthEntry.income += amount
-    monthEntry.visits++
-    byMonthMap.set(monthKey, monthEntry)
+    incomeByDayMap.set(dayKey, (incomeByDayMap.get(dayKey) || 0) + amount)
+    incomeByMonthMap.set(monthKey, (incomeByMonthMap.get(monthKey) || 0) + amount)
   }
 
-  const byDay: IncomeDayPoint[] = [...byDayMap.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, v]) => ({ date, income: Math.round(v.income), visits: v.visits }))
+  // ── Visits (count) from clinical notes ──────────────────────────────────
+  let visitsToday     = 0
+  let visitsThisMonth = 0
+  const visitsByDayMap   = new Map<string, number>()
+  const visitsByMonthMap = new Map<string, number>()
 
-  const byMonth: IncomeMonthPoint[] = [...byMonthMap.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([month, v]) => ({ month, income: Math.round(v.income), visits: v.visits }))
+  for (const n of notes) {
+    if (!n?.created_at) continue
+
+    const d = new Date(n.created_at)
+    const dayKey   = cairoDateKey(d)
+    const monthKey = cairoMonthKey(d)
+
+    if (d >= todayStart && d <= todayEnd) visitsToday++
+    if (d >= monthStart)                   visitsThisMonth++
+
+    visitsByDayMap.set(dayKey, (visitsByDayMap.get(dayKey) || 0) + 1)
+    visitsByMonthMap.set(monthKey, (visitsByMonthMap.get(monthKey) || 0) + 1)
+  }
+
+  // ── Merge income + visits into combined chart series ────────────────────
+  const allDayKeys = new Set<string>([...incomeByDayMap.keys(), ...visitsByDayMap.keys()])
+  const byDay: IncomeDayPoint[] = [...allDayKeys]
+    .sort()
+    .map((date) => ({
+      date,
+      income: Math.round(incomeByDayMap.get(date) || 0),
+      visits: visitsByDayMap.get(date) || 0,
+    }))
+
+  const allMonthKeys = new Set<string>([...incomeByMonthMap.keys(), ...visitsByMonthMap.keys()])
+  const byMonth: IncomeMonthPoint[] = [...allMonthKeys]
+    .sort()
+    .map((month) => ({
+      month,
+      income: Math.round(incomeByMonthMap.get(month) || 0),
+      visits: visitsByMonthMap.get(month) || 0,
+    }))
 
   return {
     summary: {
-      today:          Math.round(incomeToday),
-      thisMonth:      Math.round(incomeThisMonth),
+      today:     Math.round(incomeToday),
+      thisMonth: Math.round(incomeThisMonth),
       visitsToday,
       visitsThisMonth,
     },
@@ -459,23 +529,41 @@ function computeIncomeStats(payments: any[]): DoctorIncomeStats {
 
 /**
  * Compute full analytics stats for a doctor over a given period.
- * Scoped strictly to the provided doctorId.
+ * Scoped to (doctorId, clinicId). clinicId is optional for callers
+ * that haven't resolved a clinic yet, but in production it is always
+ * passed (the /api/analytics/doctor-stats route resolves it from
+ * getClinicContext before calling).
+ *
+ * Scope caveats:
+ *  - clinical_notes and payments are scoped by BOTH doctor_id and
+ *    clinic_id when clinicId is supplied — so a multi-clinic doctor
+ *    sees only the active clinic's sessions and revenue.
+ *  - analytics_events is scoped by doctor_id only (the table has no
+ *    clinic_id column), so timing KPIs (avgDuration, under45sRate)
+ *    remain cross-clinic. This is noted on fetchSessionEvents and
+ *    should be revisited when analytics_events.clinic_id lands.
  */
 export async function getDoctorStats(
   doctorId: string,
   period: StatsPeriod = '30d',
+  clinicId: string | null = null,
 ): Promise<DoctorStatsResult> {
   const startDate = periodToStartDate(period)
-  // For income we always fetch last 12 months to power the by-month chart
-  const twelveMonthsAgo = new Date()
-  twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12)
-  const incomeStartDate = twelveMonthsAgo.toISOString()
+  // For income we always fetch last 12 months to power the by-month
+  // chart; boundary is computed in Cairo so the oldest month on the
+  // chart matches what a clinic in Egypt considers "12 months ago".
+  const incomeStartDate = cairoNMonthsAgoStart(12).toISOString()
 
-  // Fetch all data sources in parallel
-  const [events, notes, payments] = await Promise.all([
+  // Notes: fetch over the income window (12 months) so the byDay /
+  // byMonth visit counts cover the same window as the income series.
+  // The timing KPIs use `events` which are restricted to the narrower
+  // `period` window — that's intentional, those are performance
+  // metrics for the selected span.
+  const [events, notes, notesForChart, payments] = await Promise.all([
     fetchSessionEvents(doctorId, startDate),
-    fetchClinicalNotes(doctorId, startDate),
-    fetchDoctorPayments(doctorId, incomeStartDate),
+    fetchClinicalNotes(doctorId, startDate, clinicId),
+    fetchClinicalNotes(doctorId, incomeStartDate, clinicId),
+    fetchDoctorPayments(doctorId, incomeStartDate, clinicId),
   ])
 
   const summary          = computeSummary(events, notes)
@@ -483,7 +571,7 @@ export async function getDoctorStats(
   const topComplaints    = computeTopComplaints(notes, summary.totalSessions)
   const topMedications   = computeTopMedications(notes, summary.totalSessions)
   const weeklyComparison = computeWeeklyComparison(events, notes)
-  const income           = computeIncomeStats(payments)
+  const income           = computeIncomeStats(payments, notesForChart)
 
   return {
     period,
