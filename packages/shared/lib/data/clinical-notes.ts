@@ -26,7 +26,14 @@ export interface CreateClinicalNoteParams {
   doctorId: string
   patientId: string
   appointmentId?: string
-  clinicId?: string
+  /**
+   * Owning clinic for this note. REQUIRED — the multi-tenant scoping
+   * invariant relies on every clinical note having a clinic. Callers
+   * (currently only handlers/clinical/notes/handler.ts) must resolve a
+   * clinic before calling. See migration 045 for the historical orphan
+   * cleanup; the API handler returns 400 if it can't resolve a clinic.
+   */
+  clinicId: string
   noteData: ClinicalNoteData
   keystrokeCount: number
   durationSeconds: number
@@ -38,6 +45,13 @@ export interface CreateClinicalNoteParams {
  * Schema matches: chief_complaint, diagnosis, medications, plan (separate columns)
  */
 export async function createClinicalNote(params: CreateClinicalNoteParams) {
+  // Defense-in-depth: the type system already requires clinicId, but a
+  // runtime check here protects against `as any` callers and stale JS bundles.
+  // Migration 045 documents the historical orphan-rows that motivated this guard.
+  if (!params.clinicId) {
+    throw new Error('createClinicalNote: clinicId is required (no orphan notes)')
+  }
+
   const supabase = await createClient()
 
   // Transform diagnosis to JSONB format expected by schema
@@ -70,7 +84,7 @@ export async function createClinicalNote(params: CreateClinicalNoteParams) {
     doctor_id: params.doctorId,
     patient_id: params.patientId,
     appointment_id: params.appointmentId || null,
-    clinic_id: params.clinicId || null,
+    clinic_id: params.clinicId,   // required — see CreateClinicalNoteParams + mig 045
     chief_complaint: params.noteData.chief_complaint,
     diagnosis: diagnosisJson,
     medications: medicationsJson,

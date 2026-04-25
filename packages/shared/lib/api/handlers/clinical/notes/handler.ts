@@ -30,12 +30,15 @@ export async function POST(request: Request) {
       )
     }
 
-    // Resolve clinic: prefer body param → cookie → membership fallback
-    let clinicId = bodyClinicId || await getActiveClinicIdFromCookies()
+    // Resolve clinic: prefer body param → cookie → membership fallback.
+    // If all three layers fail, we 400 instead of silently writing a NULL —
+    // see migration 045 for why (24 orphan notes for Dr. Naser, invisible on
+    // his profile + analytics after commit ed5aa2a tightened scoping).
+    let clinicId: string | null = bodyClinicId || await getActiveClinicIdFromCookies()
     if (!clinicId) {
       try {
         const admin = createAdminClient('clinical-notes-clinic')
-        const { data: membership } = await admin
+        const { data: membership, error: membershipErr } = await admin
           .from('clinic_memberships')
           .select('clinic_id')
           .eq('user_id', user.id)
@@ -44,10 +47,26 @@ export async function POST(request: Request) {
           .order('created_at', { ascending: true })
           .limit(1)
           .maybeSingle()
+        if (membershipErr) {
+          // Don't swallow — log so we can see lookup regressions in prod
+          console.error('[clinical-notes] membership lookup failed:', membershipErr)
+        }
         clinicId = membership?.clinic_id || null
-      } catch {
-        // Membership lookup failed — proceed without clinic_id
+      } catch (err) {
+        console.error('[clinical-notes] membership lookup threw:', err)
       }
+    }
+
+    // Hard guard: every clinical note must have an owning clinic. The
+    // analytics + profile scoping in commit ed5aa2a depends on this invariant.
+    if (!clinicId) {
+      return NextResponse.json(
+        {
+          error: 'لا توجد عيادة نشطة لحفظ الجلسة. يرجى تحديث الصفحة واختيار عيادة.',
+          code: 'NO_ACTIVE_CLINIC'
+        },
+        { status: 400 }
+      )
     }
 
     // Create clinical note
@@ -55,7 +74,7 @@ export async function POST(request: Request) {
       doctorId: user.id,
       patientId,
       appointmentId: appointmentId || undefined,
-      clinicId: clinicId || undefined,
+      clinicId,
       noteData,
       keystrokeCount: keystrokeCount || 0,
       durationSeconds: durationSeconds || 0,

@@ -331,11 +331,21 @@ export async function fetchPatientNotes(
   return getPatientNotes(patientId)
 }
 
+/**
+ * Create a clinical note via the offline-aware shim.
+ *
+ * IMPORTANT: `clinic_id` is REQUIRED — the cloud handler now returns 400
+ * NO_ACTIVE_CLINIC if clinic_id is missing (see migrations 045/046 and
+ * apps/clinic/app/api/clinical/notes/route.ts). If a caller doesn't pass
+ * clinic_id, the row will save locally but the sync queue will retry
+ * forever and never succeed. Resolve the clinic from the doctor-shell
+ * context (which the front-end already maintains) before calling.
+ */
 export async function createClinicalNote(data: {
   doctor_id: string
   patient_id: string
+  clinic_id: string
   appointment_id?: string
-  clinic_id?: string
   chief_complaint?: string[]
   diagnosis?: Record<string, unknown>
   medications?: unknown[]
@@ -390,9 +400,20 @@ export async function fetchDoctorSlots(
 
 // ─── Payments ────────────────────────────────────────────────────────────────
 
+/**
+ * Create a payment via the offline-aware shim.
+ *
+ * IMPORTANT: `clinic_id` is REQUIRED — the cloud handler returns 400
+ * NO_ACTIVE_CLINIC if missing (see migration 047 and
+ * packages/shared/lib/api/handlers/frontdesk/payments/create/handler.ts).
+ * If a caller doesn't pass clinic_id, the row will save locally but the
+ * sync queue will retry forever and never succeed. Resolve the clinic
+ * via getFrontdeskClinicId / doctor-shell context before calling.
+ */
 export async function createPayment(data: {
   patient_id: string
   doctor_id: string
+  clinic_id: string
   appointment_id?: string
   clinical_note_id?: string
   amount: number

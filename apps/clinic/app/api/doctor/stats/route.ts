@@ -62,7 +62,8 @@ export async function GET() {
     const monthStartIso = cairoMonthStart().toISOString()
 
     // ── 5. Patient counts (active-clinic-scoped when available) ──
-    // Note: doctor_patient_relationships.clinic_id exists (mig 019/026).
+    // Note: doctor_patient_relationships.clinic_id was finally added by mig 048
+    // (mig 019/026 never landed on the live DB; the column was missing until 2026-04-24).
     const patientBase = () => {
       let q = admin
         .from('doctor_patient_relationships')
@@ -90,7 +91,8 @@ export async function GET() {
     })()
 
     // ── 6. Session counts (active-clinic-scoped when available) ──
-    // Note: clinical_notes.clinic_id exists (mig 016/023).
+    // clinical_notes.clinic_id added in mig 016, backfilled in mig 045,
+    // enforced NOT NULL in mig 046.
     const { count: totalSessions } = await (() => {
       let q = admin
         .from('clinical_notes')
@@ -111,7 +113,9 @@ export async function GET() {
     })()
 
     // ── 7. Fees — both this-month and all-time ─────────────────
-    // payments.clinic_id exists (mig 019) so scoping is safe.
+    // payments.clinic_id is NOT NULL since mig 047 (which deleted 9 test/seed
+    // rows that had no resolvable clinic). Tightened at the write path too —
+    // see packages/shared/lib/api/handlers/frontdesk/payments/create/handler.ts.
     const feesQueryBase = () => {
       let q = admin
         .from('payments')
