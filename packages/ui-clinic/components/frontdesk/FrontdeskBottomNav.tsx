@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Home, UserPlus, Calendar, CreditCard, BarChart2 } from 'lucide-react'
+import { Home, UserPlus, Calendar, CreditCard, BarChart2, User } from 'lucide-react'
 
 const NAV_ITEMS = [
   { href: '/frontdesk/dashboard', label: 'الرئيسية', icon: Home },
@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { href: '/frontdesk/appointments', label: 'المواعيد', icon: Calendar },
   { href: '/frontdesk/payments', label: 'المدفوعات', icon: CreditCard },
   { href: '/frontdesk/reports', label: 'التقارير', icon: BarChart2 },
+  { href: '/frontdesk/profile', label: 'الحساب', icon: User },
 ]
 
 export function FrontdeskBottomNav() {

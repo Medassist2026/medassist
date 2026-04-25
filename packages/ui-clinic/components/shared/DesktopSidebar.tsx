@@ -46,6 +46,7 @@ const frontdeskNav: NavItem[] = [
   { label: 'المواعيد', href: '/frontdesk/appointments', icon: Calendar },
   { label: 'المدفوعات', href: '/frontdesk/payments', icon: Banknote },
   { label: 'التقارير', href: '/frontdesk/reports', icon: BarChart3 },
+  { label: 'الحساب', href: '/frontdesk/profile', icon: UserCog },
 ]
 
 const patientNav: NavItem[] = [
