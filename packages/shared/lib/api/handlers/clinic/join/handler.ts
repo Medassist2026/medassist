@@ -103,33 +103,10 @@ export async function POST(request: Request) {
       if (membershipError) throw new Error(membershipError.message)
     }
 
-    // Always write to the concrete role tables (clinic_doctors / front_desk_staff)
-    if (user.role === 'doctor') {
-      // Check duplicate
-      const { data: existing } = await admin
-        .from('clinic_doctors')
-        .select('clinic_id')
-        .eq('clinic_id', clinic.id)
-        .eq('doctor_id', user.id)
-        .maybeSingle()
-
-      if (existing) {
-        return NextResponse.json(
-          { error: 'You are already a member of this clinic' },
-          { status: 409 }
-        )
-      }
-
-      const { error: cdError } = await admin
-        .from('clinic_doctors')
-        .insert({ clinic_id: clinic.id, doctor_id: user.id, role: 'doctor' })
-      if (cdError) throw new Error(cdError.message)
-    } else if (user.role === 'frontdesk') {
-      await admin
-        .from('front_desk_staff')
-        .update({ clinic_id: clinic.id })
-        .eq('id', user.id)
-    }
+    // Note: legacy clinic_doctors / front_desk_staff.clinic_id writes were
+    // removed once clinic_memberships became the canonical store (post mig
+    // 045-051). The duplicate-check above (existing membership) covers the
+    // 409 case that clinic_doctors was previously checking.
 
     // ── Notify the clinic owner ────────────────────────────────────────────
     // Fire-and-forget — a failure here must not block the join response.

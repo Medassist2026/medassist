@@ -219,7 +219,11 @@ export async function createClinic(params: CreateClinicParams) {
     throw new Error(clinicError.message)
   }
 
-  // 2. Link doctor to clinic via clinic_memberships (primary)
+  // 2. Link doctor to clinic via clinic_memberships (canonical store).
+  // Legacy clinic_doctors mirror was removed once memberships became
+  // authoritative (mig 045-051). Read fallbacks in clinic-context.ts and
+  // frontdesk-scope.ts only fire when memberships returns nothing, which
+  // can't happen for new clinics created here.
   const { error: membershipError } = await adminSupabase
     .from('clinic_memberships')
     .insert({
@@ -231,20 +235,6 @@ export async function createClinic(params: CreateClinicParams) {
 
   if (membershipError) {
     console.error('clinic_memberships insert error:', membershipError.message)
-  }
-
-  // 3. Also insert into legacy clinic_doctors for backward compatibility
-  const { error: linkError } = await adminSupabase
-    .from('clinic_doctors')
-    .insert({
-      clinic_id: clinic.id,
-      doctor_id: params.doctorId,
-      role: 'doctor'
-    })
-
-  if (linkError) {
-    // Don't throw — clinic_memberships is the source of truth now
-    console.error('clinic_doctors legacy insert error:', linkError.message)
   }
 
   return {

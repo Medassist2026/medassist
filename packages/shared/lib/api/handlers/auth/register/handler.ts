@@ -106,7 +106,10 @@ export async function POST(request: Request) {
             .maybeSingle()
 
           if (!findError && clinic) {
-            // Primary: create clinic_memberships record
+            // clinic_memberships is the source of truth for clinic linkage.
+            // Legacy clinic_frontdesk + front_desk_staff.clinic_id mirrors
+            // were removed once the multi-tenant rollout (mig 045-051) made
+            // memberships authoritative — see docs/investigations for context.
             await admin
               .from('clinic_memberships')
               .insert({
@@ -115,20 +118,6 @@ export async function POST(request: Request) {
                 role: 'FRONT_DESK',
                 status: 'ACTIVE'
               })
-
-            // Legacy: link front desk to clinic
-            await admin
-              .from('clinic_frontdesk')
-              .insert({
-                clinic_id: clinic.id,
-                frontdesk_id: result.userId
-              })
-
-            // Legacy: update front_desk_staff.clinic_id for backwards compatibility
-            await admin
-              .from('front_desk_staff')
-              .update({ clinic_id: clinic.id })
-              .eq('id', result.userId)
           }
         } catch (clinicError) {
           console.error('Error linking front desk to clinic:', clinicError)

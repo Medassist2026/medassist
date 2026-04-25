@@ -2,8 +2,10 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { createAdminClient } from '@shared/lib/supabase/admin'
 
 /**
- * Get the clinic ID for a frontdesk/assistant user from clinic_memberships
- * Falls back to legacy front_desk_staff table for backward compatibility
+ * Get the clinic ID for a frontdesk/assistant user.
+ * clinic_memberships is the sole source of truth — legacy
+ * front_desk_staff.clinic_id fallback was removed in mig 052
+ * (column dropped).
  */
 export async function getFrontdeskClinicId(
   _supabase: SupabaseClient,
@@ -11,8 +13,7 @@ export async function getFrontdeskClinicId(
 ): Promise<string | null> {
   const admin = createAdminClient('patient-privacy-checks')
 
-  // Try new clinic_memberships table first
-  const { data: membership, error: membershipError } = await admin
+  const { data: membership, error } = await admin
     .from('clinic_memberships')
     .select('clinic_id')
     .eq('user_id', userId)
@@ -21,29 +22,18 @@ export async function getFrontdeskClinicId(
     .limit(1)
     .maybeSingle()
 
-  if (!membershipError && membership?.clinic_id) {
-    return membership.clinic_id
-  }
-
-  // Fallback to legacy table
-  const { data, error } = await admin
-    .from('front_desk_staff')
-    .select('clinic_id')
-    .eq('id', userId)
-    .maybeSingle()
-
   if (error) {
-    // Table might not exist yet, swallow error
-    console.warn('getFrontdeskClinicId legacy fallback error:', error.message)
+    console.warn('getFrontdeskClinicId error:', error.message)
     return null
   }
 
-  return data?.clinic_id || null
+  return membership?.clinic_id || null
 }
 
 /**
- * Get all doctor user IDs in a clinic from clinic_memberships
- * Falls back to legacy clinic_doctors table
+ * Get all doctor user IDs in a clinic.
+ * clinic_memberships is the sole source of truth — legacy clinic_doctors
+ * fallback was removed in mig 052 (table dropped).
  */
 export async function getClinicDoctorIds(
   _supabase: SupabaseClient,
@@ -51,30 +41,19 @@ export async function getClinicDoctorIds(
 ): Promise<string[]> {
   const admin = createAdminClient('patient-privacy-checks')
 
-  // Try new clinic_memberships table first
-  const { data: memberships, error: membershipError } = await admin
+  const { data: memberships, error } = await admin
     .from('clinic_memberships')
     .select('user_id')
     .eq('clinic_id', clinicId)
     .in('role', ['OWNER', 'DOCTOR'])
     .eq('status', 'ACTIVE')
 
-  if (!membershipError && memberships && memberships.length > 0) {
-    return memberships.map((row: any) => row.user_id).filter(Boolean)
-  }
-
-  // Fallback to legacy table
-  const { data, error } = await admin
-    .from('clinic_doctors')
-    .select('doctor_id')
-    .eq('clinic_id', clinicId)
-
   if (error) {
-    console.warn('getClinicDoctorIds legacy fallback error:', error.message)
+    console.warn('getClinicDoctorIds error:', error.message)
     return []
   }
 
-  return (data || []).map((row: any) => row.doctor_id).filter(Boolean)
+  return (memberships || []).map((row: any) => row.user_id).filter(Boolean)
 }
 
 /**
@@ -93,14 +72,14 @@ export async function ensureDoctorInFrontdeskClinic(
 }
 
 /**
- * Get the active clinic ID for any user based on their membership
- * Falls back to legacy tables (front_desk_staff, clinic_doctors) for backward compatibility
+ * Get the active clinic ID for any user based on their membership.
+ * clinic_memberships is the sole source of truth — legacy table fallbacks
+ * (front_desk_staff.clinic_id, clinic_doctors) were removed in mig 052.
  */
 export async function getUserClinicId(userId: string): Promise<string | null> {
   const admin = createAdminClient('patient-privacy-checks')
 
-  // Try new clinic_memberships table first
-  const { data: membership, error: membershipError } = await admin
+  const { data: membership } = await admin
     .from('clinic_memberships')
     .select('clinic_id')
     .eq('user_id', userId)
@@ -108,28 +87,5 @@ export async function getUserClinicId(userId: string): Promise<string | null> {
     .limit(1)
     .maybeSingle()
 
-  if (!membershipError && membership?.clinic_id) {
-    return membership.clinic_id
-  }
-
-  // Fallback: check legacy front_desk_staff table
-  const { data: fdStaff } = await admin
-    .from('front_desk_staff')
-    .select('clinic_id')
-    .eq('id', userId)
-    .maybeSingle()
-
-  if (fdStaff?.clinic_id) {
-    return fdStaff.clinic_id
-  }
-
-  // Fallback: check legacy clinic_doctors table
-  const { data: clinicDoc } = await admin
-    .from('clinic_doctors')
-    .select('clinic_id')
-    .eq('doctor_id', userId)
-    .limit(1)
-    .maybeSingle()
-
-  return clinicDoc?.clinic_id || null
+  return membership?.clinic_id || null
 }

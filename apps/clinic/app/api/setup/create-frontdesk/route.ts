@@ -88,23 +88,14 @@ export async function GET(request: Request) {
       log.push(`  front_desk_staff: ${sErr?.message || 'OK'}`)
     }
 
-    // ── clinic_memberships ──────────────────────────────────────────────
+    // ── clinic_memberships (source of truth) ────────────────────────────
+    // Legacy front_desk_staff.clinic_id and clinic_frontdesk writes were
+    // removed — memberships is canonical (mig 045-051).
     const { error: cmErr } = await admin.from('clinic_memberships').upsert(
       { clinic_id: clinic.id, user_id: userId, role: 'FRONT_DESK', status: 'ACTIVE' },
       { onConflict: 'clinic_id,user_id' }
     )
     log.push(`  clinic_memberships: ${cmErr?.message || 'OK'}`)
-
-    // ── front_desk_staff.clinic_id ──────────────────────────────────────
-    await admin.from('front_desk_staff').update({ clinic_id: clinic.id }).eq('id', userId)
-    log.push(`  front_desk_staff.clinic_id: OK`)
-
-    // ── clinic_frontdesk (legacy) ───────────────────────────────────────
-    const { error: cfdErr } = await admin.from('clinic_frontdesk').upsert(
-      { clinic_id: clinic.id, frontdesk_id: userId },
-      { onConflict: 'clinic_id,frontdesk_id' }
-    )
-    log.push(`  clinic_frontdesk: ${cfdErr?.message || 'OK'}`)
 
     // ── Verify ──────────────────────────────────────────────────────────
     const { data: verify } = await admin

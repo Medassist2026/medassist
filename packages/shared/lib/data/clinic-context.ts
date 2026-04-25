@@ -69,14 +69,14 @@ export async function getActiveClinicIdFromCookies(): Promise<string | null> {
 // ============================================================================
 
 /**
- * Get all clinics a doctor belongs to
- * Uses clinic_memberships (unified table) as the source of truth
+ * Get all clinics a doctor belongs to.
+ * clinic_memberships is the sole source of truth — legacy clinic_doctors
+ * fallback was removed in mig 052 (table dropped).
  */
 export async function getDoctorClinics(doctorId: string): Promise<ClinicInfo[]> {
   const admin = createAdminClient('clinic-context')
 
-  // Primary: use clinic_memberships
-  const { data: memberships, error: membershipError } = await admin
+  const { data: memberships, error } = await admin
     .from('clinic_memberships')
     .select(`
       role,
@@ -90,54 +90,31 @@ export async function getDoctorClinics(doctorId: string): Promise<ClinicInfo[]> 
     .in('role', ['OWNER', 'DOCTOR'])
     .eq('status', 'ACTIVE')
 
-  if (!membershipError && memberships && memberships.length > 0) {
-    return memberships
-      .filter((row: any) => row.clinics)
-      .map((row: any) => ({
-        id: row.clinics.id,
-        uniqueId: row.clinics.unique_id,
-        name: row.clinics.name,
-        role: row.role === 'OWNER' ? 'owner' : 'doctor',
-      }))
-  }
-
-  // Fallback: legacy clinic_doctors table
-  const { data, error } = await admin
-    .from('clinic_doctors')
-    .select(`
-      role,
-      clinics:clinic_id (
-        id,
-        unique_id,
-        name
-      )
-    `)
-    .eq('doctor_id', doctorId)
-
   if (error) {
     console.error('Error fetching doctor clinics:', error)
     return []
   }
 
-  return (data || [])
+  return (memberships || [])
     .filter((row: any) => row.clinics)
     .map((row: any) => ({
       id: row.clinics.id,
       uniqueId: row.clinics.unique_id,
       name: row.clinics.name,
-      role: row.role || 'doctor',
+      role: row.role === 'OWNER' ? 'owner' : 'doctor',
     }))
 }
 
 /**
- * Get the front desk staff's clinic
- * Uses clinic_memberships as primary source
+ * Get the front desk staff's clinic.
+ * clinic_memberships is the sole source of truth — legacy
+ * front_desk_staff.clinic_id fallback was removed in mig 052
+ * (column dropped).
  */
 export async function getFrontdeskClinic(userId: string): Promise<ClinicInfo | null> {
   const admin = createAdminClient('clinic-context')
 
-  // Primary: use clinic_memberships
-  const { data: membership, error: membershipError } = await admin
+  const { data: membership, error } = await admin
     .from('clinic_memberships')
     .select(`
       role,
@@ -153,41 +130,15 @@ export async function getFrontdeskClinic(userId: string): Promise<ClinicInfo | n
     .limit(1)
     .maybeSingle()
 
-  if (!membershipError && membership?.clinics) {
-    const clinic = membership.clinics as any
-    return {
-      id: clinic.id,
-      uniqueId: clinic.unique_id,
-      name: clinic.name,
-      role: 'frontdesk',
-    }
-  }
-
-  // Fallback: legacy front_desk_staff table
-  const { data: staffData, error: staffError } = await admin
-    .from('front_desk_staff')
-    .select('clinic_id')
-    .eq('id', userId)
-    .maybeSingle()
-
-  if (staffError || !staffData?.clinic_id) {
+  if (error || !membership?.clinics) {
     return null
   }
 
-  const { data: clinicData, error: clinicError } = await admin
-    .from('clinics')
-    .select('id, unique_id, name')
-    .eq('id', staffData.clinic_id)
-    .single()
-
-  if (clinicError || !clinicData) {
-    return null
-  }
-
+  const clinic = membership.clinics as any
   return {
-    id: clinicData.id,
-    uniqueId: clinicData.unique_id,
-    name: clinicData.name,
+    id: clinic.id,
+    uniqueId: clinic.unique_id,
+    name: clinic.name,
     role: 'frontdesk',
   }
 }
@@ -261,41 +212,32 @@ export async function getClinicContext(
 }
 
 /**
- * Get all doctor IDs in a given clinic
- * Uses clinic_memberships as primary source
+ * Get all doctor IDs in a given clinic.
+ * clinic_memberships is the sole source of truth — legacy clinic_doctors
+ * fallback was removed in mig 052 (table dropped).
  */
 export async function getClinicDoctorIds(clinicId: string): Promise<string[]> {
   const admin = createAdminClient('clinic-context')
 
-  // Primary: clinic_memberships
-  const { data: memberships, error: membershipError } = await admin
+  const { data: memberships, error } = await admin
     .from('clinic_memberships')
     .select('user_id')
     .eq('clinic_id', clinicId)
     .in('role', ['OWNER', 'DOCTOR'])
     .eq('status', 'ACTIVE')
 
-  if (!membershipError && memberships && memberships.length > 0) {
-    return memberships.map((row: any) => row.user_id).filter(Boolean)
-  }
-
-  // Fallback: legacy table
-  const { data, error } = await admin
-    .from('clinic_doctors')
-    .select('doctor_id')
-    .eq('clinic_id', clinicId)
-
   if (error) {
     console.error('Error fetching clinic doctors:', error)
     return []
   }
 
-  return (data || []).map((row: any) => row.doctor_id).filter(Boolean)
+  return (memberships || []).map((row: any) => row.user_id).filter(Boolean)
 }
 
 /**
- * Validate that a doctor belongs to a specific clinic
- * Uses clinic_memberships as primary source
+ * Validate that a doctor belongs to a specific clinic.
+ * clinic_memberships is the sole source of truth — legacy clinic_doctors
+ * fallback was removed in mig 052 (table dropped).
  */
 export async function validateDoctorClinicAccess(
   doctorId: string,
@@ -303,7 +245,6 @@ export async function validateDoctorClinicAccess(
 ): Promise<boolean> {
   const admin = createAdminClient('clinic-context')
 
-  // Primary: clinic_memberships
   const { data: membership } = await admin
     .from('clinic_memberships')
     .select('id')
@@ -313,18 +254,7 @@ export async function validateDoctorClinicAccess(
     .eq('status', 'ACTIVE')
     .maybeSingle()
 
-  if (membership) return true
-
-  // Fallback: legacy table
-  const { data, error } = await admin
-    .from('clinic_doctors')
-    .select('doctor_id')
-    .eq('clinic_id', clinicId)
-    .eq('doctor_id', doctorId)
-    .maybeSingle()
-
-  if (error) return false
-  return !!data
+  return !!membership
 }
 
 /**
@@ -364,90 +294,42 @@ export async function getClinicMembers(clinicId: string): Promise<ClinicMember[]
   const admin = createAdminClient('clinic-context')
   const members: ClinicMember[] = []
 
-  // Primary: clinic_memberships (unified)
-  const { data: memberships, error: membershipError } = await admin
+  // clinic_memberships is the sole source of truth — legacy table fallbacks
+  // were removed in mig 052 (clinic_doctors dropped, front_desk_staff.clinic_id
+  // dropped). front_desk_staff itself is kept as the metadata table for
+  // frontdesk display names.
+  const { data: memberships, error } = await admin
     .from('clinic_memberships')
     .select('user_id, role, status')
     .eq('clinic_id', clinicId)
     .eq('status', 'ACTIVE')
 
-  if (!membershipError && memberships && memberships.length > 0) {
-    // Resolve user details for each member
-    const userIds = memberships.map((m: any) => m.user_id)
-
-    // Get doctor details
-    const doctorUserIds = memberships
-      .filter((m: any) => ['OWNER', 'DOCTOR'].includes(m.role))
-      .map((m: any) => m.user_id)
-
-    if (doctorUserIds.length > 0) {
-      const { data: doctors } = await admin
-        .from('doctors')
-        .select('id, full_name, specialty, unique_id')
-        .in('id', doctorUserIds)
-
-      if (doctors) {
-        for (const doc of doctors) {
-          const membership = memberships.find((m: any) => m.user_id === doc.id)
-          members.push({
-            userId: doc.id,
-            name: doc.full_name,
-            role: membership?.role === 'OWNER' ? 'owner' : 'doctor',
-            specialty: doc.specialty,
-            unique_id: doc.unique_id,
-          })
-        }
-      }
-    }
-
-    // Get frontdesk/assistant details
-    const staffUserIds = memberships
-      .filter((m: any) => ['FRONT_DESK', 'ASSISTANT'].includes(m.role))
-      .map((m: any) => m.user_id)
-
-    if (staffUserIds.length > 0) {
-      const { data: staffData } = await admin
-        .from('front_desk_staff')
-        .select('id, full_name')
-        .in('id', staffUserIds)
-
-      if (staffData) {
-        for (const staff of staffData) {
-          const membership = memberships.find((m: any) => m.user_id === staff.id)
-          members.push({
-            userId: staff.id,
-            name: staff.full_name,
-            role: membership?.role === 'ASSISTANT' ? 'assistant' : 'frontdesk',
-          })
-        }
-      }
-    }
-
-    return members
+  if (error) {
+    console.error('Error fetching clinic memberships:', error)
+    return []
+  }
+  if (!memberships || memberships.length === 0) {
+    return []
   }
 
-  // Fallback: legacy tables
-  const { data: doctorLinks } = await admin
-    .from('clinic_doctors')
-    .select(`
-      role,
-      doctors:doctor_id (
-        id,
-        full_name,
-        specialty,
-        unique_id
-      )
-    `)
-    .eq('clinic_id', clinicId)
+  // Get doctor details
+  const doctorUserIds = memberships
+    .filter((m: any) => ['OWNER', 'DOCTOR'].includes(m.role))
+    .map((m: any) => m.user_id)
 
-  if (doctorLinks) {
-    for (const link of doctorLinks) {
-      const doc = link.doctors as any
-      if (doc) {
+  if (doctorUserIds.length > 0) {
+    const { data: doctors } = await admin
+      .from('doctors')
+      .select('id, full_name, specialty, unique_id')
+      .in('id', doctorUserIds)
+
+    if (doctors) {
+      for (const doc of doctors) {
+        const membership = memberships.find((m: any) => m.user_id === doc.id)
         members.push({
           userId: doc.id,
           name: doc.full_name,
-          role: (link.role as string) || 'doctor',
+          role: membership?.role === 'OWNER' ? 'owner' : 'doctor',
           specialty: doc.specialty,
           unique_id: doc.unique_id,
         })
@@ -455,18 +337,26 @@ export async function getClinicMembers(clinicId: string): Promise<ClinicMember[]
     }
   }
 
-  const { data: staffData } = await admin
-    .from('front_desk_staff')
-    .select('id, full_name')
-    .eq('clinic_id', clinicId)
+  // Get frontdesk/assistant display names from front_desk_staff (metadata table)
+  const staffUserIds = memberships
+    .filter((m: any) => ['FRONT_DESK', 'ASSISTANT'].includes(m.role))
+    .map((m: any) => m.user_id)
 
-  if (staffData) {
-    for (const staff of staffData) {
-      members.push({
-        userId: staff.id,
-        name: staff.full_name,
-        role: 'frontdesk',
-      })
+  if (staffUserIds.length > 0) {
+    const { data: staffData } = await admin
+      .from('front_desk_staff')
+      .select('id, full_name')
+      .in('id', staffUserIds)
+
+    if (staffData) {
+      for (const staff of staffData) {
+        const membership = memberships.find((m: any) => m.user_id === staff.id)
+        members.push({
+          userId: staff.id,
+          name: staff.full_name,
+          role: membership?.role === 'ASSISTANT' ? 'assistant' : 'frontdesk',
+        })
+      }
     }
   }
 

@@ -13,9 +13,15 @@ import { cookies } from 'next/headers'
  *
  * Rules:
  *  - Cannot leave if you are the OWNER (owner must transfer or delete the clinic)
- *  - Sets clinic_memberships.status = 'SUSPENDED'
- *  - Removes legacy clinic_doctors / front_desk_staff link
+ *  - Sets clinic_memberships.status = 'SUSPENDED' (source of truth)
+ *  - Revokes any assistant_doctor_assignments for this user/clinic
  *  - If the clinic being left is the active one, the cookie is cleared
+ *
+ * Note: legacy clinic_doctors / front_desk_staff.clinic_id are no longer
+ * mirrored here. The fallback reads in clinic-context.ts and frontdesk-scope.ts
+ * only trigger if memberships returns nothing — which can't happen now that
+ * memberships is the canonical store. See migrations 045-051 for the
+ * multi-tenant clinic_id rollout that made memberships authoritative.
  */
 export async function DELETE(request: Request) {
   try {
@@ -45,28 +51,14 @@ export async function DELETE(request: Request) {
       )
     }
 
-    // Suspend membership
+    // Suspend membership — this is the source of truth.
+    // Legacy clinic_doctors / front_desk_staff.clinic_id are no longer
+    // mirrored on leave; see route header note.
     await admin
       .from('clinic_memberships')
       .update({ status: 'SUSPENDED' })
       .eq('clinic_id', clinicId)
       .eq('user_id', user.id)
-
-    // Remove from legacy tables
-    if (user.role === 'doctor') {
-      await admin
-        .from('clinic_doctors')
-        .delete()
-        .eq('clinic_id', clinicId)
-        .eq('doctor_id', user.id)
-    } else if (user.role === 'frontdesk') {
-      // front_desk_staff stores clinic_id inline — set it null
-      await admin
-        .from('front_desk_staff')
-        .update({ clinic_id: null })
-        .eq('id', user.id)
-        .eq('clinic_id', clinicId)
-    }
 
     // Revoke any assistant assignments tied to this clinic for this user
     await admin

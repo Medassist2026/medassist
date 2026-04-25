@@ -26,17 +26,17 @@ export async function GET() {
     const admin = createAdminClient('settings-owner-check')
 
     // ── Owner auto-repair ────────────────────────────────────────────────────
-    // clinic_memberships OWNER insert is fire-and-forget in createClinic(),
-    // so some older clinics may have no OWNER row even though the doctor
-    // who created the clinic is the real owner.
+    // The clinic_memberships OWNER insert in createClinic() ignores errors,
+    // so some older clinics may end up with the creator as DOCTOR rather than
+    // OWNER. Heuristic: if there's no OWNER for this clinic and the calling
+    // user is the SOLE active member, they're the creator — upgrade them.
     //
-    // Detection: userRole is null/DOCTOR but NO OWNER exists anywhere in
-    // clinic_memberships for this clinic AND this user is in clinic_doctors
-    // (i.e. they were linked at clinic creation time).
+    // (Pre-mig-052 this used clinic_doctors as the "creator signal"; that
+    // table is now dropped, so we use clinic_memberships membership cardinality
+    // instead. Same intent, single source of truth.)
     let effectiveRole = (rawRole || '').toUpperCase() || 'DOCTOR'
 
     if (effectiveRole !== 'OWNER') {
-      // 1. Check if any OWNER exists in clinic_memberships for this clinic
       const { data: ownerRows } = await admin
         .from('clinic_memberships')
         .select('user_id')
@@ -46,30 +46,22 @@ export async function GET() {
         .limit(1)
 
       if (!ownerRows?.length) {
-        // 2. No OWNER row exists — check if this user is the SOLE member of
-        //    clinic_doctors (i.e. they created the clinic, nobody else has joined yet).
-        //    If multiple doctors are in clinic_doctors, we cannot safely infer ownership.
-        const { data: allCdRows } = await admin
-          .from('clinic_doctors')
-          .select('doctor_id')
+        const { data: allMemberRows } = await admin
+          .from('clinic_memberships')
+          .select('user_id')
           .eq('clinic_id', context.clinicId)
+          .eq('status', 'ACTIVE')
 
-        const doctorIds = (allCdRows || []).map((r: any) => r.doctor_id)
-        const isCreator = doctorIds.length === 1 && doctorIds[0] === user.id
+        const memberIds = (allMemberRows || []).map((r: any) => r.user_id)
+        const isSoleMember = memberIds.length === 1 && memberIds[0] === user.id
 
-        if (isCreator) {
-          // This is definitively the clinic creator — repair the missing row.
+        if (isSoleMember) {
+          // Promote the sole member's existing membership to OWNER.
           await admin
             .from('clinic_memberships')
-            .upsert(
-              {
-                clinic_id: context.clinicId,
-                user_id: user.id,
-                role: 'OWNER',
-                status: 'ACTIVE',
-              },
-              { onConflict: 'clinic_id,user_id' }
-            )
+            .update({ role: 'OWNER' })
+            .eq('clinic_id', context.clinicId)
+            .eq('user_id', user.id)
           effectiveRole = 'OWNER'
         }
       }

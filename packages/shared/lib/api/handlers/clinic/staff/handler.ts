@@ -20,48 +20,16 @@ export async function GET() {
 
     const admin = createAdminClient('clinic-staff')
 
-    // Get all clinic members — try clinic_memberships first, fall back to clinic_doctors
-    let members: Array<{ user_id: string; role: string; status: string; created_at: string }> = []
+    // clinic_memberships is the sole source of truth (mig 052 dropped
+    // the legacy clinic_doctors / front_desk_staff.clinic_id fallback).
     const { data: memberRows, error: membersError } = await admin
       .from('clinic_memberships')
       .select('user_id, role, status, created_at')
       .eq('clinic_id', clinicId)
       .eq('status', 'ACTIVE')
 
-    const isMembershipsTableMissing =
-      membersError &&
-      (membersError.code === 'PGRST205' || (membersError.message || '').includes('clinic_memberships'))
-
-    if (!isMembershipsTableMissing && memberRows) {
-      members = memberRows
-    } else if (isMembershipsTableMissing) {
-      // Fallback: read doctors from clinic_doctors + frontdesk from front_desk_staff
-      const { data: cdRows } = await admin
-        .from('clinic_doctors')
-        .select('doctor_id, created_at')
-        .eq('clinic_id', clinicId)
-      const doctorMembers = (cdRows || []).map((r: any) => ({
-        user_id: r.doctor_id,
-        role: 'DOCTOR',
-        status: 'ACTIVE',
-        created_at: r.created_at,
-      }))
-
-      const { data: fdsRows } = await admin
-        .from('front_desk_staff')
-        .select('id, created_at')
-        .eq('clinic_id', clinicId)
-      const fdMembers = (fdsRows || []).map((r: any) => ({
-        user_id: r.id,
-        role: 'ASSISTANT',
-        status: 'ACTIVE',
-        created_at: r.created_at,
-      }))
-
-      members = [...doctorMembers, ...fdMembers]
-    } else if (membersError) {
-      throw membersError
-    }
+    if (membersError) throw membersError
+    const members: Array<{ user_id: string; role: string; status: string; created_at: string }> = memberRows || []
 
     // Get user details
     const userIds = (members || []).map(m => m.user_id)

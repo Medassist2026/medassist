@@ -85,7 +85,10 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === 'accept') {
-      // Accept: update status to ACTIVE
+      // Accept: update status to ACTIVE.
+      // clinic_memberships is the canonical store; legacy
+      // front_desk_staff.clinic_id mirror removed (mig 045-051 made
+      // memberships authoritative).
       const { error: updateError } = await supabase
         .from('clinic_memberships')
         .update({ status: 'ACTIVE', updated_at: new Date().toISOString() })
@@ -94,12 +97,6 @@ export async function POST(request: NextRequest) {
       if (updateError) {
         return NextResponse.json({ error: 'Failed to accept invite' }, { status: 500 })
       }
-
-      // Legacy backward compatibility: update front_desk_staff.clinic_id
-      await supabase
-        .from('front_desk_staff')
-        .update({ clinic_id: membership.clinic_id })
-        .eq('id', user.id)
 
       const clinicName = (membership as any).clinics?.name || 'العيادة'
 
