@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic'
 import { createPayment } from '@shared/lib/data/frontdesk'
 import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
 import { createClient } from '@shared/lib/supabase/server'
-import { ensureDoctorInFrontdeskClinic } from '@shared/lib/data/frontdesk-scope'
+import { ensureDoctorInFrontdeskClinic, getFrontdeskClinicId } from '@shared/lib/data/frontdesk-scope'
 import { NextResponse } from 'next/server'
 
 export async function POST(request: Request) {
@@ -21,6 +21,21 @@ export async function POST(request: Request) {
       )
     }
 
+    // Resolve the frontdesk's clinic. We do this BEFORE the doctor-scope
+    // check because (a) we need the clinic_id to write the payment row
+    // (NOT NULL since mig 047), and (b) doctor-scope already calls the
+    // same resolver internally — so this avoids a second lookup.
+    const clinicId = await getFrontdeskClinicId(supabase as any, user.id)
+    if (!clinicId) {
+      return NextResponse.json(
+        {
+          error: 'لا توجد عيادة نشطة لهذا الحساب. يرجى التواصل مع المسؤول.',
+          code: 'NO_ACTIVE_CLINIC'
+        },
+        { status: 400 }
+      )
+    }
+
     const doctorInScope = await ensureDoctorInFrontdeskClinic(supabase as any, user.id, doctorId)
     if (!doctorInScope) {
       return NextResponse.json(
@@ -32,6 +47,7 @@ export async function POST(request: Request) {
     const payment = await createPayment({
       patientId,
       doctorId,
+      clinicId,
       amount,
       paymentMethod,
       appointmentId,
