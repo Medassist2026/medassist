@@ -1,0 +1,18 @@
+#!/usr/bin/env sh
+# ----------------------------------------------------------------------------
+# pre-push: gate `git push` on a clean type-check of the clinic app.
+#
+# Why this exists: commit b724eb1 widened a data-layer signature without
+# updating the call site, and the broken code reached Vercel because nothing
+# ran `tsc --noEmit` between the commit and the push. CI runs type-check on
+# push (.github/workflows/ci.yml:31-32), but Vercel builds in parallel — by
+# the time CI fails, Vercel has already failed too.
+#
+# This hook closes the gap. It mirrors what CI runs, so a passing hook
+# guarantees CI's type-check job will pass.
+#
+# Skip with: git push --no-verify   (use sparingly, e.g. WIP branches)
+# ----------------------------------------------------------------------------
+
+# Run type-check for the clinic app — the same step CI runs.
+npm run type-check -w @medassist/clinic
