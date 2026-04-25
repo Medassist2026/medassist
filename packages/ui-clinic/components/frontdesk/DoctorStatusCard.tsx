@@ -9,6 +9,7 @@ import { useEffect, useState } from 'react'
 interface DoctorStatusCardProps {
   doctorName: string
   status: 'in_session' | 'available' | 'away'
+  specialty?: string
   currentPatient?: {
     name: string
     queueNumber: number
@@ -16,6 +17,14 @@ interface DoctorStatusCardProps {
   sessionStartedAt?: string
   waitingCount: number
   nextPatientName?: string
+  onCallNext?: () => void
+  nextWaitMinutes?: number
+  appointments?: Array<{
+    id: string
+    startTime: string
+    patientName: string
+    status: string
+  }>
 }
 
 // Re-export old interface for backward compat with dashboard deriveDoctorStatuses
@@ -60,10 +69,14 @@ function getProgressColor(seconds: number): string {
 export function DoctorStatusCard({
   doctorName,
   status,
+  specialty,
   currentPatient,
   sessionStartedAt,
   waitingCount,
   nextPatientName,
+  onCallNext,
+  nextWaitMinutes,
+  appointments,
 }: DoctorStatusCardProps) {
   const [elapsed, setElapsed] = useState(0)
 
@@ -86,9 +99,12 @@ export function DoctorStatusCard({
 
   const isAway = status === 'away'
   const cardOpacity = isAway ? 'opacity-60' : ''
+  const isReadyToCall = status === 'available' && !!nextPatientName && !!onCallNext
 
   return (
-    <div className={`bg-white rounded-[12px] shadow-sm p-4 ${cardOpacity}`}>
+    <div className={`bg-white rounded-[12px] border-[0.8px] shadow-sm p-4 ${
+      isReadyToCall ? 'border-[#16A34A] bg-[#FAFFFE]' : 'border-[#E5E7EB]'
+    } ${cardOpacity}`}>
       {/* Row 1: Doctor name + Status badge */}
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
@@ -97,9 +113,14 @@ export function DoctorStatusCard({
               status === 'away' ? 'bg-[#9CA3AF]' : 'bg-[#16A34A]'
             }`}
           />
-          <span className="font-cairo text-[15px] font-bold text-[#030712]">
-            {doctorName}
-          </span>
+          <div className="flex flex-col">
+            <span className="font-cairo text-[15px] font-bold text-[#030712]">
+              {doctorName}
+            </span>
+            {specialty && (
+              <span className="font-cairo text-[10px] text-[#9CA3AF]">{specialty}</span>
+            )}
+          </div>
         </div>
         {status === 'in_session' && (
           <span className="font-cairo text-[11px] font-medium px-2 py-0.5 rounded-full bg-[#DCFCE7] text-[#16A34A]">
@@ -143,17 +164,60 @@ export function DoctorStatusCard({
         </>
       )}
 
-      {/* Footer: Waiting count + Next patient */}
-      <div className="flex items-center justify-between">
+      {/* Footer row */}
+      <div className="flex items-center justify-between mt-1">
         <span className="font-cairo text-[12px] text-[#9CA3AF]">
           {waitingCount.toLocaleString('ar-EG')} في الانتظار
         </span>
-        {nextPatientName && (
-          <span className="font-cairo text-[12px] text-[#9CA3AF]">
-            التالي: {nextPatientName}
-          </span>
+        {status === 'away' && (
+          <span className="font-cairo text-[12px] text-[#9CA3AF]">لم تبدأ الجلسة بعد</span>
         )}
       </div>
+
+      {/* Next patient callout */}
+      {nextPatientName && status !== 'away' && onCallNext && (
+        <div className="mt-2 bg-[#F0FDF4] rounded-[10px] px-3 py-2 flex items-center justify-between">
+          <div>
+            <p className="font-cairo text-[9px] font-bold text-[#15803D] tracking-wide">التالي</p>
+            <p className="font-cairo text-[14px] font-bold text-[#030712]">{nextPatientName}</p>
+            {nextWaitMinutes !== undefined && (
+              <p className="font-cairo text-[10px] text-[#15803D]">
+                {nextWaitMinutes.toLocaleString('ar-EG')} دقيقة انتظار
+              </p>
+            )}
+          </div>
+          <button
+            onClick={onCallNext}
+            className={`${isReadyToCall ? 'h-[42px] text-[13px] px-4' : 'h-[34px] text-[12px] px-3'} bg-[#16A34A] text-white rounded-[8px] font-cairo font-bold flex-shrink-0`}
+          >
+            استدعاء
+          </button>
+        </div>
+      )}
+
+      {/* Morning appointments preview */}
+      {status === 'available' && !nextPatientName && appointments && appointments.length > 0 && (
+        <div className="mt-2 border-t border-[#F3F4F6] pt-2">
+          <p className="font-cairo text-[9px] font-bold text-[#9CA3AF] tracking-wide mb-1.5">مواعيد اليوم</p>
+          {appointments.slice(0, 3).map(apt => (
+            <div key={apt.id} className="flex items-center justify-between py-1">
+              <div className="flex items-center gap-2">
+                <span className="font-cairo text-[10px] font-bold text-[#16A34A]">
+                  {new Date(apt.startTime).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}
+                </span>
+                <span className="font-cairo text-[11px] font-semibold text-[#030712]">{apt.patientName}</span>
+              </div>
+              <span className={`font-cairo text-[8px] font-bold px-1.5 py-0.5 rounded-full ${
+                apt.status === 'confirmed'
+                  ? 'bg-[#DCFCE7] text-[#15803D]'
+                  : 'bg-[#FEF9C3] text-[#A16207]'
+              }`}>
+                {apt.status === 'confirmed' ? 'مؤكد' : 'غير مؤكد'}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -167,6 +231,7 @@ export function DoctorStatusCardLegacy({ doctor }: { doctor: DoctorStatus }) {
     <DoctorStatusCard
       doctorName={`د. ${doctor.doctorName}`}
       status={derivedStatus}
+      specialty={doctor.specialty}
       currentPatient={
         doctor.currentPatient
           ? { name: doctor.currentPatient.name, queueNumber: doctor.currentPatient.queueNumber }

@@ -64,6 +64,34 @@ function useWaitTime(checkedInAt: string): { text: string; colorClass: string } 
 }
 
 // ============================================================================
+// QUEUE NUMBER BOX
+// ============================================================================
+
+function QueueNumberBox({
+  queueNumber,
+  status,
+  isNextInQueue,
+}: {
+  queueNumber: number
+  status: QueueStatus
+  isNextInQueue: boolean
+}) {
+  const bgColor = isNextInQueue
+    ? 'bg-[#DCFCE7] text-[#15803D]'
+    : status === 'completed'
+      ? 'bg-[#DCFCE7] text-[#15803D]'
+      : status === 'in_progress'
+        ? 'bg-[#EFF6FF] text-[#1D4ED8]'
+        : 'bg-[#F3F4F6] text-[#030712]'
+
+  return (
+    <div className={`w-[34px] h-[34px] rounded-[10px] flex items-center justify-center flex-shrink-0 font-cairo text-[13px] font-black ${bgColor}`}>
+      {status === 'completed' ? '✓' : queueNumber.toLocaleString('ar-EG')}
+    </div>
+  )
+}
+
+// ============================================================================
 // COMPONENT
 // ============================================================================
 
@@ -84,16 +112,15 @@ export function QueuePatientCard({
   const { text: waitTimeText, colorClass: waitTimeColor } = useWaitTime(checkedInAt)
   const [confirmNoShow, setConfirmNoShow] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [showActions, setShowActions] = useState(false)
 
   // --- Status-specific rendering ---
 
   if (status === 'completed') {
     return (
-      <div className="bg-white rounded-[12px] border-[0.8px] border-[#E5E7EB] p-3.5 opacity-40">
+      <div className="bg-white rounded-[12px] border-[0.8px] border-[#E5E7EB] p-3 opacity-40">
         <div className="flex items-center gap-3">
-          <span className="font-cairo text-[14px] font-bold text-[#030712]">
-            #{queueNumber.toLocaleString('ar-EG')}
-          </span>
+          <QueueNumberBox queueNumber={queueNumber} status={status} isNextInQueue={false} />
           <span className="font-cairo text-[14px] text-[#030712] flex-1 truncate">
             {patientName}
           </span>
@@ -107,11 +134,9 @@ export function QueuePatientCard({
 
   if (status === 'no_show') {
     return (
-      <div className="bg-white rounded-[12px] border-[0.8px] border-[#E5E7EB] p-3.5 opacity-40">
+      <div className="bg-white rounded-[12px] border-[0.8px] border-[#E5E7EB] p-3 opacity-40">
         <div className="flex items-center gap-3">
-          <span className="font-cairo text-[14px] font-bold text-[#030712]">
-            #{queueNumber.toLocaleString('ar-EG')}
-          </span>
+          <QueueNumberBox queueNumber={queueNumber} status={status} isNextInQueue={false} />
           <span className="font-cairo text-[14px] text-[#030712] flex-1 truncate line-through">
             {patientName}
           </span>
@@ -125,11 +150,9 @@ export function QueuePatientCard({
 
   if (status === 'in_progress') {
     return (
-      <div className="bg-white rounded-[12px] border-[0.8px] border-[#E5E7EB] p-3.5 opacity-60">
+      <div className="bg-white rounded-[12px] border-[0.8px] border-[#E5E7EB] p-3 opacity-60">
         <div className="flex items-center gap-3">
-          <span className="font-cairo text-[14px] font-bold text-[#030712]">
-            #{queueNumber.toLocaleString('ar-EG')}
-          </span>
+          <QueueNumberBox queueNumber={queueNumber} status={status} isNextInQueue={false} />
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <span className="font-cairo text-[14px] font-semibold text-[#030712] truncate">
@@ -182,9 +205,7 @@ export function QueuePatientCard({
     >
       {/* Row 1: Queue# + Name + Visit type badge */}
       <div className="flex items-center gap-3">
-        <span className="font-cairo text-[14px] font-bold text-[#030712]">
-          #{queueNumber.toLocaleString('ar-EG')}
-        </span>
+        <QueueNumberBox queueNumber={queueNumber} status={status} isNextInQueue={isNextInQueue} />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-cairo text-[14px] font-semibold text-[#030712] truncate">
@@ -212,39 +233,51 @@ export function QueuePatientCard({
             <span className="text-[#D1D5DB]">·</span>
           </>
         )}
-        <span className={`font-cairo text-[12px] ${waitTimeColor}`}>
+        <span className={`font-cairo text-[13px] font-semibold ${waitTimeColor}`}>
           {waitTimeText} ⏱
         </span>
       </div>
 
-      {/* Row 3: Action buttons */}
-      <div className="flex items-center gap-2 mt-3">
+      {/* Primary action row */}
+      <div className="flex items-center gap-2 mt-2.5">
         <button
           onClick={onCallPatient}
-          className="h-[36px] px-3 rounded-[8px] bg-[#16A34A] text-white font-cairo text-sm font-medium"
+          className="h-[32px] px-3 rounded-[8px] bg-[#16A34A] text-white font-cairo text-[11px] font-bold"
         >
           استدعاء
         </button>
         <button
-          onClick={onCollectPayment}
-          className="h-[36px] px-3 rounded-[8px] bg-white border border-[#E5E7EB] text-[#030712] font-cairo text-sm font-medium"
+          onClick={() => setShowActions(prev => !prev)}
+          className="h-[32px] px-3 rounded-[8px] bg-white border border-[#E5E7EB] text-[#4B5563] font-cairo text-[11px] font-medium"
         >
-          دفع
-        </button>
-        <button
-          onClick={onReschedule}
-          className="h-[36px] px-3 rounded-[8px] bg-white border border-[#E5E7EB] text-[#030712] font-cairo text-sm font-medium"
-        >
-          تأجيل
-        </button>
-        <button
-          onClick={handleNoShow}
-          disabled={isSubmitting}
-          className="h-[36px] px-3 rounded-[8px] bg-white border border-[#DC2626] text-[#DC2626] font-cairo text-sm font-medium disabled:opacity-40"
-        >
-          {confirmNoShow ? 'تأكيد؟' : 'لم يحضر'}
+          ••• المزيد
         </button>
       </div>
+
+      {/* Expanded actions — revealed on ••• tap */}
+      {showActions && (
+        <div className="flex items-center gap-2 mt-2">
+          <button
+            onClick={onCollectPayment}
+            className="h-[32px] px-3 rounded-[8px] bg-white border border-[#E5E7EB] text-[#030712] font-cairo text-[11px] font-medium"
+          >
+            دفع
+          </button>
+          <button
+            onClick={onReschedule}
+            className="h-[32px] px-3 rounded-[8px] bg-white border border-[#E5E7EB] text-[#030712] font-cairo text-[11px] font-medium"
+          >
+            تأجيل
+          </button>
+          <button
+            onClick={handleNoShow}
+            disabled={isSubmitting}
+            className="h-[32px] px-3 rounded-[8px] bg-white border border-[#DC2626] text-[#DC2626] font-cairo text-[11px] font-medium disabled:opacity-40"
+          >
+            {confirmNoShow ? 'تأكيد؟' : 'لم يحضر'}
+          </button>
+        </div>
+      )}
     </div>
   )
 }

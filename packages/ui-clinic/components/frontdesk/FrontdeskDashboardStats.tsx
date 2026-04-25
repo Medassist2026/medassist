@@ -16,11 +16,19 @@ function SkeletonNumber() {
   return <div className="w-12 h-5 rounded bg-[#E5E7EB] animate-pulse mx-auto" />
 }
 
+function getStatColor(label: string, value: number): string {
+  if (label === 'في الانتظار') {
+    if (value >= 7) return 'text-[#DC2626]'
+    if (value >= 4) return 'text-[#F59E0B]'
+    return 'text-[#16A34A]'
+  }
+  return 'text-[#030712]'
+}
+
 export function FrontdeskDashboardStats({
   waitingCount,
   arrivedToday,
   avgWaitMinutes,
-  revenueToday,
   isLoading,
 }: FrontdeskDashboardStatsProps) {
   const stats = [
@@ -39,15 +47,10 @@ export function FrontdeskDashboardStats({
       value: avgWaitMinutes,
       format: (v: number) => `${formatArabicNumber(v)} د`,
     },
-    {
-      label: 'إيرادات اليوم',
-      value: revenueToday,
-      format: (v: number) => `${formatArabicNumber(v)} ج.م`,
-    },
   ]
 
   return (
-    <div className="grid grid-cols-2 gap-3">
+    <div className="grid grid-cols-3 gap-3">
       {stats.map((stat) => (
         <div
           key={stat.label}
@@ -59,7 +62,7 @@ export function FrontdeskDashboardStats({
             ) : stat.value === null ? (
               <span className="font-cairo text-[20px] font-bold text-[#9CA3AF]">—</span>
             ) : (
-              <span className="font-cairo text-[20px] font-bold text-[#030712]">
+              <span className={`font-cairo text-[20px] font-bold ${getStatColor(stat.label, stat.value ?? 0)}`}>
                 {stat.format(stat.value)}
               </span>
             )}

@@ -766,6 +766,15 @@ export default function FrontDeskDashboardPage() {
   const [clinicId, setClinicId] = useState<string | null>(null)
   const [selectedDoctorId, setSelectedDoctorId] = useState<string | 'all'>('all')
 
+  // Appointments state
+  const [todayAppointments, setTodayAppointments] = useState<Array<{
+    id: string
+    start_time: string
+    patient: { full_name: string | null }
+    doctor_id: string
+    status: string
+  }>>([])
+
   // Sheet states
   const [showWalkIn, setShowWalkIn] = useState(false)
   const [walkInToast, setWalkInToast] = useState<string | null>(null)
@@ -803,6 +812,16 @@ export default function FrontDeskDashboardPage() {
     }
   }, [])
 
+  const refreshAppointments = useCallback(async () => {
+    try {
+      const res = await fetch('/api/frontdesk/appointments?today=true&limit=10')
+      if (res.ok) {
+        const data = await res.json()
+        setTodayAppointments(data.appointments || [])
+      }
+    } catch { /* non-critical */ }
+  }, [])
+
   const refreshData = useCallback(async () => {
     try {
       await Promise.all([refreshQueue(), refreshRevenue()])
@@ -814,7 +833,8 @@ export default function FrontDeskDashboardPage() {
   // Initial load
   useEffect(() => {
     refreshData()
-  }, [refreshData])
+    refreshAppointments()
+  }, [refreshData, refreshAppointments])
 
   // Realtime subscription for queue
   useEffect(() => {
@@ -861,6 +881,33 @@ export default function FrontDeskDashboardPage() {
 
   // Find first waiting entry for isNextInQueue
   const firstWaitingId = sortedQueue.find(q => q.status === 'waiting')?.id
+
+  // Next waiting item per doctor (for onCallNext in DoctorStatusCard)
+  const nextWaitingByDoctor = new Map<string, QueueItem>()
+  for (const item of sortedQueue) {
+    if (item.status === 'waiting' && !nextWaitingByDoctor.has(item.doctor_id)) {
+      nextWaitingByDoctor.set(item.doctor_id, item)
+    }
+  }
+
+  // Today's appointments grouped by doctor
+  const appointmentsByDoctor = new Map<string, Array<{
+    id: string
+    startTime: string
+    patientName: string
+    status: string
+  }>>()
+  for (const apt of todayAppointments) {
+    if (!appointmentsByDoctor.has(apt.doctor_id)) {
+      appointmentsByDoctor.set(apt.doctor_id, [])
+    }
+    appointmentsByDoctor.get(apt.doctor_id)!.push({
+      id: apt.id,
+      startTime: apt.start_time,
+      patientName: apt.patient?.full_name || 'مريض',
+      status: apt.status,
+    })
+  }
 
   // Doctor tab strip data
   const doctorTabData = doctorStatuses.map(d => ({
@@ -1000,6 +1047,36 @@ export default function FrontDeskDashboardPage() {
         onSelect={setSelectedDoctorId}
       />
 
+      {/* ═══ QUICK ACTIONS ═══ */}
+      <div className="bg-white border-b-[0.8px] border-[#E5E7EB] px-4 py-2.5">
+        <div className="flex gap-2 overflow-x-auto scrollbar-hide">
+          <button
+            onClick={() => setShowWalkIn(true)}
+            className="flex items-center gap-1.5 h-[38px] px-4 rounded-full bg-[#16A34A] text-white font-cairo text-[12px] font-bold whitespace-nowrap flex-shrink-0"
+          >
+            <span className="text-[15px]">+</span> تسجيل وصول
+          </button>
+          <button
+            onClick={() => router.push('/frontdesk/appointments/new')}
+            className="flex items-center gap-1.5 h-[38px] px-4 rounded-full bg-[#EFF6FF] text-[#1D4ED8] border border-[#1D4ED8] font-cairo text-[12px] font-bold whitespace-nowrap flex-shrink-0"
+          >
+            📅 موعد جديد
+          </button>
+          <button
+            onClick={() => router.push('/frontdesk/patients/register')}
+            className="flex items-center gap-1.5 h-[38px] px-4 rounded-full bg-white text-[#030712] border border-[#E5E7EB] font-cairo text-[12px] font-medium whitespace-nowrap flex-shrink-0"
+          >
+            👤 مريض جديد
+          </button>
+          <button
+            onClick={() => setShowUrgent(true)}
+            className="flex items-center gap-1.5 h-[38px] px-4 rounded-full bg-[#FFF7ED] text-[#EA580C] border border-[#EA580C] font-cairo text-[12px] font-bold whitespace-nowrap flex-shrink-0"
+          >
+            ⚡ مستعجل
+          </button>
+        </div>
+      </div>
+
       {/* ═══ CONTENT ═══ */}
       <div className="px-4 pt-2 pb-6 space-y-4">
         {loading ? (
@@ -1011,17 +1088,32 @@ export default function FrontDeskDashboardPage() {
               <div className="space-y-3">
                 {doctorStatuses
                   .filter(d => selectedDoctorId === 'all' || d.doctorId === selectedDoctorId)
-                  .map((doc) => (
-                    <DoctorStatusCard
-                      key={doc.doctorId}
-                      doctorName={doc.doctorName}
-                      status={doc.status}
-                      currentPatient={doc.currentPatient}
-                      sessionStartedAt={doc.sessionStartedAt}
-                      waitingCount={doc.waitingCount}
-                      nextPatientName={doc.nextPatientName}
-                    />
-                  ))}
+                  .map((doc) => {
+                    const nextItem = nextWaitingByDoctor.get(doc.doctorId)
+                    const nextWaitMinutes = nextItem
+                      ? Math.max(0, Math.floor((Date.now() - new Date(nextItem.checked_in_at).getTime()) / 60000))
+                      : undefined
+                    const docAppointments = appointmentsByDoctor.get(doc.doctorId)
+
+                    return (
+                      <DoctorStatusCard
+                        key={doc.doctorId}
+                        doctorName={doc.doctorName}
+                        status={doc.status}
+                        currentPatient={doc.currentPatient}
+                        sessionStartedAt={doc.sessionStartedAt}
+                        waitingCount={doc.waitingCount}
+                        nextPatientName={doc.nextPatientName}
+                        nextWaitMinutes={nextWaitMinutes}
+                        onCallNext={
+                          nextItem
+                            ? () => updateStatus(nextItem.id, 'in_progress')
+                            : undefined
+                        }
+                        appointments={docAppointments}
+                      />
+                    )
+                  })}
               </div>
             ) : (
               <EmptyQueueState
@@ -1048,9 +1140,14 @@ export default function FrontDeskDashboardPage() {
 
             {/* Queue List */}
             <div>
-              <h2 className="font-cairo text-[14px] font-semibold text-[#4B5563] mb-2">
-                قائمة الانتظار
-              </h2>
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="font-cairo text-[14px] font-semibold text-[#4B5563]">قائمة الانتظار</h2>
+                {sortedQueue.length > 0 && (
+                  <span className="font-cairo text-[11px] font-bold text-[#9CA3AF] bg-[#F3F4F6] px-2 py-0.5 rounded-full">
+                    {sortedQueue.length.toLocaleString('ar-EG')} مرضى
+                  </span>
+                )}
+              </div>
 
               {sortedQueue.length === 0 ? (
                 <EmptyQueueState variant="no_patients" />
