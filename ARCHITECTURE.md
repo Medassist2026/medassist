@@ -8,7 +8,7 @@
 
 MedAssist is an Arabic-first, mobile-first clinic management system built for Egyptian healthcare. It serves three user roles — doctors, frontdesk staff, and patients — across a multi-clinic architecture where a single doctor can belong to multiple clinics and a single frontdesk staff member manages one clinic's daily operations.
 
-The system runs as a Next.js 14 web app backed by Supabase (PostgreSQL + Auth + Realtime + Storage), with an offline-capable PWA shell and a planned Flutter mobile migration.
+The system runs as a Next.js 14 web app backed by Supabase (PostgreSQL + Auth + Realtime + Storage), with an offline-capable PWA shell. Mobile distribution will use a **Capacitor PWA shell** wrapping the same Next.js app for iOS and Android (D-043), reusing every line of `@medassist/shared` and `@medassist/ui-clinic`.
 
 ---
 
@@ -38,7 +38,7 @@ medassist/
 │   │       ├── api/handlers/      # Shared API handler logic (doctor/appointments, frontdesk/checkin, queue, payments)
 │   │       ├── audit/             # Audit trail logger
 │   │       ├── notifications/     # Push notification creation
-│   │       ├── offline/           # Service worker, IDB cache, LAN sync
+│   │       ├── offline/           # IndexedDB cache + pending-writes queue (idb-cache.ts only)
 │   │       ├── privacy/           # Schema health checks
 │   │       ├── realtime/          # Supabase realtime subscriptions
 │   │       ├── security/          # Rate limiting
@@ -56,9 +56,11 @@ medassist/
 │           └── shared/            # Cross-role shared components
 │
 ├── supabase/
-│   └── migrations/                # 44 sequential SQL migrations (045-047 in progress)
+│   └── migrations/                # 51 sequential SQL migrations (052 queued in working tree)
 │
-├── package.json                   # npm workspaces root
+├── .husky/
+│   └── pre-push                   # Type-check gate (see D-042)
+├── package.json                   # npm workspaces root (prepare: husky)
 ├── tsconfig.json                  # Root TypeScript config with path aliases
 └── turbo.json                     # Turborepo pipeline config
 ```
@@ -74,7 +76,7 @@ medassist/
 | Framework | Next.js (App Router) | 14.2.25 | Server components + client islands |
 | Language | TypeScript | 5.x | Strict mode, 6 residual `@capacitor` errors (mobile-only) |
 | Styling | Tailwind CSS | 3.4 | Custom design tokens, Cairo font, RTL-first |
-| Database | PostgreSQL (Supabase) | 15 | RLS policies, 44 migrations |
+| Database | PostgreSQL (Supabase) | 15 | RLS policies, 51 migrations |
 | Auth | Supabase Auth | — | Email/phone + password, OTP verification |
 | Realtime | Supabase Realtime | — | Queue subscriptions, live updates |
 | Storage | Supabase Storage | — | Attachments bucket |
@@ -83,6 +85,7 @@ medassist/
 | Error Tracking | Sentry | 10.38 | `@sentry/nextjs` integration |
 | Package Manager | npm | 10.2.4 | Workspaces for monorepo |
 | Build | Turborepo | — | Pipeline: lint → type-check → build |
+| Git Hooks | Husky | — | `pre-push`: runs `npm run type-check -w @medassist/clinic` to catch type errors before they reach Vercel. Added after `b724eb1` incident (see D-042). Activates via `prepare: husky` script. |
 
 ---
 
@@ -135,12 +138,14 @@ clinics
 ├── invite_code (short alphanumeric for staff onboarding)
 └── appointment_window_enabled, gap_minutes
 
-clinic_memberships (unified RBAC — Migration 018)
+clinic_memberships (unified RBAC — Migration 018; authoritative since mig 051)
 ├── clinic_id → clinics.id
 ├── user_id → auth.users.id
 ├── role: 'OWNER' | 'DOCTOR' | 'ASSISTANT' | 'FRONT_DESK'
 ├── status: 'ACTIVE' | 'INVITED' | 'SUSPENDED'
 └── created_by, timestamps
+NOTE: Legacy tables `front_desk_staff` and `clinic_doctors` still exist
+      but are deprecated. Mig 052 (queued) removes all direct queries.
 
 assistant_doctor_assignments (scope control)
 ├── assistant_user_id
@@ -262,7 +267,7 @@ Rx Intelligence logging (drug interactions, template suggestions) never blocks t
 
 ---
 
-## 8. Database Schema (44 Migrations)
+## 8. Database Schema (51 Migrations)
 
 ### 8.1 Core Tables
 
@@ -322,7 +327,8 @@ consent_log               → Patient consent tracking
 | 018-023 | Multi-Tenant | Unified RBAC, clinic IDs everywhere, centralized access |
 | 024-032 | Clinical | OTP fixes, appointments, Rx intelligence, templates, SMS |
 | 033-044 | Operations | Clinic address, invites, storage, scheduling, invoices, dev accounts |
-| 045-047 | Data Integrity (in progress) | NULL `clinic_id` backfill on legacy `clinical_notes` rows |
+| 045-051 | Data Integrity | `clinic_id` `NOT NULL` enforcement across 21 tables. Backfill legacy NULL rows in `clinical_notes` (56 rows) and `payments` (9 rows). Tables that were missing `clinic_id` entirely (mig 019/026 never applied to live) now have the column + constraint. Save-path tightening in 5 handler files. D-041. |
+| 052 | Legacy Cleanup (queued) | Remove `front_desk_staff` / `clinic_doctors` direct queries — `clinic_memberships` now authoritative across all 21 tables since mig 051. 10 files: `clinic-context.ts`, `frontdesk-scope.ts`, `users.ts`, + 7 handlers/routes. |
 
 ---
 
@@ -395,10 +401,14 @@ FrontdeskBottomNav        → Fixed bottom: dashboard, check-in, appointments, p
 
 - **Service Worker**: `next-pwa` generates SW with precaching
 - **Offline page**: `/offline` fallback when network unavailable
-- **IDB Cache**: `packages/shared/lib/offline/idb-cache.ts` for local data
-- **Sync Queue**: `sync-queue.ts` queues mutations for replay when online
-- **LAN Sync**: `lan-discovery.ts` + `lan-sync.ts` for local network clinic sync (Capacitor mobile)
-- **Morning Sync**: `morning-sync.ts` downloads daily patient data on first open
+- **IDB Cache + Pending Writes Queue**: `packages/shared/lib/offline/idb-cache.ts` exposes:
+  - `cacheGet` / `cacheSet` — TTL'd API response cache
+  - `addPendingWrite(url, method, body)` — enqueue offline mutation
+  - `getPendingWriteCount()` — UI badge data
+  - `syncPendingWrites()` — flush queue on reconnect (called by `OfflineIndicator`)
+- **Offline Indicator**: `packages/ui-clinic/components/frontdesk/OfflineIndicator.tsx` mounts in the frontdesk layout, listens to `online`/`offline` events, dynamically imports `idb-cache` for the badge count and reconnect-time sync.
+- **LAN Sync**: deferred — see D-044. Re-evaluate after Capacitor mobile (D-043) ships.
+- **Phase 1 follow-up (open)**: wire `addPendingWrite` into actual write paths (frontdesk check-in first), add server-side idempotency keys, and define the auth-refresh-mid-replay flow. See TD-007 (now superseded by file deletion) and the Phase plan in `docs/investigations/CAPACITOR_BUILD_INVESTIGATION.md`.
 
 ---
 
@@ -442,10 +452,11 @@ Created via Migration 043. All passwords: `Test1234!`
 ## 14. TypeScript Health
 
 - **Path aliases**: `@/*`, `@shared/*`, `@ui-clinic/*` in root `tsconfig.json`
-- **Current errors**: 6 total — all `@capacitor/*` module references (mobile-only, not applicable to web build)
+- **Current errors**: 0 (was 3 `@capacitor/*` errors; all resolved by removing the unreachable Capacitor SQLite/LAN scaffolding — D-043, D-044). Root `tsc --noEmit` and per-workspace `type-check` both clean.
 - **Strict mode**: Enabled
-- **Verification**: `npx tsc --noEmit` from project root
-- **Test runner**: None configured. Existing tests (`drug-interactions.test.ts`, `doctor-stats.test.ts` — 31 tests) use a hand-rolled `test()` harness run via `npx tsx <file>`. A real runner (vitest recommended) should be installed before CI enforcement.
+- **CI gate**: `npm run type-check` (root) and per-workspace `type-check -w @medassist/clinic` / `-w @medassist/patient` are required CI checks. Pre-push hook runs the same root + clinic-workspace combo locally (D-042 + D-045).
+- **Verification**: `npx tsc --noEmit` from project root → 0 errors.
+- **Test runner**: Mixed. `doctor-stats.test.ts` (31 tests) and `drug-interactions.test.ts` use a hand-rolled `test()` harness via `npx tsx <file>`. `frontdesk/payments/create/__tests__/handler.test.ts` uses Vitest with compile-time witnesses + `@ts-expect-error` regression guards — first Vitest usage in the repo. Full Vitest migration recommended before CI enforcement.
 
 ---
 
@@ -473,7 +484,7 @@ Created via Migration 043. All passwords: `Test1234!`
 
 ## 16. Known Technical Debt
 
-> Tracking table for identified issues. TD-001–004 resolved 22 Apr; TD-005 resolved 25 Apr; TD-006 open.
+> Tracking table for identified issues. TD-001–004 resolved 22 Apr; TD-005 resolved 25 Apr; TD-007 superseded 25 Apr (files deleted); TD-006 + TD-008 open.
 
 | ID | Issue | Location | Impact | Status |
 |----|-------|----------|--------|--------|
@@ -483,4 +494,5 @@ Created via Migration 043. All passwords: `Test1234!`
 | TD-004 | **Analytics not scoped by `clinic_id`.** | `doctor-stats.ts` | Cross-clinic data leakage in analytics | **Resolved** 22 Apr — D-034. |
 | TD-005 | **NULL `clinic_id` on legacy `clinical_notes` and `payments` rows + 19 untightened tables.** Save-path holes allowed orphan rows in `clinical_notes` (56) and `payments` (9). Plus mig 019/026 never landed on live DB — 19 tables were missing the `clinic_id` column entirely. Resolved by migrations 045-051 and matching save-path tightening in `data/clinical-notes.ts`, `data/frontdesk.ts`, `clinical/notes/handler.ts`, `frontdesk/payments/create/handler.ts`, `offline/data-service.ts`. | `clinical_notes` + `payments` + 19 other tables; 5 files | Legacy data invisible to scoped queries; new orphan writes blocked at schema layer | **Resolved** 25 Apr — D-041 + migrations 045-051. |
 | TD-006 | **Clinical-notes handler trusts body-supplied `clinicId` without re-validating it against the doctor's memberships.** `handlers/clinical/notes/handler.ts:37` accepts `bodyClinicId` directly into the resolution chain. A doctor's authenticated session means we can validate the value via `getClinicContext(user.id, 'doctor', bodyClinicId)`, but currently we don't. Lower urgency than TD-005 because the only writer is the doctor's own session form (no UI to forge another clinic), but it's a D-041 violation and should be tightened before any third-party clinical-write integration. | `clinical/notes/handler.ts` | Theoretical write-target leak across clinics for malicious/compromised clients | Open — follow-up PR. |
-| TD-007 | **Offline payment shim points at the wrong endpoint and uses the wrong body shape.** `offline/data-service.ts:424` POSTs to `/api/frontdesk/payments` (GET-only — would 405) instead of `/api/frontdesk/payments/create`; same in `sync-queue.ts:105`. Both also send snake_case (`patient_id`, `doctor_id`, `clinic_id`) while the handler expects camelCase. Same-shape bug exists for the clinical-notes shim's body. Pre-existing since `48f2760` — never worked at runtime, but invisible because no production user has triggered an offline payment replay yet. | `offline/data-service.ts`, `offline/sync-queue.ts` | Offline payment + clinical-note replays will silently fail (would-405 / would-400) when network returns | Open — follow-up PR. Out of scope for the build-fix PR. |
+| TD-007 | **Offline payment shim points at the wrong endpoint and uses the wrong body shape.** `offline/data-service.ts:424` POSTs to `/api/frontdesk/payments` (GET-only — would 405) instead of `/api/frontdesk/payments/create`; same in `sync-queue.ts:105`. Both also send snake_case while the handler expects camelCase. | `offline/data-service.ts`, `offline/sync-queue.ts` | Offline payment + clinical-note replays would silently fail (405/400) when network returns | **Superseded** 25 Apr — both files deleted (D-043, D-044). Replacement work: TD-008 (offline-write Phase 1 on idb-cache) will write the new shim correctly the first time. |
+| TD-008 | **Offline-write queue Phase 1 not wired.** After D-043/D-044 cleanup, `idb-cache.ts` exposes `addPendingWrite` / `syncPendingWrites` / `getPendingWriteCount` and `OfflineIndicator` already calls them on reconnect — but no actual write surface enqueues. Frontdesk check-in, payment create, and clinical-note save still hit the network directly with no offline fallback. | check-in client code, `payments/create`, `clinical/notes` write surfaces | During internet outages, frontdesk and doctors lose ability to record check-ins, payments, and notes. | Open — Phase 1 PR. Wire frontdesk check-in first (highest-frequency, lowest-risk surface); add server-side idempotency keys; define auth-refresh-mid-replay flow. See `docs/investigations/CAPACITOR_BUILD_INVESTIGATION.md` §3 for the full plan. |

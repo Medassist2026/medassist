@@ -24,6 +24,12 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Type check (root — full monorepo)
+        # D-045: catches phantom imports inside packages/shared/** that the
+        # per-workspace checks miss (workspace tsconfigs only see apps/<app>/**).
+        # Required check — no continue-on-error.
+        run: npm run type-check
+
       - name: Lint clinic app
         run: npm run lint -w @medassist/clinic
         continue-on-error: true

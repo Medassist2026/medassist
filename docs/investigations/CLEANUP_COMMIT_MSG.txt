@@ -1,0 +1,69 @@
+chore(offline): delete Capacitor/SQLite dead code; adopt Capacitor PWA mobile strategy
+
+Resolves the 3 long-standing TS2307 errors in packages/shared/lib/offline/
+(@capacitor/core, @capacitor-community/sqlite — never installed). Per the
+investigation in docs/investigations/CAPACITOR_BUILD_INVESTIGATION.md, all
+the offending files were unreachable from apps/clinic entry points: their
+only static caller chain rooted at ConnectionStatus.tsx, which had zero
+importers. The web build survived only because of bundler tree-shaking +
+narrower scope of apps/clinic/tsconfig.json — one accidental import away
+from a hard build break. tsc --noEmit at the root surfaced the errors
+permanently in IDE Problems panes, training us to ignore real signal.
+
+What's deleted
+--------------
+packages/shared/lib/offline/lan-discovery.ts   (Capacitor UDP discovery)
+packages/shared/lib/offline/lan-sync.ts        (depends on lan-discovery)
+packages/shared/lib/offline/local-db.ts        (Capacitor SQLite driver)
+packages/shared/lib/offline/morning-sync.ts    (depends on local-db)
+packages/shared/lib/offline/sw-register.ts     (orphan; next-pwa handles SW)
+packages/shared/lib/offline/sync-engine.ts     (depends on lan + queue)
+packages/shared/lib/offline/sync-queue.ts      (SQLite-bound; broken at runtime per TD-007)
+packages/shared/lib/offline/data-service.ts    (SQLite-bound; broken at runtime per TD-007)
+packages/shared/hooks/useOfflineStatus.ts      (orphan; only ConnectionStatus used it)
+packages/shared/hooks/useClinicPeers.ts        (orphan; LAN-sync hook)
+packages/shared/components/ui/ConnectionStatus.tsx     (orphan)
+packages/shared/components/ui/OfflineIndicator.tsx     (legacy duplicate)
+
+What's kept
+-----------
+packages/shared/lib/offline/idb-cache.ts                       — IndexedDB
+  offline write queue (addPendingWrite, syncPendingWrites,
+  getPendingWriteCount). The actual working web offline-queue primitives.
+packages/ui-clinic/components/frontdesk/OfflineIndicator.tsx   — the live
+  banner component; dynamic-imports idb-cache for the pending count badge
+  and on-reconnect flush.
+
+Strategy decisions captured in DECISIONS_LOG
+---------------------------------------------
+- D-005 amended: mobile target is Capacitor PWA shell (was Flutter).
+  Rationale: max code reuse from existing Next.js + @medassist/shared,
+  one UI codebase across web/iOS/Android, fits MedAssist's solo-founder
+  delivery profile and Egyptian clinic deployment model.
+- D-NEW (LAN sync deferred): real LAN peer discovery requires a native
+  runtime (UDP, mDNS) — only viable inside the Capacitor mobile shell.
+  Re-evaluate after the mobile build ships and outage telemetry justifies
+  the engineering cost.
+
+Follow-up work (not in this commit)
+-----------------------------------
+- Phase 1 of offline-write: wire idb-cache.addPendingWrite into
+  frontdesk/queue/checkin first. Add idempotency keys server-side.
+- TD-007 closes: the broken endpoint/body shapes were in the deleted
+  files; the replacement on idb-cache will be written correctly the
+  first time.
+
+Verification
+------------
+  npx tsc --noEmit                          ->  0 errors (was 3)
+  npm run type-check -w @medassist/clinic   ->  0 errors
+  npm run lint                              ->  unchanged warnings
+  npm run build:clinic                      ->  41/41 pages OK
+
+CI gate added
+-------------
+.github/workflows/type-check.yml runs `npm run type-check` on every PR.
+.husky/pre-push runs the same locally before push. Closes the "one
+accidental import away" risk class permanently.
+
+Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>

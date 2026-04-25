@@ -48,10 +48,12 @@
 ## D-005: Monorepo with npm workspaces
 
 **When**: Early architecture
-**Context**: Business logic (auth, data, validation) needs to be shared between the web app and a future Flutter mobile app. UI components are role-specific but share design tokens.
+**Context**: Business logic (auth, data, validation) needs to be shared between the web app and a future mobile app. UI components are role-specific but share design tokens.
 **Decision**: Three-package monorepo: `apps/clinic` (web app), `packages/shared` (business logic), `packages/ui-clinic` (React components).
-**Alternatives**: Single app (no code reuse for Flutter), Turborepo-only (added but not required), Nx (too heavy).
-**Outcome**: `@medassist/shared` has 60+ modules covering auth, data, SMS, analytics, offline, validation. `@medassist/ui-clinic` has 26 components organized by role. Clean separation for eventual Flutter migration.
+**Alternatives**: Single app (no code reuse), Turborepo-only (added but not required), Nx (too heavy).
+**Outcome**: `@medassist/shared` has 60+ modules covering auth, data, SMS, analytics, offline, validation. `@medassist/ui-clinic` has 26 components organized by role. Mobile-strategy-agnostic separation that pays off for the chosen mobile path.
+
+> **Amended 2026-04-25 by D-043**: Mobile target is now Capacitor PWA shell (not Flutter). The monorepo structure is unchanged — the React components and TypeScript business logic in `@medassist/shared` and `@medassist/ui-clinic` are reused inside the Capacitor webview, which is exactly the reuse story this monorepo was designed for.
 
 ---
 
@@ -417,5 +419,53 @@
 
 ---
 
-*Last entry: D-041 | 25 April 2026*
+## D-042: Pre-push type-check gate via Husky
+
+**When**: 25 April 2026 (commit `035f141`)
+**Context**: The `b724eb1` build break reached Vercel before CI could catch it. Vercel builds on push without waiting for the GitHub Actions `lint-and-typecheck` job — by the time CI fails, Vercel has already deployed a broken build. The root cause was a missing `clinicId` argument in the frontdesk payment-create handler, which `tsc` would have caught locally.
+**Decision**: Add `.husky/pre-push` hook that runs `npm run type-check -w @medassist/clinic` — the same step CI runs. Activates automatically after `npm install` via the new `prepare: husky` script in root `package.json`. Blocks `git push` if type-check fails.
+**Alternatives**: Pre-commit hook (too slow — runs on every commit, not just push), CI-only with branch protection (Vercel still races ahead), Vercel ignore build step script (fragile — requires maintaining a custom script), move to preview deployments only (loses the fast-deploy workflow Mo prefers).
+**Outcome**: Developer-side gate closes the Vercel/CI race from the local machine. A `b724eb1`-class error now fails `git push` before it reaches origin. CI remains the authoritative check for PRs and non-local pushes. First Husky usage in the repo.
+
+---
+
+## D-043: Mobile shell strategy is Capacitor PWA, not Flutter
+
+**When**: 25 April 2026
+**Context**: D-005 originally named Flutter as the future mobile target, motivating the monorepo's TS-only business-logic separation. Months later the codebase actually accumulated Capacitor scaffolding (`@capacitor/core`, `@capacitor-community/sqlite`) inside `packages/shared/lib/offline/`, with the Capacitor packages never installed. Investigation showed those imports had been silently producing 3 TS2307 errors and were unreachable from any web entry point. The "Capacitor vs Flutter" question was implicitly open in the docs and explicitly open in the code.
+**Decision**: Mobile shell will be **Capacitor PWA** wrapping the existing Next.js app. Same UI codebase ships to web, iOS, and Android via a webview + native plugin bridge. Flutter is rejected as the mobile target.
+**Alternatives**:
+- *Flutter (rejected)*: separate Dart codebase, zero TS reuse, every screen rewritten, ~3–6 month dedicated effort, permanent doubled maintenance. Right answer only if MedAssist needed sustained native performance (real-time imaging, heavy graphics) or had a Flutter-fluent collaborator. It does not.
+- *React Native (rejected)*: would reuse business logic but not UI components — `@medassist/ui-clinic` would still need to be rewritten with native components instead of HTML.
+- *PWA only (no native shell, rejected)*: App Store / Play Store presence is a distribution requirement for Egyptian clinic acquisition; pure PWA can't be listed.
+**Outcome**:
+- D-005 amended to remove Flutter language. Monorepo structure unchanged — Capacitor uses the same React + TypeScript code.
+- All Capacitor TS scaffolding currently in the repo (`lan-discovery.ts`, `lan-sync.ts`, `local-db.ts`, etc.) is deleted in this commit. It was unreachable, broken at runtime per TD-007, and not a working starting point for an actual Capacitor build. When mobile work begins, it will be initialized fresh via `npx cap init` against installed `@capacitor/cli`.
+- ARCHITECTURE.md §1 updated.
+
+---
+
+## D-044: LAN sync deferred until Capacitor mobile shell ships
+
+**When**: 25 April 2026
+**Context**: Original `offline/lan-discovery.ts` + `offline/lan-sync.ts` proposed peer-to-peer sync over the clinic's local WiFi (UDP broadcast for discovery, HTTP server on each device). Real LAN peer discovery requires native runtime capabilities (UDP socket binding, mDNS, in-process HTTP server) that browsers do not have and cannot polyfill. The proposed "registration endpoint" web fallback in the original design didn't actually solve the offline case (the registration endpoint also requires the internet that's currently down).
+**Decision**: LAN sync is deferred. The product will ship single-device offline-first via `idb-cache.ts` (IndexedDB queue + reconnect-replay) only. LAN peer sync is gated on (a) the Capacitor mobile shell shipping (D-043), (b) every device in a clinic running the Capacitor build (not the web app), and (c) production telemetry showing meaningful operational time lost to multi-minute outages with multiple staff actively typing during the same window.
+**Alternatives**: Ship LAN sync now with a web-only fallback that doesn't actually work offline (rejected — false UX), build a LAN sync proxy server hosted at the clinic on a dedicated device (rejected — distribution & support nightmare for solo founder).
+**Outcome**: LAN-related files removed from the repo in this commit. **Re-evaluate this decision after Capacitor mobile builds are shipping to production clinics.** If outage telemetry and clinic feedback support the feature, design a fresh LAN sync against the actual `@capacitor/network` and `@capacitor-community/udp` APIs — not from the deleted scaffolding, which assumed Capacitor v3 patterns that may not match current APIs by then.
+
+---
+
+## D-045: Root `tsc --noEmit` added to CI gate and pre-push hook (extends D-042)
+
+**When**: 25 April 2026
+**Context**: D-042 added a pre-push hook running `npm run type-check -w @medassist/clinic`. That command uses `apps/clinic/tsconfig.json`, whose `include` glob is relative to `apps/clinic/` and therefore does not see `packages/shared/**`. The 3 long-standing Capacitor TS2307 errors lived in `packages/shared/lib/offline/*` and were invisible to D-042's gate. They were only surfaced by running root-level `tsc --noEmit` (root tsconfig has `"include": ["**/*.ts", "**/*.tsx"]`). The "one accidental import away" risk class identified in the investigation report (§9) needed a wider gate.
+**Decision**: Add `npm run type-check` (root, equivalent to `tsc --noEmit` from repo root) to:
+- `.github/workflows/ci.yml` as a required step alongside the existing per-workspace type-checks.
+- `.husky/pre-push` as a step that runs alongside the existing per-workspace one.
+**Alternatives**: Replace the per-workspace checks with root-only (rejected — root is slower; per-workspace fails faster on common cases), enable `typescript.ignoreBuildErrors` in `next.config.js` (rejected — silences real errors), webpack-alias `@capacitor/*` to `false` to neutralize the specific errors (rejected — addresses symptom not class).
+**Outcome**: The root gate catches monorepo-wide phantom imports that the per-workspace gate misses by design. Pre-push is now slower (~15s on cold cache) but produces a passing-CI guarantee. Skip with `git push --no-verify` for explicitly WIP branches.
+
+---
+
+*Last entry: D-045 | 25 April 2026*
 *Add new decisions at the bottom with sequential ID.*

@@ -1,18 +1,29 @@
 #!/usr/bin/env sh
 # ----------------------------------------------------------------------------
-# pre-push: gate `git push` on a clean type-check of the clinic app.
+# pre-push: gate `git push` on clean type-checks for the whole monorepo.
 #
 # Why this exists: commit b724eb1 widened a data-layer signature without
 # updating the call site, and the broken code reached Vercel because nothing
 # ran `tsc --noEmit` between the commit and the push. CI runs type-check on
-# push (.github/workflows/ci.yml:31-32), but Vercel builds in parallel — by
-# the time CI fails, Vercel has already failed too.
+# push, but Vercel builds in parallel — by the time CI fails, Vercel has
+# already failed too. This hook closes that gap locally.
 #
-# This hook closes the gap. It mirrors what CI runs, so a passing hook
-# guarantees CI's type-check job will pass.
+# Two passes (D-042 + D-045):
+#   1. Root tsc --noEmit  — catches phantom imports inside packages/shared/**
+#      that the per-workspace check misses (its tsconfig only sees
+#      apps/clinic/**). This is the gate that would have flagged the
+#      Capacitor TS2307 errors that lived for ~6 weeks unseen.
+#   2. Clinic-workspace type-check — fast feedback on app-specific errors.
 #
 # Skip with: git push --no-verify   (use sparingly, e.g. WIP branches)
 # ----------------------------------------------------------------------------
 
-# Run type-check for the clinic app — the same step CI runs.
+set -e
+
+# Pass 1: root — wide scope, catches monorepo-wide drift (D-045).
+echo "→ pre-push: root tsc --noEmit (full monorepo)"
+npm run type-check
+
+# Pass 2: clinic workspace — fast app-scoped feedback (D-042).
+echo "→ pre-push: type-check clinic workspace"
 npm run type-check -w @medassist/clinic
