@@ -113,12 +113,71 @@ export function cairoMonthEnd(now: Date = new Date()): Date {
 
 /**
  * Return the UTC `Date` corresponding to 00:00:00.000 Cairo on a day
- * N calendar months before today (Cairo). `cairoNMonthsAgoStart(12)`
- * is used for the 12-month income chart.
+ * N calendar months before today (Cairo). `cairoNMonthsAgoStart(11)`
+ * is used as the start of the 12-month income chart's window (current
+ * month + 11 prior months = 12 buckets).
  */
 export function cairoNMonthsAgoStart(months: number, now: Date = new Date()): Date {
   const { year, month } = cairoParts(now)
   return cairoWallClockToUtc(year, month - months, 1, 0, 0, 0, 0)
+}
+
+/**
+ * Return the UTC `Date` corresponding to 00:00:00.000 Cairo on a day
+ * N calendar days before today (Cairo). Useful when a window does
+ * NOT line up with calendar month boundaries.
+ */
+export function cairoNDaysAgoStart(days: number, now: Date = new Date()): Date {
+  const { year, month, day } = cairoParts(now)
+  return cairoWallClockToUtc(year, month, day - days, 0, 0, 0, 0)
+}
+
+/**
+ * Enumerate Cairo calendar days between two instants (inclusive).
+ * Returns YYYY-MM-DD strings, in ascending order.
+ *
+ * Used by the analytics aggregator to pre-fill zero-buckets for days
+ * with no notes / no payments, so the chart shows an honest "this
+ * month / last 30 days" view instead of being silently sparse.
+ */
+export function cairoEachDay(startUtc: Date, endUtc: Date): string[] {
+  const start = cairoParts(startUtc)
+  const end   = cairoParts(endUtc)
+  // Use plain UTC Dates as integer-arithmetic helpers — the values are
+  // never interpreted as UTC instants, only used to advance day-by-day
+  // through a Cairo calendar.
+  const startKey = Date.UTC(start.year, start.month - 1, start.day)
+  const endKey   = Date.UTC(end.year,   end.month - 1,   end.day)
+  if (endKey < startKey) return []
+
+  const result: string[] = []
+  for (let t = startKey; t <= endKey; t += 24 * 60 * 60 * 1000) {
+    const d = new Date(t)
+    result.push(
+      `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`
+    )
+  }
+  return result
+}
+
+/**
+ * Enumerate Cairo calendar months between two instants (inclusive).
+ * Returns YYYY-MM strings, in ascending order.
+ */
+export function cairoEachMonth(startUtc: Date, endUtc: Date): string[] {
+  const start = cairoParts(startUtc)
+  const end   = cairoParts(endUtc)
+  const startN = start.year * 12 + (start.month - 1)
+  const endN   = end.year   * 12 + (end.month   - 1)
+  if (endN < startN) return []
+
+  const result: string[] = []
+  for (let n = startN; n <= endN; n++) {
+    const y = Math.floor(n / 12)
+    const m = (n % 12) + 1
+    result.push(`${y}-${pad2(m)}`)
+  }
+  return result
 }
 
 // ============================================================================
