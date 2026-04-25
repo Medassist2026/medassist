@@ -5,26 +5,14 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Stethoscope, Eye, EyeOff, ChevronRight, Building2, Users } from 'lucide-react'
+import {
+  isValidEgyptianLocalPhone,
+  getEgyptianPhoneError,
+  normalizeEgyptianDigits,
+} from '@shared/lib/utils/phone-validation'
 
 type AuthTab = 'login' | 'register'
 type RegisterRole = 'doctor' | 'frontdesk'
-
-// ─── Egyptian mobile number validation ───────────────────────────────────────
-// Covers: Vodafone 010, Etisalat/E& 011, Orange 012, WE 015
-const EG_PHONE_RE = /^01[0125][0-9]{8}$/
-
-function isValidEgPhone(v: string) {
-  return EG_PHONE_RE.test(v)
-}
-
-// ─── Arabic-Indic → Western digit normalizer ─────────────────────────────────
-// Converts ٠١٢٣٤٥٦٧٨٩ → 0123456789 before stripping non-digits
-const ARABIC_INDIC = '٠١٢٣٤٥٦٧٨٩'
-function normalizeDigits(v: string) {
-  return v
-    .replace(/[٠-٩]/g, d => String(ARABIC_INDIC.indexOf(d)))
-    .replace(/\D/g, '')
-}
 
 // ─── Left panel icons ─────────────────────────────────────────────────────────
 function PrescriptionIcon() {
@@ -96,11 +84,9 @@ export default function AuthPage() {
     ? 'يرجى إدخال الاسم الأول واسم العائلة'
     : null
 
-  const phoneError = phoneTouched && phone.length > 0 && !isValidEgPhone(phone)
-    ? 'أدخل رقم موبايل مصري صحيح (010 / 011 / 012 / 015)'
-    : null
+  const phoneError = phoneTouched ? getEgyptianPhoneError(phone) : null
 
-  const isPhoneOk = isValidEgPhone(phone)
+  const isPhoneOk = isValidEgyptianLocalPhone(phone)
 
   // Arabic character detection (Unicode block U+0600–U+06FF)
   const ARABIC_RE = /[\u0600-\u06FF]/
@@ -387,7 +373,7 @@ export default function AuthPage() {
                 type="tel"
                 value={phone}
                 onChange={e => {
-                  setPhone(normalizeDigits(e.target.value).slice(0, 11))
+                  setPhone(normalizeEgyptianDigits(e.target.value))
                   setPhoneExists(false)
                   setError('')
                 }}

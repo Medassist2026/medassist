@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { ConfirmDialog } from '@shared/components/ui/ConfirmDialog'
 import { HelpIcon, HelpPanel } from '@shared/components/ui/HelpTooltips'
+import { getEgyptianPhoneError } from '@shared/lib/utils/phone-validation'
 
 // ============================================================================
 // CONSTANTS
@@ -143,9 +144,11 @@ function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatientModalProps) {
     // Validate
     const newErrors: Record<string, string> = {}
     if (!form.name.trim()) newErrors.name = 'الاسم مطلوب'
-    if (!form.phone.trim()) newErrors.phone = 'رقم الهاتف مطلوب'
-    if (form.phone && !/^01[0125]\d{8}$/.test(form.phone.replace(/\s/g, ''))) {
-      newErrors.phone = 'رقم هاتف مصري غير صحيح'
+    if (!form.phone.trim()) {
+      newErrors.phone = 'رقم الهاتف مطلوب'
+    } else {
+      const phoneErr = getEgyptianPhoneError(form.phone.replace(/\s/g, ''))
+      if (phoneErr) newErrors.phone = phoneErr
     }
 
     if (Object.keys(newErrors).length > 0) {

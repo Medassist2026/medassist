@@ -4,6 +4,11 @@ import { useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Stethoscope, ChevronRight, Eye, EyeOff } from 'lucide-react'
 import { motion } from 'framer-motion'
+import {
+  isValidEgyptianLocalPhone,
+  getEgyptianPhoneError,
+  normalizeEgyptianDigits,
+} from '@shared/lib/utils/phone-validation'
 
 /**
  * Reset Password Page — Matches Figma design
@@ -32,6 +37,7 @@ function ResetPasswordPageInner() {
 
   // Step 1: Phone entry
   const [phone, setPhone] = useState(phoneParam.replace('+20', ''))
+  const [phoneTouched, setPhoneTouched] = useState(false)
 
   // Step 2: New password
   const [newPassword, setNewPassword] = useState('')
@@ -126,7 +132,8 @@ function ResetPasswordPageInner() {
   }
 
   const isStep2Valid = newPassword.length >= 8 && confirmPassword.length >= 8 && newPassword === confirmPassword
-  const isStep1Valid = phone.length >= 10
+  const isStep1Valid = isValidEgyptianLocalPhone(phone)
+  const phoneError = phoneTouched ? getEgyptianPhoneError(phone) : null
 
   // Success state
   if (success) {
@@ -293,12 +300,17 @@ function ResetPasswordPageInner() {
                 <input
                   type="tel"
                   value={phone}
-                  onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 11))}
+                  onChange={(e) => setPhone(normalizeEgyptianDigits(e.target.value))}
+                  onBlur={() => setPhoneTouched(true)}
                   placeholder="01XXXXXXXXX"
                   className="flex-1 bg-transparent font-cairo text-[14px] leading-[26px] text-[#030712] placeholder:text-[#9CA3AF] outline-none text-right"
                   dir="ltr"
+                  inputMode="numeric"
                 />
               </div>
+              {phoneError && (
+                <span className="font-cairo text-[12px] text-red-500">{phoneError}</span>
+              )}
             </div>
 
             <button

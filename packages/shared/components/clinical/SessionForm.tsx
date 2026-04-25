@@ -16,6 +16,11 @@ import { PatientHistorySheet } from './PatientHistorySheet'
 import DiagnosisInput from './DiagnosisInput'
 import { PatientLivingCard } from './PatientLivingCard'
 import type { VisitType } from '@ui-clinic/components/doctor/PatientQueueCard'
+import {
+  EGYPT_LOCAL_PHONE_RE,
+  normalizeEgyptianDigits,
+  getEgyptianPhoneSearchError,
+} from '@shared/lib/utils/phone-validation'
 
 // ============================================================================
 // TYPES
@@ -119,33 +124,29 @@ export function SessionForm({ preselectedPatientId, queueId, appointmentId }: Se
   const router = useRouter()
 
   // ===== EGYPTIAN PHONE VALIDATION =====
-  // Normalizes Arabic-Indic digits (٠١٢٣٤٥٦٧٨٩) to Western digits before validation.
-  // Egyptian keyboards (and autocomplete) often produce Eastern Arabic numerals.
+  // The phone input here is search-style: user types into the +20 field, we
+  // search the patients table, and if no match is found the same input
+  // becomes the create-walk-in identifier. Canonical regex + helpers live in
+  // @shared/lib/utils/phone-validation. We use the *search* variant so we
+  // don't yell at the user mid-keystroke (length < 10 returns null), and we
+  // still accept 10-digit input (missing leading zero) for paste-friendliness.
+  // `normalizePhone` here keeps just the Arabic-Indic → Western digit pass
+  // and intentionally does NOT strip non-digits, because callers pipe its
+  // output back into search queries that still need spaces/dashes preserved
+  // when present.
   function normalizePhone(input: string): string {
     return input.replace(/[٠١٢٣٤٥٦٧٨٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString())
   }
 
-  // Validates the raw digits typed into the "+20" prefix phone field.
-  // Valid: 11 digits starting with 010/011/012/015 (local format)
-  //     or 10 digits starting with 10/11/12/15 (missing leading zero)
   function isValidEgyptianPhone(rawInput: string): boolean {
     const digits = normalizePhone(rawInput).replace(/\D/g, '')
-    if (digits.length === 11 && /^0(10|11|12|15)/.test(digits)) return true
+    if (digits.length === 11 && EGYPT_LOCAL_PHONE_RE.test(digits)) return true
     if (digits.length === 10 && /^(10|11|12|15)/.test(digits)) return true
     return false
   }
 
-  function egyptianPhoneError(rawInput: string): string | null {
-    const digits = normalizePhone(rawInput).replace(/\D/g, '')
-    if (digits.length === 0) return null
-    if (digits.length < 10) return null  // still typing, no error yet
-    if (isValidEgyptianPhone(rawInput)) return null
-    if (digits.length > 11) return 'رقم طويل جداً — يجب أن يكون 11 رقماً (مثال: 01012345678)'
-    if (!digits.startsWith('0') && !['10','11','12','15'].some(p => digits.startsWith(p))) {
-      return 'يجب أن يبدأ الرقم بـ 010 أو 011 أو 012 أو 015'
-    }
-    return 'رقم موبايل مصري غير صحيح (مثال: 01012345678)'
-  }
+  const egyptianPhoneError = (rawInput: string): string | null =>
+    getEgyptianPhoneSearchError(normalizePhone(rawInput))
 
   // ===== STEP STATE =====
   // Step 1: Patient Info | Step 2: Prescription

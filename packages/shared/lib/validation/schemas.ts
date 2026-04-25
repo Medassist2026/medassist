@@ -5,6 +5,8 @@
  * Phase D4: Input validation for Layer 2 readiness
  */
 
+import { validateEgyptianPhone } from '../utils/phone-validation'
+
 // ============================================================================
 // VALIDATION TYPES
 // ============================================================================
@@ -40,8 +42,13 @@ function isEmail(val: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)
 }
 
+// Defers to the canonical Egyptian phone validator. The previous length-only
+// stub (`val.length >= 8 && val.length <= 20`) was a foot-gun: it accepted
+// any 8–20-char string, including non-Egyptian numbers, and several reviewers
+// assumed this file held the real validator. Real phone validation lives in
+// packages/shared/lib/utils/phone-validation.ts.
 function isPhone(val: string): boolean {
-  return val.length >= 8 && val.length <= 20
+  return validateEgyptianPhone(val).isValid
 }
 
 // ============================================================================

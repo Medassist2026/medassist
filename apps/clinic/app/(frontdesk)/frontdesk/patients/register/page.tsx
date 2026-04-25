@@ -3,6 +3,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { ChevronRight, X, Search, User, Phone, Calendar, Check, AlertTriangle, Loader2, UserPlus } from 'lucide-react'
+import {
+  isValidEgyptianLocalPhone,
+  getEgyptianPhoneError,
+  normalizeEgyptianDigits,
+} from '@shared/lib/utils/phone-validation'
 
 // ============================================================================
 // TYPES
@@ -84,7 +89,14 @@ export default function RegisterPatientPage() {
   const hasFormData = fullName.trim() || phone.trim() || age.trim() || sex
 
   // ── Computed: form validity ──
-  const isFormValid = fullName.trim().length >= 2 && phone.trim().length === 11 && age.trim() && sex
+  // Phone gate uses the canonical regex (not just length) so an invalid prefix
+  // like 01999999999 keeps the submit button disabled and forces the user to
+  // see the inline error rather than slipping through to a server-side 400.
+  const isFormValid =
+    fullName.trim().length >= 2 &&
+    isValidEgyptianLocalPhone(phone) &&
+    age.trim() &&
+    sex
 
   // ============================================================================
   // PHONE TYPEAHEAD — Search after 3 digits
@@ -113,8 +125,8 @@ export default function RegisterPatientPage() {
   }, [])
 
   const handlePhoneChange = (value: string) => {
-    // Only allow digits, max 11
-    const digits = value.replace(/\D/g, '').slice(0, 11)
+    // Normalize Arabic-Indic digits, strip non-digits, cap at 11
+    const digits = normalizeEgyptianDigits(value)
     setPhone(digits)
     setFormErrors(prev => ({ ...prev, phone: undefined }))
 
@@ -123,6 +135,18 @@ export default function RegisterPatientPage() {
     searchTimeoutRef.current = setTimeout(() => {
       searchByPhone(digits)
     }, 400)
+  }
+
+  // Validate on blur so the user sees the warning *before* submitting,
+  // matching the auth flow's UX (D-019). Only sets the phone error — does NOT
+  // flip `formTouched` (which would also reveal errors on still-empty
+  // name/age/sex fields, which is too aggressive on a per-field blur).
+  const handlePhoneBlur = () => {
+    setTimeout(() => setShowResults(false), 200)
+    const phoneErr = getEgyptianPhoneError(phone)
+    if (phoneErr) {
+      setFormErrors(prev => ({ ...prev, phone: phoneErr }))
+    }
   }
 
   // ── Select existing patient from typeahead ──
@@ -205,10 +229,9 @@ export default function RegisterPatientPage() {
 
     if (!phone.trim()) {
       errors.phone = 'أدخل رقم الهاتف'
-    } else if (phone.length !== 11) {
-      errors.phone = 'رقم الهاتف يجب أن يكون ١١ رقم (مثال: 01012345678)'
-    } else if (!/^01[0125]\d{8}$/.test(phone)) {
-      errors.phone = 'رقم هاتف مصري غير صحيح — يبدأ بـ 010, 011, 012, أو 015'
+    } else {
+      const phoneErr = getEgyptianPhoneError(phone)
+      if (phoneErr) errors.phone = phoneErr
     }
 
     if (!age.trim()) {
@@ -553,7 +576,7 @@ export default function RegisterPatientPage() {
               value={phone}
               onChange={(e) => handlePhoneChange(e.target.value)}
               onFocus={() => { if (searchResults.length > 0) setShowResults(true) }}
-              onBlur={() => { setTimeout(() => setShowResults(false), 200) }}
+              onBlur={handlePhoneBlur}
               placeholder="01012345678"
               dir="ltr"
               className={`w-full h-12 pr-10 pl-10 rounded-[12px] border-[0.8px] font-cairo text-[14px] text-[#030712] placeholder:text-[#9CA3AF] focus:outline-none transition-colors bg-white text-left ${
@@ -566,7 +589,7 @@ export default function RegisterPatientPage() {
           <p className="font-cairo text-[11px] text-[#9CA3AF] mt-1">
             مثال: 01012345678
           </p>
-          {formErrors.phone && formTouched && (
+          {formErrors.phone && (
             <p className="font-cairo text-[12px] text-red-600 mt-1 flex items-center gap-1">
               <AlertTriangle className="w-3 h-3 flex-shrink-0" />
               {formErrors.phone}

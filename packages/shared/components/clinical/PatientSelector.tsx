@@ -9,26 +9,24 @@ import {
   DEPENDENT_PATIENT_HELP,
   WALKIN_PATIENT_HELP
 } from '@shared/components/ui/HelpTooltips'
+import {
+  isValidEgyptianLocalPhone,
+  getEgyptianPhoneError,
+} from '@shared/lib/utils/phone-validation'
 
 // ============================================================================
-// EGYPTIAN PHONE VALIDATION
+// EGYPTIAN PHONE VALIDATION — walk-in registration form
+// Both helpers below validate strict 11-digit local format. The walk-in form
+// is a registration field (not a search), so users must type the full
+// 01012345678. Canonical regex + error wording lives in
+// @shared/lib/utils/phone-validation.
 // ============================================================================
 
-function isValidEgyptianPhone(rawInput: string): boolean {
-  const digits = rawInput.replace(/\D/g, '')
-  if (digits.length === 11 && /^0(10|11|12|15)/.test(digits)) return true
-  if (digits.length === 10 && /^(10|11|12|15)/.test(digits)) return true
-  return false
-}
+const isValidEgyptianPhone = (raw: string): boolean =>
+  isValidEgyptianLocalPhone(raw.replace(/\D/g, ''))
 
-function egyptianPhoneError(rawInput: string): string | null {
-  const digits = rawInput.replace(/\D/g, '')
-  if (digits.length === 0) return null
-  if (digits.length < 10) return 'رقم الهاتف قصير — يجب أن يكون 11 رقماً'
-  if (digits.length > 11) return 'رقم الهاتف طويل — يجب أن يكون 11 رقماً'
-  if (!/^0?(10|11|12|15)/.test(digits)) return 'يجب أن يبدأ الرقم بـ 010 أو 011 أو 012 أو 015'
-  return null
-}
+const egyptianPhoneError = (raw: string): string | null =>
+  getEgyptianPhoneError(raw.replace(/\D/g, ''))
 
 // ============================================================================
 // TYPES

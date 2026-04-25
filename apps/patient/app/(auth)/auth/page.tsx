@@ -4,6 +4,11 @@ import { Suspense } from 'react'
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { ar } from '@shared/lib/i18n/ar'
+import {
+  isValidEgyptianLocalPhone,
+  getEgyptianPhoneError,
+  normalizeEgyptianDigits,
+} from '@shared/lib/utils/phone-validation'
 
 // ============================================================================
 // EGYPTIAN MEDICAL SPECIALTIES
@@ -57,6 +62,7 @@ function AuthContent() {
 
   const [activeTab, setActiveTab] = useState<Tab>('login')
   const [phone, setPhone] = useState('')
+  const [phoneTouched, setPhoneTouched] = useState(false)
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [fullName, setFullName] = useState('')
@@ -109,6 +115,11 @@ function AuthContent() {
       setError('جميع الحقول مطلوبة')
       return
     }
+    if (!isValidEgyptianLocalPhone(phone)) {
+      setPhoneTouched(true)
+      setError(getEgyptianPhoneError(phone) || 'رقم الهاتف غير صحيح')
+      return
+    }
     setLoading(true)
     try {
       const formattedPhone = formatPhone(phone)
@@ -143,6 +154,11 @@ function AuthContent() {
     setError('')
     if (!phone || !password || !fullName) {
       setError('جميع الحقول مطلوبة')
+      return
+    }
+    if (!isValidEgyptianLocalPhone(phone)) {
+      setPhoneTouched(true)
+      setError(getEgyptianPhoneError(phone) || 'رقم الهاتف غير صحيح')
       return
     }
     if (password.length < 6) {
@@ -267,12 +283,17 @@ function AuthContent() {
               <input
                 type="tel"
                 value={phone}
-                onChange={(e) => setPhone(e.target.value)}
+                onChange={(e) => setPhone(normalizeEgyptianDigits(e.target.value))}
+                onBlur={() => setPhoneTouched(true)}
                 placeholder="01XXXXXXXXX"
                 className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                 dir="ltr"
+                inputMode="numeric"
               />
             </div>
+            {phoneTouched && getEgyptianPhoneError(phone) && (
+              <p className="mt-1.5 text-xs text-red-600">{getEgyptianPhoneError(phone)}</p>
+            )}
           </div>
 
           {/* Full Name (register only) */}

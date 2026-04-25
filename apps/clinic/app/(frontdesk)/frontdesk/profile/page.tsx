@@ -20,6 +20,10 @@ import {
   RefreshCw,
   LogIn,
 } from 'lucide-react'
+import {
+  getEgyptianPhoneError,
+  normalizeEgyptianDigits,
+} from '@shared/lib/utils/phone-validation'
 
 // ============================================================================
 // TYPES
@@ -154,8 +158,9 @@ export default function ProfilePage() {
       showToast('الاسم لازم يكون على الأقل حرفين', 'error')
       return
     }
-    if (!editPhone.trim() || editPhone.replace(/[\s\-]/g, '').length < 10) {
-      showToast('رقم الهاتف غير صحيح', 'error')
+    const phoneErr = getEgyptianPhoneError(editPhone.replace(/[\s\-]/g, ''))
+    if (phoneErr) {
+      showToast(phoneErr, 'error')
       return
     }
 
@@ -528,13 +533,13 @@ export default function ProfilePage() {
                 {pageState === 'edit' ? (
                   <input
                     value={editPhone}
-                    onChange={(e) => setEditPhone(e.target.value)}
+                    onChange={(e) => setEditPhone(normalizeEgyptianDigits(e.target.value))}
                     className="flex-1 min-w-0 text-[14px] font-semibold text-[#030712] bg-[#F9FAFB] rounded-lg px-2.5 py-1.5 outline-none border-[0.8px] border-[#E5E7EB] focus:border-[#16A34A]"
                     dir="ltr"
                     style={{ textAlign: 'left' }}
                     placeholder="01xxxxxxxxx"
                     type="tel"
-                    inputMode="tel"
+                    inputMode="numeric"
                   />
                 ) : (
                   <span className="flex-1 min-w-0 text-[14px] font-semibold text-[#030712] truncate" dir="ltr" style={{ textAlign: 'left' }}>

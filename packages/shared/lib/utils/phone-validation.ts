@@ -29,6 +29,77 @@ const EGYPT_MOBILE_PREFIXES: Record<string, string> = {
   '015': 'WE'
 }
 
+// ============================================================================
+// CLIENT-SIDE HELPERS — for forms and search inputs
+// ----------------------------------------------------------------------------
+// The `validateEgyptianPhone` above is the flexible server-boundary validator
+// (accepts +20, 00, 12-digit, 10-digit, etc.) and returns a rich result.
+//
+// The helpers below are thin, UI-friendly wrappers around the same canonical
+// regex so client forms stop reinventing it. Use:
+//   - getEgyptianPhoneError       → strict, for forms (registration, profile)
+//   - getEgyptianPhoneSearchError → lax, for search inputs (still-typing aware)
+//   - normalizeEgyptianDigits     → onChange handler for tel inputs
+// ============================================================================
+
+/** Canonical regex for a local Egyptian mobile (11 digits, prefix 010/011/012/015). */
+export const EGYPT_LOCAL_PHONE_RE = /^01[0125]\d{8}$/
+
+const ARABIC_INDIC_DIGITS = '٠١٢٣٤٥٦٧٨٩'
+
+/**
+ * Normalize a phone-input string for use in `onChange`:
+ * Arabic-Indic numerals → Western, strip non-digits, cap at `maxDigits` (default 11).
+ */
+export function normalizeEgyptianDigits(raw: string, maxDigits = 11): string {
+  return raw
+    .replace(/[٠-٩]/g, (d) => String(ARABIC_INDIC_DIGITS.indexOf(d)))
+    .replace(/\D/g, '')
+    .slice(0, maxDigits)
+}
+
+/** True if `local` is exactly an 11-digit Egyptian mobile with a valid prefix. */
+export function isValidEgyptianLocalPhone(local: string): boolean {
+  return EGYPT_LOCAL_PHONE_RE.test(local)
+}
+
+/**
+ * Strict form-field validator. Returns canonical Arabic error or null.
+ *
+ * - Empty input → null (caller decides whether the field is required).
+ * - Length ≠ 11 → length error.
+ * - Length 11 but wrong prefix → prefix error.
+ * - Valid → null.
+ */
+export function getEgyptianPhoneError(local: string): string | null {
+  if (!local) return null
+  if (local.length !== 11) {
+    return 'رقم الهاتف يجب أن يكون ١١ رقم (مثال: 01012345678)'
+  }
+  if (!EGYPT_LOCAL_PHONE_RE.test(local)) {
+    return 'رقم هاتف مصري غير صحيح — يبدأ بـ 010 أو 011 أو 012 أو 015'
+  }
+  return null
+}
+
+/**
+ * Lax search-input validator. Returns null while the user is still typing
+ * (length < 10) so we don't yell at them mid-keystroke. Accepts 10-digit
+ * input (missing leading zero) as a courtesy for paste-from-clipboard.
+ */
+export function getEgyptianPhoneSearchError(input: string): string | null {
+  const digits = input.replace(/\D/g, '')
+  if (digits.length === 0) return null
+  if (digits.length < 10) return null  // still typing — no error yet
+  if (digits.length > 11) return 'رقم الهاتف طويل — يجب أن يكون ١١ رقماً'
+
+  // Accept 11-digit local OR 10-digit (missing leading zero)
+  if (digits.length === 11 && EGYPT_LOCAL_PHONE_RE.test(digits)) return null
+  if (digits.length === 10 && /^(10|11|12|15)/.test(digits)) return null
+
+  return 'رقم هاتف مصري غير صحيح — يبدأ بـ 010 أو 011 أو 012 أو 015'
+}
+
 /**
  * Validate and normalize an Egyptian phone number
  */

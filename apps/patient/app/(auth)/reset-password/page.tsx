@@ -4,6 +4,11 @@ import { Suspense } from 'react'
 import { useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { ar } from '@shared/lib/i18n/ar'
+import {
+  isValidEgyptianLocalPhone,
+  getEgyptianPhoneError,
+  normalizeEgyptianDigits,
+} from '@shared/lib/utils/phone-validation'
 
 function ResetPasswordContent() {
   const router = useRouter()
@@ -12,7 +17,9 @@ function ResetPasswordContent() {
   const resetToken = searchParams.get('resetToken') || ''
 
   // If a resetToken is present in the URL, skip straight to step 2
-  const [phone, setPhone] = useState(phoneParam)
+  // The +20 chip is rendered separately, so the input value is local-only.
+  const [phone, setPhone] = useState(normalizeEgyptianDigits(phoneParam.replace(/^\+?20/, '')))
+  const [phoneTouched, setPhoneTouched] = useState(false)
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState('')
@@ -31,6 +38,11 @@ function ResetPasswordContent() {
     setError('')
     if (!phone) {
       setError('رقم الهاتف مطلوب')
+      return
+    }
+    if (!isValidEgyptianLocalPhone(phone)) {
+      setPhoneTouched(true)
+      setError(getEgyptianPhoneError(phone) || 'رقم الهاتف غير صحيح')
       return
     }
 
@@ -183,12 +195,17 @@ function ResetPasswordContent() {
                 <input
                   type="tel"
                   value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
+                  onChange={(e) => setPhone(normalizeEgyptianDigits(e.target.value))}
+                  onBlur={() => setPhoneTouched(true)}
                   placeholder="01XXXXXXXXX"
                   className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                   dir="ltr"
+                  inputMode="numeric"
                 />
               </div>
+              {phoneTouched && getEgyptianPhoneError(phone) && (
+                <p className="mt-1.5 text-xs text-red-600">{getEgyptianPhoneError(phone)}</p>
+              )}
             </div>
             <button
               onClick={handleSendOTP}
