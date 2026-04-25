@@ -3,6 +3,12 @@ export const dynamic = 'force-dynamic'
 import { getTodayQueue, getQueueByDateRange } from '@shared/lib/data/frontdesk'
 import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
 import { getClinicContext } from '@shared/lib/data/clinic-context'
+import {
+  cairoNDaysAgoStart,
+  cairoParts,
+  cairoTodayEnd,
+  cairoTodayStart,
+} from '@shared/lib/date/cairo-date'
 import { NextRequest, NextResponse } from 'next/server'
 
 /**
@@ -34,32 +40,27 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: true, queue })
     }
 
-    // For reports: compute date range and fetch all statuses
+    // For reports: compute date range and fetch all statuses.
+    // Boundaries flip on Cairo midnight so a queue entry from 23:30
+    // Cairo on the Saturday of "this week" is grouped correctly
+    // regardless of the server's local TZ.
     const now = new Date()
     let dateFrom: Date
     let dateTo: Date
 
     if (range === 'yesterday') {
-      dateFrom = new Date(now)
-      dateFrom.setDate(dateFrom.getDate() - 1)
-      dateFrom.setHours(0, 0, 0, 0)
-      dateTo = new Date(now)
-      dateTo.setDate(dateTo.getDate() - 1)
-      dateTo.setHours(23, 59, 59, 999)
+      dateFrom = cairoNDaysAgoStart(1, now)         // 00:00 Cairo yesterday
+      dateTo   = new Date(cairoTodayStart(now).getTime() - 1) // 23:59:59.999 Cairo yesterday
     } else if (range === 'week') {
-      const dayOfWeek = now.getDay()
-      const daysSinceSaturday = (dayOfWeek + 1) % 7
-      dateFrom = new Date(now)
-      dateFrom.setDate(dateFrom.getDate() - daysSinceSaturday)
-      dateFrom.setHours(0, 0, 0, 0)
-      dateTo = new Date(now)
-      dateTo.setHours(23, 59, 59, 999)
+      const cp = cairoParts(now)
+      const cairoWeekday      = new Date(Date.UTC(cp.year, cp.month - 1, cp.day)).getUTCDay() // 0=Sun … 6=Sat
+      const daysSinceSaturday = (cairoWeekday + 1) % 7
+      dateFrom = cairoNDaysAgoStart(daysSinceSaturday, now)
+      dateTo   = cairoTodayEnd(now)
     } else {
       // fallback to today (all statuses)
-      dateFrom = new Date(now)
-      dateFrom.setHours(0, 0, 0, 0)
-      dateTo = new Date(now)
-      dateTo.setHours(23, 59, 59, 999)
+      dateFrom = cairoTodayStart(now)
+      dateTo   = cairoTodayEnd(now)
     }
 
     const queue = await getQueueByDateRange(

@@ -1,5 +1,6 @@
 import { createClient } from '@shared/lib/supabase/server'
 import { createAdminClient } from '@shared/lib/supabase/admin'
+import { cairoTodayEnd, cairoTodayStart } from '@shared/lib/date/cairo-date'
 
 // translateSpecialty lives in a client-safe utility so Client Components
 // can import it without pulling in next/headers via this file.
@@ -1004,26 +1005,40 @@ export async function rescheduleAppointment(
 // ============================================================================
 
 /**
- * Create payment record
+ * Create payment record.
+ *
+ * `clinicId` is REQUIRED — every payment is scoped to a clinic. The frontdesk
+ * handler should resolve via getFrontdeskClinicId() before calling. Schema
+ * enforces NOT NULL since migration 047. See doctor analytics scoping in
+ * commit ed5aa2a for why this matters.
  */
 export async function createPayment(params: {
   patientId: string
   doctorId: string
+  clinicId: string
   amount: number
   paymentMethod: 'cash' | 'card' | 'insurance' | 'other'
   appointmentId?: string
   clinicalNoteId?: string
   notes?: string
 }): Promise<Payment> {
+  // Defense-in-depth: TS already requires clinicId, runtime guard catches
+  // `as any` callers and stale JS bundles. Migration 047 documents the
+  // historical orphan rows that motivated this guard.
+  if (!params.clinicId) {
+    throw new Error('createPayment: clinicId is required (no orphan payments)')
+  }
+
   const supabase = await createClient()
-  
+
   const user = await supabase.auth.getUser()
-  
+
   const { data, error } = await supabase
     .from('payments')
     .insert({
       patient_id: params.patientId,
       doctor_id: params.doctorId,
+      clinic_id: params.clinicId,   // required — see params doc + mig 047
       amount: params.amount,
       payment_method: params.paymentMethod,
       appointment_id: params.appointmentId,
@@ -1034,29 +1049,32 @@ export async function createPayment(params: {
     })
     .select()
     .single()
-  
+
   if (error) throw new Error(error.message)
-  
+
   return data as Payment
 }
 
 /**
- * Get today's payments
+ * Get today's payments — "today" is the Cairo wall-clock day, so the
+ * window flips at 00:00 Cairo (not 02:00–03:00 Cairo, which is what
+ * server-local UTC midnight would yield).
  */
 export async function getTodayPayments(): Promise<Payment[]> {
   const supabase = await createClient()
-  
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  
+
+  const todayStart = cairoTodayStart()
+  const todayEnd   = cairoTodayEnd()
+
   const { data, error } = await supabase
     .from('payments')
     .select('*')
-    .gte('created_at', today.toISOString())
+    .gte('created_at', todayStart.toISOString())
+    .lte('created_at', todayEnd.toISOString())
     .order('created_at', { ascending: false })
-  
+
   if (error) throw new Error(error.message)
-  
+
   return data as Payment[]
 }
 

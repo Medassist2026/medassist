@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
 import { createClient } from '@shared/lib/supabase/server'
 import { getFrontdeskClinicId, getClinicDoctorIds } from '@shared/lib/data/frontdesk-scope'
+import { cairoTodayEnd, cairoTodayStart } from '@shared/lib/date/cairo-date'
 import { NextRequest, NextResponse } from 'next/server'
 import type { PaymentStatus } from '@shared/lib/data/frontdesk'
 
@@ -68,13 +69,14 @@ export async function PATCH(request: NextRequest) {
     }
 
     // ── Same-day restriction ──
+    // "Today" anchored on Cairo midnight, so a payment taken at 23:30
+    // Cairo can still be edited until 00:00 Cairo, not until UTC
+    // midnight (which would cut off Cairo users at 02:00 AM).
     const paymentDate = new Date(existing.created_at)
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    const tomorrow = new Date(today)
-    tomorrow.setDate(tomorrow.getDate() + 1)
+    const todayStart = cairoTodayStart()
+    const todayEnd   = cairoTodayEnd()
 
-    if (paymentDate < today || paymentDate >= tomorrow) {
+    if (paymentDate < todayStart || paymentDate > todayEnd) {
       return NextResponse.json(
         { error: 'لا يمكن تعديل دفعات الأيام السابقة' },
         { status: 400 }

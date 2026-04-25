@@ -3,6 +3,12 @@ export const dynamic = 'force-dynamic'
 import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
 import { createClient } from '@shared/lib/supabase/server'
 import { getFrontdeskClinicId, getClinicDoctorIds } from '@shared/lib/data/frontdesk-scope'
+import {
+  cairoNDaysAgoStart,
+  cairoParts,
+  cairoTodayEnd,
+  cairoTodayStart,
+} from '@shared/lib/date/cairo-date'
 import { NextRequest, NextResponse } from 'next/server'
 
 /**
@@ -42,33 +48,30 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ payments: [], totals: { total: 0, count: 0, by_method: {} } })
     }
 
-    // Calculate date range
+    // Calculate date range — Cairo wall-clock so "today" / "yesterday"
+    // / "week" boundaries flip at Cairo midnight, not server-local.
     const now = new Date()
     let dateFrom: Date
     let dateTo: Date
 
     if (range === 'yesterday') {
-      dateFrom = new Date(now)
-      dateFrom.setDate(dateFrom.getDate() - 1)
-      dateFrom.setHours(0, 0, 0, 0)
-      dateTo = new Date(now)
-      dateTo.setDate(dateTo.getDate() - 1)
-      dateTo.setHours(23, 59, 59, 999)
+      dateFrom = cairoNDaysAgoStart(1, now)         // 00:00 Cairo yesterday
+      // 23:59:59.999 Cairo yesterday = (today 00:00 Cairo) - 1ms
+      dateTo = new Date(cairoTodayStart(now).getTime() - 1)
     } else if (range === 'week') {
-      // Start of current week (Saturday in Egypt)
-      const dayOfWeek = now.getDay() // 0=Sun … 6=Sat
-      const daysSinceSaturday = (dayOfWeek + 1) % 7 // Sat=0, Sun=1, …, Fri=6
-      dateFrom = new Date(now)
-      dateFrom.setDate(dateFrom.getDate() - daysSinceSaturday)
-      dateFrom.setHours(0, 0, 0, 0)
-      dateTo = new Date(now)
-      dateTo.setHours(23, 59, 59, 999)
+      // Start of current Egyptian week (Saturday). Read the Cairo
+      // calendar weekday by constructing a UTC Date from Cairo Y/M/D
+      // and reading getUTCDay() — that matches the wall-calendar
+      // weekday a clinic in Egypt sees.
+      const cp = cairoParts(now)
+      const cairoWeekday      = new Date(Date.UTC(cp.year, cp.month - 1, cp.day)).getUTCDay() // 0=Sun … 6=Sat
+      const daysSinceSaturday = (cairoWeekday + 1) % 7  // Sat=0, Sun=1 … Fri=6
+      dateFrom = cairoNDaysAgoStart(daysSinceSaturday, now)
+      dateTo   = cairoTodayEnd(now)
     } else {
       // today (default)
-      dateFrom = new Date(now)
-      dateFrom.setHours(0, 0, 0, 0)
-      dateTo = new Date(now)
-      dateTo.setHours(23, 59, 59, 999)
+      dateFrom = cairoTodayStart(now)
+      dateTo   = cairoTodayEnd(now)
     }
 
     // Build query with pagination

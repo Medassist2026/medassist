@@ -6,6 +6,7 @@ import { createClient } from '@shared/lib/supabase/server'
 import { createAdminClient } from '@shared/lib/supabase/admin'
 import { ensureDoctorInFrontdeskClinic, getUserClinicId } from '@shared/lib/data/frontdesk-scope'
 import { logAuditEvent } from '@shared/lib/data/audit'
+import { cairoTodayStart } from '@shared/lib/date/cairo-date'
 import { sendReminder } from '@shared/lib/sms/reminder-service'
 import { NextResponse } from 'next/server'
 
@@ -33,8 +34,10 @@ export async function POST(request: Request) {
     }
 
     // ── Duplicate check-in prevention (pre-check) ──
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
+    // "Today" anchored on Cairo midnight so a 23:30 Cairo check-in
+    // doesn't get flagged as duplicate of an entry from "yesterday"
+    // server-local that the user is mentally treating as today.
+    const today = cairoTodayStart()
 
     const { data: existingEntry } = await supabase
       .from('check_in_queue')

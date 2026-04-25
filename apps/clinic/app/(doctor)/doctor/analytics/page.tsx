@@ -201,9 +201,12 @@ export default function DoctorAnalyticsPage() {
 
   const income = data?.income
 
-  // Slice last 30 days / last 12 months for the charts
-  const dayData   = income?.byDay.slice(-30)   ?? []
-  const monthData = income?.byMonth.slice(-12) ?? []
+  // Server returns exactly the chart window we want:
+  //   byDay   = every Cairo day from the 1st of this month through today
+  //   byMonth = the last 12 Cairo calendar months including this one
+  // No client-side slicing — display what the server emits.
+  const dayData   = income?.byDay   ?? []
+  const monthData = income?.byMonth ?? []
 
   const chartData  = view === 'day' ? dayData   : monthData
   const labelFn    = view === 'day' ? formatDayLabel : formatMonthLabel
@@ -310,7 +313,7 @@ export default function DoctorAnalyticsPage() {
                       : 'bg-[#F3F4F6] text-[#6B7280]'
                   }`}
                 >
-                  ٣٠ يوم
+                  هذا الشهر
                 </button>
                 <button
                   onClick={() => setView('month')}

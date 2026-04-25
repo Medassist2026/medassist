@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@shared/lib/supabase/server'
 import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
 import { createAdminClient } from '@shared/lib/supabase/admin'
+import { cairoTodayStart } from '@shared/lib/date/cairo-date'
 import { validateClinicHours } from '@shared/lib/utils/clinic-hours'
 import { sendReminder } from '@shared/lib/sms/reminder-service'
 
@@ -192,10 +193,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid appointment type' }, { status: 400 })
     }
 
-    // Validate start time is not in the past (allow same-day)
+    // Validate start time is not in the past (allow same-day).
+    // "Today" is Cairo midnight so a doctor in Egypt can book a 06:00
+    // morning slot even if the Vercel server is already at 04:00 UTC
+    // of the previous calendar day in its own clock.
     const appointmentDate = new Date(startTime)
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
+    const today = cairoTodayStart()
     if (appointmentDate < today) {
       return NextResponse.json({ error: 'Cannot create appointments in the past' }, { status: 400 })
     }

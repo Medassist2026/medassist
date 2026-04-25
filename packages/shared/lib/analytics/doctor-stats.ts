@@ -20,8 +20,12 @@ import { createAdminClient } from '@shared/lib/supabase/admin'
 import { isCollectedPayment } from '@shared/lib/data/payments'
 import {
   cairoDateKey,
+  cairoEachDay,
+  cairoEachMonth,
+  cairoMonthEnd,
   cairoMonthKey,
   cairoMonthStart,
+  cairoNDaysAgoStart,
   cairoNMonthsAgoStart,
   cairoTodayEnd,
   cairoTodayStart,
@@ -258,12 +262,13 @@ function computeSummary(
 }
 
 function computeTrends(notes: any[]): TrendDataPoint[] {
-  // Group notes by date
-  const byDate = new Map<string, number[]>()  // date → [duration, duration, ...]
+  // Group notes by Cairo date — UTC slicing previously sent late-night
+  // Cairo notes into the wrong day's bucket.
+  const byDate = new Map<string, number[]>()  // YYYY-MM-DD (Cairo) → counts
 
   for (const note of notes) {
-    const date = (note.created_at || '').slice(0, 10)  // YYYY-MM-DD
-    if (!date) continue
+    if (!note.created_at) continue
+    const date = cairoDateKey(new Date(note.created_at))
     if (!byDate.has(date)) byDate.set(date, [])
     // We don't have duration in notes — events do, but correlating by date is close enough
     byDate.get(date)!.push(1)  // just count sessions per day
@@ -278,20 +283,22 @@ function computeTrends(notes: any[]): TrendDataPoint[] {
 }
 
 function computeTrendsWithEvents(notes: any[], events: any[]): TrendDataPoint[] {
-  // Build date → sessions from notes
+  // Build Cairo-date → sessions from notes (Cairo bucketing fixes the
+  // late-evening drift that UTC slicing introduced).
   const sessionsByDate   = new Map<string, number>()
   const durationsByDate  = new Map<string, number[]>()
 
   for (const note of notes) {
-    const date = (note.created_at || '').slice(0, 10)
-    if (!date) continue
+    if (!note.created_at) continue
+    const date = cairoDateKey(new Date(note.created_at))
     sessionsByDate.set(date, (sessionsByDate.get(date) || 0) + 1)
   }
 
   for (const event of events) {
-    const date     = (event.created_at || '').slice(0, 10)
+    if (!event.created_at) continue
     const duration = event.properties?.duration_seconds
-    if (!date || !duration) continue
+    if (!duration) continue
+    const date = cairoDateKey(new Date(event.created_at))
     if (!durationsByDate.has(date)) durationsByDate.set(date, [])
     durationsByDate.get(date)!.push(duration)
   }
@@ -351,9 +358,11 @@ function computeTopMedications(notes: any[], totalSessions: number): MedicationF
 }
 
 function computeWeeklyComparison(events: any[], notes: any[]): WeeklyComparison {
-  const now       = new Date()
-  const weekStart = new Date(now); weekStart.setDate(now.getDate() - 7)
-  const prevStart = new Date(now); prevStart.setDate(now.getDate() - 14)
+  // Rolling 7-day windows anchored on Cairo midnight, so the boundary
+  // between "this week" and "last week" flips at 00:00 Cairo, not at
+  // server-local (UTC on Vercel) midnight.
+  const weekStart = cairoNDaysAgoStart(7)   // 7 days ago, 00:00 Cairo
+  const prevStart = cairoNDaysAgoStart(14)  // 14 days ago, 00:00 Cairo
 
   const thisWeekEvents = events.filter((e: any) => new Date(e.created_at) >= weekStart)
   const lastWeekEvents = events.filter((e: any) => {
@@ -434,9 +443,27 @@ async function fetchDoctorPayments(
  *    byMonth[i].visits). This matches the profile page's "جلسة" count,
  *    so one doctor sees one number for both screens.
  *
- * All date boundaries are evaluated in Africa/Cairo so a payment or
- * note timestamped at 23:30 Cairo on the last day of the month ends
- * up in "this month" regardless of what server TZ Vercel runs in.
+ * Window contract — chart is calendar-scoped (matches the card):
+ *  - byDay  : every Cairo day from the 1st of the current Cairo
+ *             calendar month through TODAY (Cairo), inclusive,
+ *             with zero-fill for empty days. Sum of byDay.visits
+ *             therefore equals summary.visitsThisMonth, and sum of
+ *             byDay.income equals summary.thisMonth.
+ *  - byMonth: every Cairo month from 11 calendar months ago through
+ *             the current Cairo calendar month, inclusive (= 12
+ *             buckets total), with zero-fill for empty months.
+ *
+ * Why bounded both ends:
+ *   - thisMonth fields use `d >= monthStart && d <= monthEnd` so a
+ *     future-dated row (test seed, clock-skewed device) does not
+ *     silently inflate the current-month card. Future rows can still
+ *     show up as their own month bar in `byMonth` if they fall
+ *     within the chart window.
+ *   - byDay's window stops at today rather than `monthEnd` so the
+ *     chart does not paint guaranteed-empty future days for the
+ *     remainder of the month.
+ *
+ * All date math is Africa/Cairo via `cairo-date.ts`.
  *
  * Exported for unit-testing — see
  * packages/shared/lib/analytics/__tests__/doctor-stats.test.ts
@@ -446,9 +473,12 @@ export function computeIncomeStats(
   notes: any[] = [],
   now: Date = new Date(),
 ): DoctorIncomeStats {
-  const todayStart = cairoTodayStart(now)
-  const todayEnd   = cairoTodayEnd(now)
-  const monthStart = cairoMonthStart(now)
+  const todayStart   = cairoTodayStart(now)
+  const todayEnd     = cairoTodayEnd(now)
+  const monthStart   = cairoMonthStart(now)
+  const monthEnd     = cairoMonthEnd(now)
+  // 12-month chart window: 11 months ago + current = 12 calendar months.
+  const monthChartStart = cairoNMonthsAgoStart(11, now)
 
   // ── Income (EGP) from payments ──────────────────────────────────────────
   let incomeToday       = 0
@@ -465,8 +495,8 @@ export function computeIncomeStats(
     const dayKey   = cairoDateKey(d)
     const monthKey = cairoMonthKey(d)
 
-    if (d >= todayStart && d <= todayEnd) incomeToday += amount
-    if (d >= monthStart)                   incomeThisMonth += amount
+    if (d >= todayStart && d <= todayEnd)     incomeToday     += amount
+    if (d >= monthStart && d <= monthEnd)     incomeThisMonth += amount
 
     incomeByDayMap.set(dayKey, (incomeByDayMap.get(dayKey) || 0) + amount)
     incomeByMonthMap.set(monthKey, (incomeByMonthMap.get(monthKey) || 0) + amount)
@@ -485,31 +515,31 @@ export function computeIncomeStats(
     const dayKey   = cairoDateKey(d)
     const monthKey = cairoMonthKey(d)
 
-    if (d >= todayStart && d <= todayEnd) visitsToday++
-    if (d >= monthStart)                   visitsThisMonth++
+    if (d >= todayStart && d <= todayEnd)     visitsToday++
+    if (d >= monthStart && d <= monthEnd)     visitsThisMonth++
 
     visitsByDayMap.set(dayKey, (visitsByDayMap.get(dayKey) || 0) + 1)
     visitsByMonthMap.set(monthKey, (visitsByMonthMap.get(monthKey) || 0) + 1)
   }
 
-  // ── Merge income + visits into combined chart series ────────────────────
-  const allDayKeys = new Set<string>([...incomeByDayMap.keys(), ...visitsByDayMap.keys()])
-  const byDay: IncomeDayPoint[] = [...allDayKeys]
-    .sort()
-    .map((date) => ({
+  // ── Calendar-scoped chart series with zero-fill ─────────────────────────
+  // Day chart: every day from monthStart through today (Cairo).
+  const byDay: IncomeDayPoint[] = cairoEachDay(monthStart, todayStart).map(
+    (date) => ({
       date,
       income: Math.round(incomeByDayMap.get(date) || 0),
       visits: visitsByDayMap.get(date) || 0,
-    }))
+    })
+  )
 
-  const allMonthKeys = new Set<string>([...incomeByMonthMap.keys(), ...visitsByMonthMap.keys()])
-  const byMonth: IncomeMonthPoint[] = [...allMonthKeys]
-    .sort()
-    .map((month) => ({
+  // Month chart: 12 calendar months ending in the current month.
+  const byMonth: IncomeMonthPoint[] = cairoEachMonth(monthChartStart, monthStart).map(
+    (month) => ({
       month,
       income: Math.round(incomeByMonthMap.get(month) || 0),
       visits: visitsByMonthMap.get(month) || 0,
-    }))
+    })
+  )
 
   return {
     summary: {
@@ -549,10 +579,11 @@ export async function getDoctorStats(
   clinicId: string | null = null,
 ): Promise<DoctorStatsResult> {
   const startDate = periodToStartDate(period)
-  // For income we always fetch last 12 months to power the by-month
-  // chart; boundary is computed in Cairo so the oldest month on the
-  // chart matches what a clinic in Egypt considers "12 months ago".
-  const incomeStartDate = cairoNMonthsAgoStart(12).toISOString()
+  // Income/visits chart window: 12 calendar months ending in the
+  // current Cairo month = 11 months ago through current month. Match
+  // the fetch window to what computeIncomeStats actually renders so
+  // we don't over-fetch.
+  const incomeStartDate = cairoNMonthsAgoStart(11).toISOString()
 
   // Notes: fetch over the income window (12 months) so the byDay /
   // byMonth visit counts cover the same window as the income series.
