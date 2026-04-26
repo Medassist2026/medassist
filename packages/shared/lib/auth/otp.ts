@@ -21,7 +21,7 @@ export function hashOTP(code: string): string {
  */
 export async function createOTP(
   phone: string,
-  purpose: 'registration' | 'login' | 'password_reset'
+  purpose: 'registration' | 'login' | 'password_reset' | 'phone_change_old' | 'phone_change_new' | 'phone_correction'
 ): Promise<string> {
   const admin = createAdminClient('otp-create')
   const code = generateOTPCode()
@@ -78,7 +78,7 @@ export async function createOTP(
 export async function verifyOTP(
   phone: string,
   code: string,
-  purpose: 'registration' | 'login' | 'password_reset'
+  purpose: 'registration' | 'login' | 'password_reset' | 'phone_change_old' | 'phone_change_new' | 'phone_correction'
 ): Promise<{ valid: boolean; error?: string }> {
   // Bypass OTP verification when Twilio is not configured
   // This allows registration to work before SMS provider is set up

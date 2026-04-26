@@ -33,7 +33,15 @@ export async function POST(request: Request) {
       )
     }
 
-    const validPurposes = ['registration', 'login', 'password_reset']
+    const validPurposes = [
+      'registration', 'login', 'password_reset',
+      // Phase B (PR-2): purposes used by /api/auth/change-phone/* and the
+      // patient-correction flow. Note: the change-phone endpoints typically
+      // call createOTP() directly inside the data module rather than going
+      // through this generic send-otp endpoint, but accepting these purposes
+      // here lets the existing OTP page resend buttons work uniformly.
+      'phone_change_old', 'phone_change_new', 'phone_correction',
+    ]
     if (!purpose || !validPurposes.includes(purpose)) {
       return NextResponse.json(
         { error: 'غرض غير صالح' },

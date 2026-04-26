@@ -23,7 +23,18 @@ const ALLOWED_ADMIN_SCOPES = new Set([
   'sms-reminders',
   'lab-results',
   'user-registration',
-  'api-route'
+  'api-route',
+  // ── Phone-change v2 (PR-2 / Phase B) — see PHONE_CHANGE_PLAN.md §6.2 ──────
+  'phone-change-request',          // INSERT phone_change_requests + otp_codes
+  'phone-change-verify',           // verify OTP + UPDATE phone_change_requests.status
+  'phone-change-commit',           // SQL change_phone_commit RPC + auth.admin.updateUserById
+  'phone-change-rollback',         // SQL change_phone_rollback RPC + revert auth admin
+  'phone-change-cancel',           // UPDATE phone_change_requests.status='cancelled'
+  'phone-change-fallback',         // UPDATE method='sms_new_only' + INSERT account_recovery_requests
+  'phone-change-owner-inbox-read', // SELECT JOIN requests/users/patients/memberships
+  'phone-change-owner-approve',    // same surface as commit
+  'phone-change-owner-reject',     // UPDATE phone_change_requests.status='rejected'
+  'phone-correction',              // UPDATE patients + INSERT phone_corrections + history (Phase C)
 ])
 
 /**

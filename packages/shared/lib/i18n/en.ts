@@ -447,4 +447,71 @@ export const en = {
   prescriptionCreated: 'Prescription created',
   vitalsRecorded: 'Vitals recorded',
   labOrderCreated: 'Lab order created',
+
+  // ============ Phone-change v2 (PR-2 / Phase B) ============
+  // English equivalents of the keys in ar.ts. PHONE_CHANGE_PLAN.md §4.0.
+  changePhone: 'Change phone number',
+  changePhoneCta: 'Change number',
+  changePhoneIntroTitle: 'Change the phone number you log in with',
+  changePhoneIntroBody: 'We\'ll send a code to your old number AND a code to the new number to confirm both belong to you. The new number becomes your login from tomorrow.',
+  changePhoneStartBtn: 'Get started',
+
+  newPhoneLabel: 'New number',
+  newPhoneHint: 'Must be a working Egyptian mobile',
+
+  oldPhoneOtpHeading: 'Confirm the old number first',
+  oldPhoneOtpSubheading: 'We sent a code to',
+  newPhoneOtpHeading: 'Now confirm the new number',
+  newPhoneOtpSubheading: 'We sent a code to',
+  codeSentHint: 'Code sent by SMS, valid for 5 minutes',
+
+  didntGetCode: 'No code?',
+  resendIn: 'Resend in',
+  resendNow: 'Resend now',
+
+  cantAccessOldPhone: 'I don\'t have access to my old number',
+  fallbackTitle: 'We\'ll forward your request to the clinic owner',
+  fallbackBody: 'If you\'ve lost your old number and can\'t receive the code, the clinic owner must approve manually. They\'ll get a notification and review your request within 24–48 hours.',
+  fallbackReasonLabel: 'Why do you want to change the number?',
+  fallbackReasonPlaceholder: 'e.g. old number was stolen / SIM lost',
+  fallbackSubmit: 'Send request to owner',
+  fallbackSubmittedTitle: 'Request sent to owner',
+  fallbackSubmittedBody: 'You\'ll get a notification once they approve or reject. You can also check the status from this page.',
+
+  changePhoneSuccessTitle: 'Phone number changed',
+  changePhoneSuccessBody: 'Your new number is active. If you log in from another device, use the new number.',
+  changePhoneCancel: 'Cancel request',
+  changePhoneCancelConfirm: 'Cancel the phone-change request?',
+
+  // Errors
+  errCodeWrong: 'Wrong code, try again',
+  errCodeExpired: 'Code expired. Request a new one',
+  errCodeAttemptsExceeded: 'Too many attempts. Try again later',
+  errPhoneTaken: 'This number is already used by another account',
+  errPhoneSameAsOld: 'New number must differ from the old one',
+  errInvalidEgyptianPhone: 'Not a valid Egyptian phone — must start with 010, 011, 012, or 015',
+  errRateLimit: 'Too many attempts. Try again later',
+  errOldPhoneNotMatched: 'This code is for the old number only',
+  errNetworkRetry: 'Network problem. Try again',
+
+  // Patient correction (Phase C)
+  correctPhoneCta: 'Fix number (typo)',
+  correctPhoneTitle: 'Fix patient phone',
+  correctPhoneSubtitle: 'Use this if the number was entered incorrectly at registration. This is NOT a real phone change.',
+  correctPhoneReasonLabel: 'Reason for the fix',
+  correctPhoneReasonPlaceholder: 'e.g. typo at registration time',
+  correctPhoneNewLabel: 'Correct number',
+  correctPhoneSaveBtn: 'Save fix',
+  correctPhoneSuccess: 'Number corrected',
+  correctPhoneVsChange: 'If the patient actually changed numbers, use the "Change number" button to send a confirmation code.',
+
+  // Owner approval inbox
+  approvalInboxTitle: 'Phone-change requests',
+  approvalInboxEmpty: 'No requests right now',
+  approvalInboxReason: 'Reason',
+  approvalInboxApprove: 'Approve change',
+  approvalInboxReject: 'Reject request',
+  approvalInboxRejectReason: 'Rejection reason (will be shown to the staff member)',
+  approvalInboxApproved: 'Approved and number changed',
+  approvalInboxRejected: 'Request rejected',
 }

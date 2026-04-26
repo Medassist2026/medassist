@@ -459,6 +459,73 @@ export const ar = {
   loginNow: 'سجل دخول',
   specialtyPlaceholder: 'اختر التخصص',
 
+  // ============ Phone-change v2 (PR-2 / Phase B) ============
+  // See PHONE_CHANGE_PLAN.md §4.0 for full copy bundle.
+  changePhone:                'تغيير رقم الهاتف',
+  changePhoneCta:             'تغيير الرقم',
+  changePhoneIntroTitle:      'هتغير رقم الهاتف اللي بتدخل بيه',
+  changePhoneIntroBody:       'هنبعتلك كود على رقمك القديم وكود تاني على الرقم الجديد عشان نتأكد إن الرقمين معاك. الرقم الجديد هيبقى رقم الدخول من بكره.',
+  changePhoneStartBtn:        'يلا نبدأ',
+
+  newPhoneLabel:              'الرقم الجديد',
+  newPhoneHint:               'لازم رقم مصري شغال على الجوال',
+
+  oldPhoneOtpHeading:         'أكد الرقم القديم الأول',
+  oldPhoneOtpSubheading:      'بعتنالك كود على',
+  newPhoneOtpHeading:         'دلوقتي أكد الرقم الجديد',
+  newPhoneOtpSubheading:      'بعتنالك كود على',
+  codeSentHint:               'الكود وصل في رسالة، صالح ٥ دقايق',
+
+  didntGetCode:               'مفيش كود؟',
+  resendIn:                   'إعادة الإرسال خلال',
+  resendNow:                  'ابعت تاني',
+
+  cantAccessOldPhone:         'مش معاي الرقم القديم',
+  fallbackTitle:              'هنحول طلبك للمالك يوافق',
+  fallbackBody:               'لو فقدت الرقم القديم وما تقدرش تستلم الكود عليه، صاحب العيادة لازم يوافق على الطلب يدوياً. هيوصله إشعار وهيراجع طلبك خلال ٢٤–٤٨ ساعة.',
+  fallbackReasonLabel:        'ليه عايز تغير الرقم؟',
+  fallbackReasonPlaceholder:  'مثال: الرقم القديم اتسرق / ضاعت الشريحة',
+  fallbackSubmit:             'ابعت الطلب للمالك',
+  fallbackSubmittedTitle:     'الطلب وصل للمالك',
+  fallbackSubmittedBody:      'هتلاقي إشعار لما يوافق أو يرفض. ممكن ترجع تتأكد من الحالة من نفس الصفحة.',
+
+  changePhoneSuccessTitle:    'تم تغيير الرقم',
+  changePhoneSuccessBody:     'الرقم الجديد فعّال دلوقتي. لو هتدخل من جهاز تاني سجل دخول بالرقم الجديد.',
+  changePhoneCancel:          'إلغاء الطلب',
+  changePhoneCancelConfirm:   'تأكيد إلغاء طلب تغيير الرقم؟',
+
+  // Errors (phone change)
+  errCodeWrong:               'الكود غلط، حاول تاني',
+  errCodeExpired:             'الكود انتهت صلاحيته. اطلب كود جديد',
+  errCodeAttemptsExceeded:    'حاولت كتير. حاول كمان شوية',
+  errPhoneTaken:              'الرقم ده مستخدم من حساب تاني',
+  errPhoneSameAsOld:          'الرقم الجديد لازم يبقى مختلف عن القديم',
+  errInvalidEgyptianPhone:    'رقم هاتف مصري غير صحيح — يبدأ بـ 010 أو 011 أو 012 أو 015',
+  errRateLimit:               'محاولات كتيرة. حاول بعد شوية',
+  errOldPhoneNotMatched:      'الكود ده على الرقم القديم بس',
+  errNetworkRetry:            'في مشكلة في الاتصال. حاول تاني',
+
+  // Patient correction (Phase C — frontdesk side)
+  correctPhoneCta:            'تصحيح الرقم (خطأ كتابي)',
+  correctPhoneTitle:          'تصحيح رقم المريض',
+  correctPhoneSubtitle:       'استخدم ده لو الرقم اتدخل غلط في التسجيل. ده مش تغيير حقيقي للرقم.',
+  correctPhoneReasonLabel:    'سبب التصحيح',
+  correctPhoneReasonPlaceholder: 'مثال: غلطة كتابة وقت التسجيل',
+  correctPhoneNewLabel:       'الرقم الصحيح',
+  correctPhoneSaveBtn:        'احفظ التصحيح',
+  correctPhoneSuccess:        'تم تصحيح الرقم',
+  correctPhoneVsChange:       'لو المريض غير رقمه فعلاً، استخدم زر "تغيير الرقم" لإرسال كود تأكيد.',
+
+  // Owner approval inbox
+  approvalInboxTitle:         'طلبات تغيير الأرقام',
+  approvalInboxEmpty:         'مفيش طلبات في الوقت الحالي',
+  approvalInboxReason:        'سبب الطلب',
+  approvalInboxApprove:       'وافق على التغيير',
+  approvalInboxReject:        'ارفض الطلب',
+  approvalInboxRejectReason:  'سبب الرفض (هيظهر للموظف)',
+  approvalInboxApproved:      'تم الموافقة وتغيير الرقم',
+  approvalInboxRejected:      'تم رفض الطلب',
+
   // ============ Dashboard ============
   welcomeDoctor: 'مرحبًا د.',
   expectedToday: 'المتوقع اليوم',

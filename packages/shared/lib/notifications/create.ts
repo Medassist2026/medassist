@@ -37,6 +37,11 @@ export type NotificationType =
   | 'daily_summary'
   | 'message_received'
   | 'invite_accepted'
+  // Phone-change v2 (PR-2 / Phase B). See PHONE_CHANGE_PLAN.md §10.2 Q5.
+  | 'phone_change_pending_approval' // → clinic OWNER, when fallback is opened
+  | 'phone_change_completed'        // → subject (staff/patient), after commit
+  | 'phone_change_approved'         // → subject, after owner approves fallback
+  | 'phone_change_rejected'         // → subject, after owner rejects fallback
 
 interface CreateNotificationParams {
   recipientId: string
@@ -231,6 +236,73 @@ export function notifyInviteAccepted(
     type: 'invite_accepted',
     title: `${staffName} انضم إلى العيادة`,
     body: 'تم قبول دعوة المساعد',
+    clinicId,
+  })
+}
+
+/** Notify clinic OWNER: a staff/patient phone-change request needs manual approval */
+export function notifyPhoneChangePendingApproval(
+  ownerUserId: string,
+  subjectName: string,
+  clinicId?: string
+) {
+  return createNotification({
+    recipientId: ownerUserId,
+    recipientRole: 'doctor',
+    type: 'phone_change_pending_approval',
+    title: 'طلب تغيير رقم جديد محتاج موافقتك',
+    body: `${subjectName} طالب تغيير رقم. اضغط لمراجعة الطلب.`,
+    clinicId,
+  })
+}
+
+/** Notify subject: their phone change has been committed (post-commit confirmation) */
+export function notifyPhoneChangeCompleted(
+  subjectUserId: string,
+  subjectRole: 'doctor' | 'frontdesk' | 'patient',
+  maskedNewPhone: string,
+  clinicId?: string
+) {
+  return createNotification({
+    recipientId: subjectUserId,
+    recipientRole: subjectRole,
+    type: 'phone_change_completed',
+    title: 'تم تغيير رقم الهاتف',
+    body: `الرقم الجديد فعّال: ${maskedNewPhone}`,
+    clinicId,
+  })
+}
+
+/** Notify subject: clinic owner approved their phone-change fallback */
+export function notifyPhoneChangeApproved(
+  subjectUserId: string,
+  subjectRole: 'doctor' | 'frontdesk' | 'patient',
+  maskedNewPhone: string,
+  clinicId?: string
+) {
+  return createNotification({
+    recipientId: subjectUserId,
+    recipientRole: subjectRole,
+    type: 'phone_change_approved',
+    title: 'تم الموافقة على طلب تغيير الرقم',
+    body: `الرقم الجديد فعّال دلوقتي: ${maskedNewPhone}`,
+    clinicId,
+  })
+}
+
+/** Notify subject: clinic owner rejected their phone-change fallback (with reason) */
+export function notifyPhoneChangeRejected(
+  subjectUserId: string,
+  subjectRole: 'doctor' | 'frontdesk' | 'patient',
+  rejectionReason: string,
+  clinicId?: string
+) {
+  return createNotification({
+    recipientId: subjectUserId,
+    recipientRole: subjectRole,
+    type: 'phone_change_rejected',
+    title: 'تم رفض طلب تغيير الرقم',
+    body: `الرقم القديم هيفضل شغال. السبب: ${rejectionReason}`,
     clinicId,
   })
 }
