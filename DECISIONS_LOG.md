@@ -585,5 +585,17 @@
 
 ---
 
-*Last entry: D-056 | 26 April 2026*
+## D-057: Phone-first registration UI — name/age/sex disabled until phone is valid
+
+**When**: 26 April 2026
+**Context**: A frontdesk tester reported (in Egyptian Arabic) that the Register page didn't surface existing patients while she typed the name, but as soon as she submitted "as new" the server told her the patient was already saved. Investigation traced this to a real architecture/UX divergence: phone is the canonical patient identity (D-051) and `onboardPatient` deduplicates on phone exact match only, but the Register page placed the name field above phone and gave the name input no typeahead. The phone field had typeahead all along — it just wasn't where the assistant looked first. The result was a guaranteed dead-end whenever an assistant followed the natural conversation order ("اسمك إيه؟ … رقم تليفونك إيه؟").
+**Decision**: Phone is the gate. On `/frontdesk/patients/register`, the phone field renders first and autoFocuses on mount; the name, age, and sex inputs (including the gender segmented control) are disabled until `isValidEgyptianLocalPhone(phone)` returns true. A green helper banner sits above the disabled fields explaining "أدخل رقم الهاتف أولاً للتحقق من المريض. باقي الحقول هتتفتح بعد كده." Phone typeahead and the existing DUPLICATE PATIENT DIALOG are unchanged — they were already correct, just unreachable through the previous field order. Name search is explicitly *retained* on the Check-in page as a discovery aid; identity remains phone everywhere.
+**Alternatives**: Reorder phone-first but keep all fields enabled (loses the architectural enforcement — assistants can still fill name first and hit the post-submit dead-end), add fuzzy name typeahead to the Register page (Option B in the investigation — promotes name to a discovery primitive on a *registration* form, conflicts with phone-as-identity), keep current order and address via documentation/training only (does not solve the user's complaint).
+**Outcome**: The "I added new and it told me already saved" failure mode is eliminated by construction — every existing-patient detection happens at the phone field, before the assistant invests data entry. Name search remains available where it belongs (Check-in page). The discovery-vs-identity distinction is now visible in the UI: discovery happens on Check-in, identity is established on Register.
+
+**Companion fix**: `/api/patients/search` frontdesk path was sourcing patient IDs from `clinical_notes` + `appointments`, which silently excluded patients registered without a visit yet. Switched to `doctor_patient_relationships` filtered by `clinic_id` (NOT NULL since mig 051) — the canonical "patient is in this clinic's universe" signal. Without this fix, the Check-in page's name search would still miss freshly-registered walk-ins.
+
+---
+
+*Last entry: D-057 | 26 April 2026*
 *Add new decisions at the bottom with sequential ID.*

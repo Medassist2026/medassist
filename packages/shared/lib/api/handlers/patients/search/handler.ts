@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic'
 import { searchMyPatients } from '@shared/lib/data/patients'
 import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
 import { createClient } from '@shared/lib/supabase/server'
-import { getClinicDoctorIds, getFrontdeskClinicId, getUserClinicId } from '@shared/lib/data/frontdesk-scope'
+import { getFrontdeskClinicId } from '@shared/lib/data/frontdesk-scope'
 import { NextResponse } from 'next/server'
 
 /**
@@ -36,43 +36,38 @@ export async function GET(request: Request) {
       // Doctor privacy-aware search: only their own patients.
       patients = await searchMyPatients(user.id, query, limit)
     } else {
-      // Frontdesk search: only within own clinic's doctors.
+      // Frontdesk search: only within own clinic.
+      //
+      // Scope source: doctor_patient_relationships.clinic_id (NOT NULL since
+      // mig 051). Pre-D-057 this path joined clinical_notes + appointments,
+      // which silently excluded patients registered via /frontdesk/patients/
+      // register but never given a visit yet — making the user's complaint
+      // ("I add as new and it tells me already saved") inevitable.
+      // DPR captures every walk-in registration the moment onboardPatient
+      // runs, so it's the canonical "patient is in this clinic's universe"
+      // signal.
       const supabase = await createClient()
       const clinicId = await getFrontdeskClinicId(supabase as any, user.id)
       if (!clinicId) {
         return NextResponse.json({ patients: [], count: 0 })
       }
-      const clinicDoctorIds = await getClinicDoctorIds(supabase as any, clinicId)
-      if (clinicDoctorIds.length === 0) {
-        return NextResponse.json({ patients: [], count: 0 })
-      }
 
       const safeQuery = query.replace(/[%,]/g, ' ').trim()
       const term = `%${safeQuery}%`
-      const [{ data: notes, error: notesError }, { data: appointments, error: appointmentsError }] =
-        await Promise.all([
-          supabase
-            .from('clinical_notes')
-            .select('patient_id')
-            .in('doctor_id', clinicDoctorIds)
-            .limit(500),
-          supabase
-            .from('appointments')
-            .select('patient_id')
-            .in('doctor_id', clinicDoctorIds)
-            .limit(500)
-        ])
 
-      if (notesError) {
-        throw new Error(notesError.message)
-      }
-      if (appointmentsError) {
-        throw new Error(appointmentsError.message)
+      const { data: relationships, error: relationshipsError } = await supabase
+        .from('doctor_patient_relationships')
+        .select('patient_id')
+        .eq('clinic_id', clinicId)
+        .limit(2000)
+
+      if (relationshipsError) {
+        throw new Error(relationshipsError.message)
       }
 
       const patientIds = Array.from(
         new Set(
-          [...(notes || []), ...(appointments || [])]
+          (relationships || [])
             .map((row: any) => row.patient_id)
             .filter(Boolean)
         )

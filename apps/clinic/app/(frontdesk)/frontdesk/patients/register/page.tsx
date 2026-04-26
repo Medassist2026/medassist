@@ -88,13 +88,21 @@ export default function RegisterPatientPage() {
 
   const hasFormData = fullName.trim() || phone.trim() || age.trim() || sex
 
+  // ── Computed: phone-first gate (D-057) ──
+  // Phone is the canonical patient identity. Per D-057, the rest of the form
+  // (name, age, sex) is disabled until the phone passes Egyptian validation
+  // — this forces the dedup lookup to happen before any other data is
+  // entered, eliminating the "I added new and it told me already saved"
+  // dead-end the frontdesk tester reported.
+  const phoneIsValid = isValidEgyptianLocalPhone(phone)
+
   // ── Computed: form validity ──
   // Phone gate uses the canonical regex (not just length) so an invalid prefix
   // like 01999999999 keeps the submit button disabled and forces the user to
   // see the inline error rather than slipping through to a server-side 400.
   const isFormValid =
     fullName.trim().length >= 2 &&
-    isValidEgyptianLocalPhone(phone) &&
+    phoneIsValid &&
     age.trim() &&
     sex
 
@@ -521,39 +529,11 @@ export default function RegisterPatientPage() {
       </div>
 
       {/* ── Form Body ── */}
+      {/* Field order is phone → name → age → sex (D-057). Phone is the      */}
+      {/* canonical patient identity, so the typeahead lookup must run before */}
+      {/* the assistant fills the rest of the form. Name/age/sex inputs stay */}
+      {/* disabled until phoneIsValid flips true.                             */}
       <div className="px-4 pt-5 space-y-5">
-
-        {/* ── Full Name ── */}
-        <div>
-          <label className="font-cairo text-[13px] font-semibold text-[#4B5563] mb-2 block">
-            الاسم الكامل <span className="text-red-500">*</span>
-          </label>
-          <div className="relative">
-            <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
-              <User className="w-[18px] h-[18px] text-[#9CA3AF]" />
-            </div>
-            <input
-              type="text"
-              value={fullName}
-              onChange={(e) => {
-                setFullName(e.target.value)
-                setFormErrors(prev => ({ ...prev, fullName: undefined }))
-              }}
-              placeholder="أحمد علي محمد"
-              className={`w-full h-12 pr-10 pl-4 rounded-[12px] border-[0.8px] font-cairo text-[14px] text-[#030712] placeholder:text-[#9CA3AF] focus:outline-none transition-colors bg-white ${
-                formErrors.fullName && formTouched
-                  ? 'border-red-400 focus:border-red-500 bg-red-50/30'
-                  : 'border-[#E5E7EB] focus:border-[#16A34A]'
-              }`}
-            />
-          </div>
-          {formErrors.fullName && formTouched && (
-            <p className="font-cairo text-[12px] text-red-600 mt-1.5 flex items-center gap-1">
-              <AlertTriangle className="w-3 h-3 flex-shrink-0" />
-              {formErrors.fullName}
-            </p>
-          )}
-        </div>
 
         {/* ── Phone Number (with typeahead) ── */}
         <div className="relative">
@@ -579,6 +559,7 @@ export default function RegisterPatientPage() {
               onBlur={handlePhoneBlur}
               placeholder="01012345678"
               dir="ltr"
+              autoFocus
               className={`w-full h-12 pr-10 pl-10 rounded-[12px] border-[0.8px] font-cairo text-[14px] text-[#030712] placeholder:text-[#9CA3AF] focus:outline-none transition-colors bg-white text-left ${
                 formErrors.phone && formTouched
                   ? 'border-red-400 focus:border-red-500 bg-red-50/30'
@@ -632,14 +613,57 @@ export default function RegisterPatientPage() {
           )}
         </div>
 
-        {/* ── Age ── */}
+        {/* ── Phone-first hint (only while phone is invalid) ── */}
+        {!phoneIsValid && (
+          <div className="bg-[#F0FDF4] border-[0.8px] border-[#BBF7D0] rounded-[10px] px-3 py-2.5 flex items-start gap-2">
+            <Phone className="w-4 h-4 text-[#16A34A] mt-0.5 flex-shrink-0" />
+            <p className="font-cairo text-[12px] text-[#15803D] leading-relaxed">
+              أدخل رقم الهاتف أولاً للتحقق من المريض. باقي الحقول هتتفتح بعد كده.
+            </p>
+          </div>
+        )}
+
+        {/* ── Full Name (gated behind phone) ── */}
+        <div>
+          <label className="font-cairo text-[13px] font-semibold text-[#4B5563] mb-2 block">
+            الاسم الكامل <span className="text-red-500">*</span>
+          </label>
+          <div className="relative">
+            <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+              <User className={`w-[18px] h-[18px] ${phoneIsValid ? 'text-[#9CA3AF]' : 'text-[#D1D5DB]'}`} />
+            </div>
+            <input
+              type="text"
+              value={fullName}
+              onChange={(e) => {
+                setFullName(e.target.value)
+                setFormErrors(prev => ({ ...prev, fullName: undefined }))
+              }}
+              placeholder="أحمد علي محمد"
+              disabled={!phoneIsValid}
+              className={`w-full h-12 pr-10 pl-4 rounded-[12px] border-[0.8px] font-cairo text-[14px] text-[#030712] placeholder:text-[#9CA3AF] focus:outline-none transition-colors disabled:bg-[#F9FAFB] disabled:text-[#9CA3AF] disabled:placeholder:text-[#D1D5DB] disabled:cursor-not-allowed disabled:border-[#F3F4F6] ${
+                formErrors.fullName && formTouched
+                  ? 'border-red-400 focus:border-red-500 bg-red-50/30'
+                  : 'border-[#E5E7EB] focus:border-[#16A34A] bg-white'
+              }`}
+            />
+          </div>
+          {formErrors.fullName && formTouched && (
+            <p className="font-cairo text-[12px] text-red-600 mt-1.5 flex items-center gap-1">
+              <AlertTriangle className="w-3 h-3 flex-shrink-0" />
+              {formErrors.fullName}
+            </p>
+          )}
+        </div>
+
+        {/* ── Age (gated behind phone) ── */}
         <div>
           <label className="font-cairo text-[13px] font-semibold text-[#4B5563] mb-2 block">
             العمر <span className="text-red-500">*</span>
           </label>
           <div className="relative">
             <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
-              <Calendar className="w-[18px] h-[18px] text-[#9CA3AF]" />
+              <Calendar className={`w-[18px] h-[18px] ${phoneIsValid ? 'text-[#9CA3AF]' : 'text-[#D1D5DB]'}`} />
             </div>
             <input
               type="text"
@@ -652,10 +676,11 @@ export default function RegisterPatientPage() {
                 setFormErrors(prev => ({ ...prev, age: undefined }))
               }}
               placeholder="٣٥"
-              className={`w-full h-12 pr-10 pl-4 rounded-[12px] border-[0.8px] font-cairo text-[14px] text-[#030712] placeholder:text-[#9CA3AF] focus:outline-none transition-colors bg-white ${
+              disabled={!phoneIsValid}
+              className={`w-full h-12 pr-10 pl-4 rounded-[12px] border-[0.8px] font-cairo text-[14px] text-[#030712] placeholder:text-[#9CA3AF] focus:outline-none transition-colors disabled:bg-[#F9FAFB] disabled:text-[#9CA3AF] disabled:placeholder:text-[#D1D5DB] disabled:cursor-not-allowed disabled:border-[#F3F4F6] ${
                 formErrors.age && formTouched
                   ? 'border-red-400 focus:border-red-500 bg-red-50/30'
-                  : 'border-[#E5E7EB] focus:border-[#16A34A]'
+                  : 'border-[#E5E7EB] focus:border-[#16A34A] bg-white'
               }`}
             />
           </div>
@@ -667,37 +692,43 @@ export default function RegisterPatientPage() {
           )}
         </div>
 
-        {/* ── Gender — Segmented Control ── */}
+        {/* ── Gender — Segmented Control (gated behind phone) ── */}
         <div>
           <label className="font-cairo text-[13px] font-semibold text-[#4B5563] mb-2 block">
             النوع <span className="text-red-500">*</span>
           </label>
-          <div className={`flex rounded-[12px] border-[0.8px] overflow-hidden ${
+          <div className={`flex rounded-[12px] border-[0.8px] overflow-hidden transition-opacity ${
+            !phoneIsValid ? 'opacity-50' : ''
+          } ${
             formErrors.sex && formTouched ? 'border-red-400' : 'border-[#E5E7EB]'
           }`}>
             <button
+              type="button"
               onClick={() => {
                 setSex('Male')
                 setFormErrors(prev => ({ ...prev, sex: undefined }))
               }}
-              className={`flex-1 h-11 font-cairo text-[14px] font-medium transition-colors ${
+              disabled={!phoneIsValid}
+              className={`flex-1 h-11 font-cairo text-[14px] font-medium transition-colors disabled:cursor-not-allowed ${
                 sex === 'Male'
                   ? 'bg-[#16A34A] text-white'
-                  : 'bg-white text-[#6B7280] hover:bg-[#F9FAFB]'
+                  : 'bg-white text-[#6B7280] hover:bg-[#F9FAFB] disabled:hover:bg-white'
               }`}
             >
               ذكر
             </button>
             <div className="w-[0.8px] bg-[#E5E7EB]" />
             <button
+              type="button"
               onClick={() => {
                 setSex('Female')
                 setFormErrors(prev => ({ ...prev, sex: undefined }))
               }}
-              className={`flex-1 h-11 font-cairo text-[14px] font-medium transition-colors ${
+              disabled={!phoneIsValid}
+              className={`flex-1 h-11 font-cairo text-[14px] font-medium transition-colors disabled:cursor-not-allowed ${
                 sex === 'Female'
                   ? 'bg-[#16A34A] text-white'
-                  : 'bg-white text-[#6B7280] hover:bg-[#F9FAFB]'
+                  : 'bg-white text-[#6B7280] hover:bg-[#F9FAFB] disabled:hover:bg-white'
               }`}
             >
               أنثى
