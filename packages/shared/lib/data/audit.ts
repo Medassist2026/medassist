@@ -21,6 +21,18 @@ export type AuditAction =
   | 'LOGIN'
   | 'LOGOUT'
   | 'EXPORT_DATA'
+  // ── Phone-change flow (Phase A: only CHANGE_PHONE_COMMITTED is wired today;
+  //    the other six are reserved for Phase B's /api/auth/change-phone/* endpoints
+  //    + /api/clinic/phone-change-requests/* + /api/frontdesk/patients/:id/phone-correction.
+  //    Defined here in Phase A so that Phase B PRs only touch the wiring, not the type.
+  //    See docs/PHONE_CHANGE_PLAN.md §2.7 / §5.8.) ─────────────────────────────────
+  | 'CHANGE_PHONE_REQUESTED'
+  | 'CHANGE_PHONE_COMMITTED'
+  | 'CHANGE_PHONE_CANCELLED'
+  | 'CHANGE_PHONE_FALLBACK_OPENED'
+  | 'CHANGE_PHONE_FALLBACK_APPROVED'
+  | 'CHANGE_PHONE_FALLBACK_REJECTED'
+  | 'CORRECT_PATIENT_PHONE'
 
 export interface AuditEventParams {
   clinicId?: string
