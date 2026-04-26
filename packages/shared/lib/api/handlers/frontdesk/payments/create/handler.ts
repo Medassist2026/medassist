@@ -12,13 +12,34 @@ export async function POST(request: Request) {
     const supabase = await createClient()
 
     const body = await request.json()
-    const { patientId, doctorId, amount, paymentMethod, appointmentId, clinicalNoteId, notes } = body
+    const { patientId, doctorId, amount, paymentMethod, appointmentId, clinicalNoteId, notes, clientIdempotencyKey } = body
 
     if (!patientId || !doctorId || !amount || !paymentMethod) {
       return NextResponse.json(
         { error: 'Missing required fields' },
         { status: 400 }
       )
+    }
+
+    // ── Replay-safe idempotency (TD-008) ───────────────────────────────────
+    // Offline-write callers (useOfflineMutation hook) include a UUID per
+    // attempt in clientIdempotencyKey. On replay we look up first; if a row
+    // already exists for this key, return it instead of inserting a duplicate.
+    // Migration 069 adds the column + partial unique index.
+    if (clientIdempotencyKey) {
+      const { data: existing } = await supabase
+        .from('payments')
+        .select('*')
+        .eq('client_idempotency_key', clientIdempotencyKey)
+        .maybeSingle()
+
+      if (existing) {
+        return NextResponse.json({
+          success: true,
+          deduped: true,
+          payment: existing,
+        })
+      }
     }
 
     // Resolve the frontdesk's clinic. We do this BEFORE the doctor-scope
@@ -52,7 +73,8 @@ export async function POST(request: Request) {
       paymentMethod,
       appointmentId,
       clinicalNoteId,
-      notes
+      notes,
+      clientIdempotencyKey,
     })
 
     return NextResponse.json({

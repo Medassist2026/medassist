@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ChevronRight, Search, UserPlus, Check, AlertTriangle, ChevronDown, Banknote, CreditCard, Building2, ArrowLeftRight, WifiOff } from 'lucide-react'
-import { syncOfflineQueue, getOfflineQueueStats } from '@shared/hooks/useOfflineMutation'
+import { addPendingWrite } from '@shared/lib/offline/idb-cache'
 import { translateSpecialty } from '@shared/lib/utils/specialty-labels'
 
 // ============================================================================
@@ -139,25 +139,32 @@ export default function CheckInPage() {
         clearTimeout(timeout)
         data = await res.json()
         if (!res.ok) throw new Error(data.error || 'فشل تسجيل الوصول')
+
+        // ── Server-side dedupe response (TD-008) ─────────────────────────
+        // Pre-TD-008 the handler returned 409 when this patient was already
+        // in queue; the client surfaced that as an error. Now the handler
+        // returns 200 with `deduped: true` so offline replays succeed.
+        // For the live (online) path we still want to tell the user this
+        // patient was already checked in — we just do it as an inline
+        // banner instead of an error toast.
+        if (data?.deduped) {
+          setError(data.message || 'هذا المريض مسجّل بالفعل')
+          setLoading(false)
+          return
+        }
       } catch (fetchErr: any) {
-        // If network error (offline/timeout), queue for later
+        // If network error (offline/timeout), queue for later via idb-cache (TD-008).
+        // Replaces the previous inline localStorage write (FD-002 path) — the
+        // legacy queue is auto-drained on first hook mount, so any pending
+        // pre-upgrade writes are preserved.
         if (fetchErr.name === 'AbortError' || !navigator.onLine) {
-          // FD-002: Guard localStorage access against SSR/hydration mismatch
-          if (typeof window !== 'undefined') {
-            try {
-              const offlineQueue = JSON.parse(localStorage.getItem('medassist_offline_queue') || '[]')
-              offlineQueue.push({
-                id: `offline_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-                url: '/api/frontdesk/checkin',
-                body: checkinBody,
-                createdAt: new Date().toISOString(),
-                retries: 0,
-                status: 'pending',
-              })
-              localStorage.setItem('medassist_offline_queue', JSON.stringify(offlineQueue))
-            } catch {
-              // localStorage unavailable (e.g. private mode) — proceed silently
-            }
+          try {
+            await addPendingWrite('/api/frontdesk/checkin', 'POST', checkinBody)
+          } catch {
+            // IndexedDB unavailable (private mode, etc.) — proceed; we still
+            // show the offline-success screen so the user has feedback. The
+            // tradeoff: write is lost if IDB itself can't open. In private
+            // mode the OfflineIndicator badge will also be 0.
           }
 
           data = { queueNumber: '—', offline: true }

@@ -2,7 +2,9 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { ChevronRight, Check, AlertTriangle, Banknote, CreditCard, Building2, ArrowLeftRight } from 'lucide-react'
+import { ChevronRight, Check, AlertTriangle, Banknote, CreditCard, Building2, ArrowLeftRight, WifiOff } from 'lucide-react'
+import { addPendingWrite } from '@shared/lib/offline/idb-cache'
+import { nanoid } from 'nanoid'
 
 // ============================================================================
 // TYPES
@@ -33,6 +35,7 @@ export default function NewPaymentPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
+  const [wasOffline, setWasOffline] = useState(false)
 
   // Load today's queue patients for quick selection
   useEffect(() => {
@@ -54,23 +57,47 @@ export default function NewPaymentPage() {
 
     setLoading(true)
     setError('')
+    setWasOffline(false)
+
+    // TD-008: per-attempt UUID. The server uses payments.client_idempotency_key
+    // (mig 069 partial unique index) to dedupe replays. Generated per submit
+    // so that retrying after a non-network error gets a fresh key.
+    const body = {
+      patientId: selectedPatientId,
+      doctorId: selectedDoctorId,
+      amount: Number(amount),
+      paymentMethod,
+      notes: notes.trim() || undefined,
+      clientIdempotencyKey: nanoid(),
+    }
+
     try {
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 8000)
       const res = await fetch('/api/frontdesk/payments/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          patientId: selectedPatientId,
-          doctorId: selectedDoctorId,
-          amount: Number(amount),
-          paymentMethod,
-          notes: notes.trim() || undefined,
-        }),
+        body: JSON.stringify(body),
+        signal: controller.signal,
       })
+      clearTimeout(timeout)
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'فشل تسجيل الدفع')
       setSuccess(true)
     } catch (err: any) {
-      setError(err.message || 'حدث خطأ')
+      // TD-008: queue the write for replay if the failure looks like network.
+      // Server idempotency (mig 069) means a later replay won't double-charge.
+      if (err?.name === 'AbortError' || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+        try {
+          await addPendingWrite('/api/frontdesk/payments/create', 'POST', body)
+          setWasOffline(true)
+          setSuccess(true)
+        } catch {
+          setError('تعذّر حفظ الدفع للمزامنة لاحقاً — حاول مرة أخرى')
+        }
+      } else {
+        setError(err?.message || 'حدث خطأ')
+      }
     } finally {
       setLoading(false)
     }
@@ -89,13 +116,21 @@ export default function NewPaymentPage() {
           <div className="w-20 h-20 bg-[#F0FDF4] rounded-full flex items-center justify-center mx-auto mb-4">
             <Check className="w-10 h-10 text-[#16A34A]" />
           </div>
-          <h2 className="font-cairo text-[20px] font-bold text-[#030712] mb-1">تم تسجيل الدفع بنجاح!</h2>
-          <p className="font-cairo text-[14px] text-[#6B7280] mb-6">{Number(amount).toLocaleString('ar-EG')} ج.م</p>
+          <h2 className="font-cairo text-[20px] font-bold text-[#030712] mb-1">
+            {wasOffline ? 'تم حفظ الدفع (بدون إنترنت)' : 'تم تسجيل الدفع بنجاح!'}
+          </h2>
+          <p className="font-cairo text-[14px] text-[#6B7280] mb-2">{Number(amount).toLocaleString('ar-EG')} ج.م</p>
+          {wasOffline && (
+            <div className="flex items-center justify-center gap-2 bg-amber-50 border border-amber-200 rounded-[10px] px-3 py-2 mb-4 mx-auto max-w-[280px]">
+              <WifiOff className="w-4 h-4 text-amber-600 flex-shrink-0" />
+              <p className="font-cairo text-[12px] text-amber-800">سيتم المزامنة عند عودة الإنترنت</p>
+            </div>
+          )}
           <div className="space-y-3">
             <button onClick={() => router.push('/frontdesk/payments')} className="w-full h-[48px] bg-[#16A34A] text-white rounded-[12px] font-cairo text-[15px] font-bold">
               عرض المدفوعات
             </button>
-            <button onClick={() => { setSuccess(false); setAmount(''); setSelectedPatientId(''); setNotes('') }}
+            <button onClick={() => { setSuccess(false); setAmount(''); setSelectedPatientId(''); setNotes(''); setWasOffline(false) }}
               className="w-full h-[44px] bg-[#F3F4F6] text-[#4B5563] rounded-[12px] font-cairo text-[14px] font-medium">
               تسجيل دفع آخر
             </button>

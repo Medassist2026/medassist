@@ -250,6 +250,12 @@ export async function getPendingWriteCount(): Promise<number> {
 /**
  * Process pending writes — call when back online.
  * Returns { synced: number, failed: number }
+ *
+ * Replay semantics: a 409 response is treated as success (TD-008). The
+ * server uses 409 for natural-dedupe hits (e.g. check-in already exists
+ * for this patient/doctor/day) — the queued write is effectively a no-op
+ * because the row is already there. Removing it from the queue is the
+ * correct behavior; retrying would loop forever.
  */
 export async function syncPendingWrites(): Promise<{ synced: number; failed: number }> {
   const pending = await getPendingWrites()
@@ -264,7 +270,9 @@ export async function syncPendingWrites(): Promise<{ synced: number; failed: num
         body: write.body,
       })
 
-      if (res.ok) {
+      // 2xx = real success. 409 = dedupe hit, server already has this row
+      // (or an equivalent one). Either way, queue entry has done its job.
+      if (res.ok || res.status === 409) {
         await removePendingWrite(write.id)
         synced++
       } else {

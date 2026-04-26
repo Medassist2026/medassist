@@ -1,0 +1,129 @@
+-- ============================================================================
+-- Migration 057: Enable RLS on tables where it was silently disabled
+-- ============================================================================
+-- Discovered during mig 055 e2e verification. Four tables in public schema
+-- have SELECT/INSERT policies defined but `relrowsecurity = false`,
+-- meaning the policies are dormant — they exist on disk but are not
+-- enforced. Any role with table-level SELECT permission reads everything.
+--
+-- Affected tables (audited 2026-04-25):
+--
+--   vital_signs    -- 4 policies, RLS off, 0 rows live
+--   lab_orders     -- 3 policies, RLS off
+--   lab_results    -- 1 policy,  RLS off
+--   lab_tests      -- 1 policy,  RLS off, 22-row reference catalog
+--
+-- ROOT CAUSE
+-- ----------
+-- An earlier migration (`20260408145102 enable_rls_on_unprotected_tables`)
+-- attempted to remediate this for the schema as a whole but missed these
+-- four. It is not clear whether they were excluded intentionally or by
+-- oversight. The tenant-isolation invariant in the architecture brief
+-- (clinic_id NOT NULL plus per-table clinic-scoped policies) assumes
+-- RLS is on; with RLS off the new clinic-scoped policy in mig 055 is a
+-- no-op for these three target tables.
+--
+-- WHY PRODUCTION HAS NOT NOTICED
+-- ------------------------------
+-- Every read path in the live app reaches these tables through one of:
+--   (a) createAdminClient()            -> service role, bypasses RLS regardless
+--   (b) regular client + WHERE patient_id = user.id  -> the query filter
+--       narrows to the user's own rows even without RLS enforcement
+-- So the disabled-RLS bug is dormant. It would surface the moment any
+-- client-side query omitted the explicit patient_id/doctor_id filter.
+--
+-- WHY THIS IS SAFE TO TURN ON NOW
+-- -------------------------------
+-- For each table, every existing read site was inventoried and confirmed
+-- to be either service-role (bypasses RLS) or covered by an existing
+-- policy:
+--
+--   vital_signs    : patient app reads filter by patient_id = auth.uid()
+--                    -> covered by "Patients can view own vitals" policy.
+--                    No doctor-app reads exist today. After mig 055, the
+--                    new clinic-scoped policy also covers OWNER reads.
+--
+--   lab_orders     : patient reads use patient_id = auth.uid() filter
+--                    -> covered by "Patients can view own lab orders".
+--                    Doctor reads use service role (bypass).
+--
+--   lab_results    : patient reads transit lab_orders' SELECT policy via
+--                    the View lab results subquery -> covered.
+--
+--   lab_tests      : 22-row reference catalog; existing policy is
+--                    USING (true). All reads stay open.
+--
+-- IDEMPOTENCY
+-- -----------
+-- ENABLE ROW LEVEL SECURITY is a no-op when already enabled. Re-running
+-- this migration is harmless.
+--
+-- This shifts the per-table sequence by one more step:
+--   057 = this migration (RLS-enable)
+--   058 = imaging_orders policy
+--   059 = lab_results policy
+--   060 = lab_orders policy
+--   061 = check_in_queue policy
+--   062 = messages policy
+--   063 = conversations policy
+--   064 = payments policy
+--   065 = appointments policy
+--   066 = clinical_notes policy
+--   067 = patients policy
+--   068 = cleanup_legacy_policies (the original mig 066 in the plan)
+-- ============================================================================
+
+ALTER TABLE public.vital_signs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.lab_orders  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.lab_results ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.lab_tests   ENABLE ROW LEVEL SECURITY;
+
+-- ============================================================================
+-- Post-migration verification (run via execute_sql after apply):
+--
+--   -- 1. All four tables now have RLS enabled.
+--   SELECT relname, relrowsecurity FROM pg_class
+--   WHERE relnamespace='public'::regnamespace
+--     AND relname IN ('vital_signs','lab_orders','lab_results','lab_tests')
+--   ORDER BY relname;
+--   -- expect: relrowsecurity=true on all four
+--
+--   -- 2. Re-run the mig 055 stranger e2e test. Now expect visible=0.
+--   BEGIN;
+--   INSERT INTO public.vital_signs (
+--     patient_id, doctor_id, clinic_id, systolic_bp, diastolic_bp
+--   ) VALUES (
+--     (SELECT id FROM public.patients
+--        WHERE clinic_id='298866c7-87b7-4405-9487-c7174bafaf99' LIMIT 1),
+--     '619a7fdd-45a1-49b5-aed2-fbada918b232'::uuid,
+--     '298866c7-87b7-4405-9487-c7174bafaf99'::uuid,
+--     120, 80
+--   );
+--   SET LOCAL ROLE authenticated;
+--   SET LOCAL "request.jwt.claims" TO '{"sub":"c982eabc-ed1d-409f-90e4-b135fcf945e6"}';
+--   SELECT count(*) FROM public.vital_signs;  -- expect 0
+--   ROLLBACK;
+--
+--   -- 3. Naser-as-OWNER e2e: expect visible=1 (clinic-scoped policy lets him in).
+--   BEGIN;
+--   INSERT INTO public.vital_signs (
+--     patient_id, doctor_id, clinic_id, systolic_bp, diastolic_bp
+--   ) VALUES (
+--     (SELECT id FROM public.patients
+--        WHERE clinic_id='298866c7-87b7-4405-9487-c7174bafaf99' LIMIT 1),
+--     '619a7fdd-45a1-49b5-aed2-fbada918b232'::uuid,
+--     '298866c7-87b7-4405-9487-c7174bafaf99'::uuid,
+--     120, 80
+--   );
+--   SET LOCAL ROLE authenticated;
+--   SET LOCAL "request.jwt.claims" TO '{"sub":"619a7fdd-45a1-49b5-aed2-fbada918b232"}';
+--   SELECT count(*) FROM public.vital_signs;  -- expect 1
+--   ROLLBACK;
+--
+--   -- 4. lab_tests catalog stays publicly readable.
+--   BEGIN;
+--   SET LOCAL ROLE authenticated;
+--   SET LOCAL "request.jwt.claims" TO '{"sub":"c982eabc-ed1d-409f-90e4-b135fcf945e6"}';
+--   SELECT count(*) FROM public.lab_tests;  -- expect 22
+--   ROLLBACK;
+-- ============================================================================

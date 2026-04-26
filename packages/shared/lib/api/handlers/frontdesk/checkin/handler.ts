@@ -41,7 +41,7 @@ export async function POST(request: Request) {
 
     const { data: existingEntry } = await supabase
       .from('check_in_queue')
-      .select('id, status, doctor_id')
+      .select('id, status, doctor_id, queue_number')
       .eq('patient_id', patientId)
       .eq('doctor_id', doctorId)
       .in('status', ['waiting', 'in_progress'])
@@ -50,11 +50,19 @@ export async function POST(request: Request) {
       .maybeSingle()
 
     if (existingEntry) {
+      // ── Replay-safe dedupe (TD-008) ──────────────────────────────────────
+      // Pre-TD-008 we returned 409 here. Now we return 200 with the existing
+      // record so an offline-write replay treats this as success and removes
+      // the entry from the local queue (instead of looping retries forever).
+      // Live UI behavior is unchanged: the client treats deduped === true
+      // the same way it treated the 409 message.
       const statusLabel = existingEntry.status === 'waiting' ? 'في الانتظار' : 'مع الطبيب'
-      return NextResponse.json(
-        { error: `هذا المريض مسجّل بالفعل (${statusLabel}) — لا يمكن تسجيله مرة أخرى` },
-        { status: 409 }
-      )
+      return NextResponse.json({
+        success: true,
+        deduped: true,
+        message: `هذا المريض مسجّل بالفعل (${statusLabel})`,
+        queueItem: existingEntry,
+      })
     }
 
     const queueItem = await checkInPatient({

@@ -3,7 +3,9 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { Users, Check } from 'lucide-react'
 import { useRouter } from 'next/navigation'
+import { nanoid } from 'nanoid'
 import { ar } from '@shared/lib/i18n/ar'
+import { addPendingWrite } from '@shared/lib/offline/idb-cache'
 import { CollapsibleSection } from './CollapsibleSection'
 import { RadiologyInline, type RadiologyItem } from './RadiologyInline'
 import { LabsInline, type LabItem } from './LabsInline'
@@ -972,32 +974,66 @@ export function SessionForm({ preselectedPatientId, queueId, appointmentId }: Se
       }
 
       if (mode !== 'print') {
-        const res = await fetch('/api/clinical/notes', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(sessionData),
-        })
-
-        if (!res.ok) {
-          const data = await res.json()
-          setError(data.error || 'فشل في حفظ الجلسة')
-          return
+        // TD-008: per-attempt UUID. Server uses clinical_notes.client_idempotency_key
+        // (mig 069 partial unique index, scoped per-doctor in handler) to dedupe
+        // replays. Generated per submit so a retry after a non-network error gets
+        // a fresh key and is treated as a separate attempt.
+        const sessionDataWithKey = {
+          ...sessionData,
+          clientIdempotencyKey: nanoid(),
         }
 
-        const result = await res.json()
+        let result: { noteId?: string; offline?: boolean } | null = null
 
-        // Clear draft after successful save
+        try {
+          const controller = new AbortController()
+          const timeout = setTimeout(() => controller.abort(), 12000)
+          const res = await fetch('/api/clinical/notes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(sessionDataWithKey),
+            signal: controller.signal,
+          })
+          clearTimeout(timeout)
+
+          if (!res.ok) {
+            const data = await res.json()
+            setError(data.error || 'فشل في حفظ الجلسة')
+            return
+          }
+
+          result = await res.json()
+        } catch (fetchErr: any) {
+          // TD-008: queue for replay if it looks like a network/timeout failure.
+          // Server idempotency (mig 069) ensures the eventual replay creates
+          // exactly one note even if it goes through twice.
+          if (fetchErr?.name === 'AbortError' || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+            try {
+              await addPendingWrite('/api/clinical/notes', 'POST', sessionDataWithKey)
+              result = { offline: true }
+            } catch {
+              setError('تعذّر حفظ الجلسة للمزامنة لاحقاً — حاول مرة أخرى')
+              return
+            }
+          } else {
+            setError(fetchErr?.message || 'فشل في حفظ الجلسة')
+            return
+          }
+        }
+
+        // Clear draft after successful save (or queued)
         try {
           sessionStorage.removeItem(`draft_session_${selectedPatient.id}`)
         } catch { /* ignore */ }
 
-        if (mode === 'save_and_print' && result.noteId) {
+        // Print path requires a real noteId; if we only queued offline, skip
+        // print and go to dashboard so the doctor isn't left on a broken page.
+        if (mode === 'save_and_print' && result?.noteId) {
           router.push(`/doctor/prescription?noteId=${result.noteId}`)
           return
         }
 
-        // After save (not save_and_print), go directly to dashboard
-        if (mode === 'save') {
+        if (mode === 'save' || result?.offline) {
           router.push('/doctor/dashboard')
           return
         }

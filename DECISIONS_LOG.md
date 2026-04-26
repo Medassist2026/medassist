@@ -467,5 +467,123 @@
 
 ---
 
-*Last entry: D-045 | 25 April 2026*
+## D-046: Phone validation audit — canonical helpers over per-surface reinvention
+
+**When**: 25 April 2026 (commit `8937b2e`, local)
+**Context**: A frontdesk tester reported "مفيش تحذير للارقام الغلط" (no warning for wrong numbers). Investigation found the canonical server-side validator (`validateEgyptianPhone` in `phone-validation.ts`) existed but no client code imported it. Instead, 6 surfaces had reinvented validation with different regex patterns, error wording, and trigger timing. 3 surfaces had no validation at all. The frontdesk register page had a UX trap: `isFormValid` used `phone.length === 11` (not the regex), so invalid prefixes like `019` enabled the submit button while a 10-digit typo disabled it silently with no inline error.
+**Decision**: Full validation-layer audit. Expand `phone-validation.ts` with client-oriented helpers: `getEgyptianPhoneError(phone)` (strict, for form submission) and `getEgyptianPhoneSearchError(phone)` (lax, for search inputs — see D-047). Also added `EGYPT_LOCAL_PHONE_RE`, `normalizeEgyptianDigits` (Arabic-Indic → Latin conversion), and `isValidEgyptianLocalPhone`. Migrated all 9 client surfaces to import from the canonical module. Replaced `isPhone` length-stub in `schemas.ts` with a `validateEgyptianPhone` call. Frontdesk register page fixed: `isFormValid` now calls `isValidEgyptianLocalPhone` (regex-based), and phone input validates `onBlur` (not submit-only) matching the auth page UX from D-019.
+**Alternatives**: Fix only the frontdesk register page (quick but leaves 5 other drifted surfaces and 2 unvalidated ones), create a `<EgyptianPhoneField>` React component (forms vary too much — auth has a `+20` chip, doctor modal is different, search inputs serve dual purpose), create a custom hook (same problem — visual presentation differs per surface).
+**Outcome**: 0 inline phone regexes remaining on the client side. Single canonical Arabic error wording for prefix and length errors. All 9 surfaces now validate consistently. Pattern added to §15 ("Canonical phone validation"). Server auth handlers left untouched — see TD-009.
+
+---
+
+## D-047: Two phone validation helpers — strict form vs. lax search
+
+**When**: 25 April 2026
+**Context**: A single `getEgyptianPhoneError` function couldn't serve both form fields and search inputs. Form fields need strict validation (reject on submit if prefix or length is wrong). Search inputs need tolerance: a user typing `012` is "still typing" and shouldn't see an error; a pasted `1234567890` (10 digits without leading zero) should be usable for lookup even though it's not a complete phone number.
+**Decision**: Two separate helpers. `getEgyptianPhoneError(phone)` — strict: returns Arabic error string for any invalid phone, `null` if valid. Used by all form submit/blur validation. `getEgyptianPhoneSearchError(phone)` — lax: returns `null` (no error) for empty input, strings shorter than 11 chars (still-typing), and 10-digit strings without leading zero (paste tolerance). Only errors on clearly-wrong input (wrong prefix with full length, non-digit characters after normalization).
+**Alternatives**: One function with an `options.strict` boolean (harder to reason about — caller must remember which mode to use, and the "lax" behaviors are specific to search UX, not a generic relaxation), per-surface inline logic (what we just eliminated in D-046).
+**Outcome**: Clean separation. Forms call `getEgyptianPhoneError`, search inputs call `getEgyptianPhoneSearchError`. Both import from the same module, share the same regex constant, and produce the same Arabic error strings when they do error.
+
+---
+
+## D-048: RLS rewrite strategy — additive-then-cleanup, ascending blast radius
+
+**When**: 25 April 2026 (migrations 052–068)
+**Context**: The original RLS rewrite (mig 020/021) was supposed to drop legacy policies and replace them with clinic-scoped ones, but mig 021's `DROP POLICY IF EXISTS` names didn't match the actual live policy names — so the drops were no-ops and the rewrite was effectively additive anyway. Investigation confirmed live schema had drifted from what the migration source assumed. Additionally, 4 tables (`vital_signs`, `lab_orders`, `lab_results`, `lab_tests`) had policies defined but `relrowsecurity=false` — meaning tenant-isolation was relying entirely on app-layer query filters. The `clinic_memberships` SELECT policy used a self-referential subquery that caused infinite recursion under the `authenticated` role.
+**Decision**: Split the work into three phases: (1) Foundation (052–054): seed `patient_visibility`, create enums, create SECURITY DEFINER access-control functions. (2) Per-table policies (055–067): additive only — new clinic-scoped policies alongside legacy ones, no drops. Fix the `clinic_memberships` recursion (mig 056). Enable RLS on the 4 dormant tables (mig 057). Order tables by ascending row count (vital_signs: 0 → patients: 35) so access-control functions are battle-tested on cheap tables before touching identity tables. Promote parent tables ahead of children (lab_orders before lab_results, conversations before messages). (3) Cleanup (068, staged): batch-drop 11 redundant legacy SELECTs, 5 cross-clinic-leak policies, and the permissive clinical_notes INSERT. Preserve mig 021's verbose policy forms verbatim even where simpler equivalents exist — per the "never silently deviate" architecture rule.
+**Alternatives**: Execute mig 021 as-is (would silently fail the drops, leaving both old and new policies active with no cleanup plan), single migration replacing everything (no rollback window between add and drop), drop-first-then-add (if the add migration fails, the table has no policies at all).
+**Outcome**: 16 migrations applied without incident. Additive phase gives a rollback window — if a new policy causes unexpected denials, the legacy policy is still there as a fallback. Cleanup migration (068) is staged and can be landed after a soak period. Two pre-existing bugs found and fixed: the `clinic_memberships` recursion (mig 056) and the 4 dormant-RLS tables (mig 057). Backfilled 3 NULL `appointments.clinic_id` rows that mig 051 missed (found during mig 053).
+
+---
+
+## D-049: Three RLS policy patterns for clinic-scoped access
+
+**When**: 25 April 2026
+**Context**: 14 tenant-scoped tables needed clinic-scoped RLS policies. Each table's access model falls into one of three categories based on how the table relates to the clinic. Needed a small set of composable patterns rather than bespoke policies per table.
+**Decision**: Three patterns, each using the SECURITY DEFINER access-control functions from mig 054:
+1. **`can_access_patient` triple-OR** — for clinical tables where access flows through the patient (vital_signs, imaging_orders, lab_orders, clinical_notes, patients). The function checks: is the user the patient themselves, is the user the treating doctor, or is the user a member of the patient's clinic.
+2. **`is_clinic_member` triple-OR** — for operations tables where access flows directly through clinic membership (check_in_queue, conversations, payments, appointments). Simpler: is the user a member of the row's clinic.
+3. **EXISTS-via-parent** — for child tables that don't carry `clinic_id` directly (lab_results → lab_orders, messages → conversations). Policy uses an EXISTS subquery joining to the parent table, which already has its own `is_clinic_member` or `can_access_patient` policy.
+**Alternatives**: Bespoke policies per table (17 unique policy bodies to maintain), single uber-function (too many parameters, too many code paths), RLS on parent-only with views for children (PostgreSQL doesn't propagate RLS through views by default).
+**Outcome**: 14 tables covered by 3 patterns. Pattern choice is deterministic from the table's position in the schema graph: clinical leaf → pattern 1, operations root → pattern 2, child of either → pattern 3. New tables added in the future should follow the same pattern selection. Important operational note: all 32 live `patient_visibility` grants point to OWNERs — production is effectively all solo clinics today. The multi-doctor visibility machinery is preparing for a future state.
+
+---
+
+## D-050: Offline-write Phase 1 — IndexedDB queue with replay-safe idempotency (resolves TD-008)
+
+**When**: 26 April 2026
+**Context**: After D-043/D-044 cleanup, `idb-cache.ts` exposed offline-write primitives but no actual write surface enqueued. Frontdesk check-in, payment create, and clinical-note save still hit the network directly with no offline fallback. Egyptian clinic internet is unstable — queueing writes during outages is a real product requirement, not a future-proofing exercise (TD-008).
+**Decision**: Three coordinated changes:
+1. **Storage unification.** `useOfflineMutation` hook refactored from localStorage onto `idb-cache.addPendingWrite` / `syncPendingWrites` / `getPendingWriteCount`. Same hook API for components; different backend. One-shot legacy-localStorage drain runs on first hook mount post-deploy so no clinic loses pending writes during the upgrade.
+2. **Server idempotency.** Two paths by surface:
+   - **Check-in** uses natural dedupe (`patient_id` + `doctor_id` + Cairo-day): handler returns 200 with `deduped: true` and the existing record, instead of the previous 409. `idb-cache.syncPendingWrites` treats both 2xx and 409 as success, so this is belt-and-suspenders for any older client still in production.
+   - **Payments + clinical_notes** have no natural dedupe (a doctor can legitimately write 2 notes for the same patient, a patient can pay cash twice in a visit). Migration 069 adds `client_idempotency_key TEXT` with a partial unique index (`WHERE NOT NULL`) on both tables. Client surfaces (`payments/new`, `SessionForm`) generate `nanoid()` per submit attempt; handlers look up by key first, return existing record on hit.
+3. **Test discipline.** New `packages/shared/hooks/__tests__/useOfflineMutation.test.ts` follows the existing compile-time-witness pattern (`frontdesk/payments/create/__tests__/handler.test.ts`). Locks the hook surface, the `clientIdempotencyKey: optional` data-layer contract, and the idb-cache 409-as-success invariant.
+**Alternatives**: Generic `idempotency_keys` table with handler-wrapping middleware (more infrastructure, higher blast radius — not justified for two write surfaces), per-endpoint inline dedupe with no schema change (works for check-in only, not generalizable), Capacitor SQLite (the previously-deleted dead code) revived — rejected since web/PWA must work standalone (D-043).
+**Outcome**: TD-008 resolved. All three high-frequency frontdesk write surfaces now queue offline and replay safely on reconnect. `OfflineIndicator` badge accurately reflects pending writes (was always 0 pre-TD-008 because the localStorage queue and the IDB-backed badge were disconnected). Phase 2 work — auth-refresh-mid-replay for outages longer than the JWT lifetime, and per-row "this is queued" UI affordances — remains a separate follow-up if production telemetry shows outages long enough to need it.
+
+---
+
+## D-051: Phone is identity — dual-OTP verification with auth-side sync
+
+**When**: 26 April 2026 (commits `8be5484`, `1ab442d`, `cf7d465`)
+**Context**: Phone number is the global patient identity in MedAssist's architecture. Changing it affects `public.users.phone`, `auth.users.phone` (53 of 288 accounts authenticate directly against this), and every `patients.phone` row across all clinics. A naive update to `public.users.phone` alone would silently break login for phone-only auth users (walk-in patients onboarded via `createWalkInPatient`). The legacy frontdesk profile PATCH accepted any 10+ character string with no validation, no audit, and no OTP. Migration 013/041 had scaffolded `phone_change_requests` and OTP purposes but the app never wired them.
+**Decision**: Three-phase approach. **Phase A** (immediate): tighten the existing frontdesk PATCH with canonical validation (`getEgyptianPhoneError`), audit logging (`logAuditEvent` with `pathway: 'phase_a_legacy_no_otp'`), and a 30-day removal trigger (TD-014). **Phase B** (server-side, feature-gated): full dual-OTP verification — user proves ownership of both old phone and new phone before the change commits. `change_phone_commit` RPC does atomic SQL propagation across all clinics; on success, `supabase.auth.admin.updateUserById` syncs `auth.users.phone`; on auth-admin failure, `change_phone_rollback` RPC fires as a compensating transaction. **Phase C** (typo correction): lightweight path for frontdesk to fix data-entry typos without OTP, scoped to the frontdesk's own clinic only. All Phase B/C endpoints gated behind `FEATURE_PHONE_CHANGE_V2` env flag — deployed but dormant until flipped. Client UI (PR-3) not yet started (TD-011).
+**Alternatives**: Update `public.users.phone` only (breaks 53 phone-only auth accounts), single-OTP on new phone only (weaker security — no proof the requester controls the old phone), skip feature flag and ship everything at once (too risky for identity-critical flow), use Supabase edge functions for the commit (adds latency, makes rollback harder, no local dev parity).
+**Outcome**: Migration 070 live in production. `phone-changes.ts` data module (~1100 lines, 8 public functions) orchestrates the full lifecycle. Phase A live and audited. Phase B server endpoints return 404 behind flag. 1 pre-existing divergent `auth.users.phone` row discovered and flagged (TD-015). See also OPD-004 (cross-clinic identity merging deferred to Phase 2).
+
+---
+
+## D-052: Self-approval banned for phone-change fallback requests
+
+**When**: 26 April 2026
+**Context**: When a user cannot receive OTP on their old phone (lost/stolen), they open a "fallback" request that requires OWNER approval. In solo clinics the OWNER is also the doctor — and potentially the user requesting the change. Allowing self-approval would eliminate the security benefit of the approval step entirely.
+**Decision**: `approvePhoneChangeRequest` rejects with 403 when `request.user_id === ownerId`. Solo doctors who lose their phone must go through a support email route. The rejection message is clear ("لا يمكنك الموافقة على طلب تغيير رقمك" — you cannot approve a request to change your own number).
+**Alternatives**: Allow self-approval with extra verification step (adds complexity, dubious security gain), require a second OWNER to approve (most clinics are solo — there is no second OWNER), time-delayed self-approval (adds 24-48h delay, still fundamentally self-approving).
+**Outcome**: Clean security boundary. Solo-clinic doctors are the majority of the user base (validated in D-049's operational note). The support email route is the existing Anthropic pattern for account recovery in identity-critical systems.
+
+---
+
+## D-053: Cross-clinic phone propagation is strict — no identity merging
+
+**When**: 26 April 2026
+**Context**: When a phone change commits, `change_phone_commit` RPC propagates the new phone to `patients.phone` rows across all clinics. But the same physical patient may exist under different phone numbers in different clinics (e.g., patient gave Clinic A their personal number and Clinic B their work number). Unconditional propagation would overwrite Clinic B's intentionally-different phone.
+**Decision**: Propagation only touches `patients.phone` rows where the phone exactly matches the OLD phone. If Clinic B has the same patient under a different phone, B's row is untouched. Cross-clinic identity merging (recognizing that two patient rows in different clinics are the same physical person) is deferred to the Phase 2 patient-app feature (OPD-004).
+**Alternatives**: Propagate to all patient rows regardless of current phone (would overwrite intentional differences), use a `global_patient_id` to link cross-clinic records (requires the patient identity network from Phase 2 — not built yet), prompt the user to confirm each clinic (UX complexity, requires knowing which clinics the patient visits).
+**Outcome**: Conservative and safe for Phase 1. The strict match ensures no data corruption. Identity merging becomes a core feature of the patient mini-portal (Phase 2, PRODUCT_SPEC.md §Phased Expansion).
+
+---
+
+## D-054: Phase A storage format — validate strictly, write back local 11-digit form
+
+**When**: 26 April 2026
+**Context**: Plan §5.8 specified writing the normalized 12-digit no-plus form (`201xxxxxxxxx`). But production data analysis revealed `users.phone` is heterogeneous: 170/288 in local 11-digit form (`01xxxxxxxxx`), 37 in `+201...`, 9 in `201...`, 72 in other shapes. The login handler regex matches a fourth shape (`/^\+2001[0125]\d{8}$/`). Canonicalizing in Phase A would introduce a 5th storage shape and could break login for users whose auth record expects the shape they registered with.
+**Decision**: Phase A validates strictly via `getEgyptianPhoneError(normalizeEgyptianDigits(phone))` but writes back the cleaned local 11-digit form (matching the 170/288 majority). Storage canonicalization stays in TD-009 — it requires updating the auth handler regex (which has a `DEV_BYPASS_OTP` branch that complicates a direct swap) and a one-time migration of all existing phone values to a single canonical form.
+**Alternatives**: Canonicalize to 12-digit now (risk of breaking login for 118+ users in non-majority formats), canonicalize to E.164 `+201...` (same risk, plus existing code that strips `+2` prefix would need updating), skip Phase A entirely and wait for Phase B (leaves the frontdesk PATCH unvalidated and unaudited for weeks).
+**Outcome**: Deviation documented in code with a comment pointing to TD-009. Phase A is live and safely validates without introducing login risk. The 11-digit write-back matches what `createWalkInPatient` and the registration flow already produce.
+
+---
+
+## D-055: Frontdesk-as-proxy pattern for patient phone changes
+
+**When**: 26 April 2026
+**Context**: Egyptian clinic workflow: the patient is physically present, the frontdesk staffer operates the computer, and the patient provides information verbally. For phone changes (Flow E in the plan), the frontdesk staffer needs to initiate the change on behalf of the patient, but the OTP goes to the patient's phone — the patient reads it aloud or shows the screen to the staffer.
+**Decision**: All change-phone endpoints accept a `frontdesk` actor role in addition to the user's own role. The handler validates `actor.role === 'frontdesk' AND patient.clinic_id === getFrontdeskClinicId(actor)` to ensure the frontdesk staffer can only initiate changes for patients in their own clinic. Audit metadata records `actorRole: 'frontdesk_proxy'` so the audit trail distinguishes self-initiated changes from proxy changes. Patient role is also accepted in all endpoints for forward compatibility — patient-side UI ships in Phase 2.
+**Alternatives**: Require the patient to use their own device (breaks the physical-world workflow — many patients don't have smartphones or aren't tech-literate), create a separate set of "frontdesk phone change" endpoints (duplicate logic, harder to maintain), use a generic "on behalf of" parameter (too abstract — the proxy pattern is specific to the frontdesk-patient physical-presence relationship).
+**Outcome**: Mirrors the existing physical-world workflow digitally. The `getFrontdeskClinicId` guard (D-041 pattern) ensures tenant isolation. Audit trail clearly distinguishes proxy vs. self-initiated changes for compliance and dispute resolution.
+
+---
+
+## D-056: Hand-rolled validation over Zod for phone-change handlers
+
+**When**: 26 April 2026
+**Context**: The phone-change plan (§5.0) suggested introducing Zod for request validation across the 8 new handlers. The existing codebase uses a `validateBody` pattern with inline shape checks — no handler in the app currently uses Zod.
+**Decision**: Keep the existing `validateBody` pattern. Handlers do inline shape checks (UUID format, string length, enum membership) matching the established codebase convention. Adding Zod for 8 handlers alone would introduce a new dependency with a different mental model, without the critical mass to justify it. Net validation coverage is identical.
+**Alternatives**: Introduce Zod for phone-change handlers only (one-off dependency, inconsistent with rest of codebase), introduce Zod repo-wide (too large a refactor for this PR), use `io-ts` or `superstruct` (same one-off problem, less ecosystem support than Zod).
+**Outcome**: Consistent with existing codebase patterns. If a future decision introduces Zod repo-wide, the phone-change handlers can be migrated then. Zero new dependencies added.
+
+---
+
+*Last entry: D-056 | 26 April 2026*
 *Add new decisions at the bottom with sequential ID.*

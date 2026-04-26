@@ -1021,6 +1021,14 @@ export async function createPayment(params: {
   appointmentId?: string
   clinicalNoteId?: string
   notes?: string
+  /**
+   * Optional client-generated UUID for offline-write replay dedupe (TD-008).
+   * If supplied, persisted to payments.client_idempotency_key, which has a
+   * partial unique index (mig 069). The handler is expected to pre-check
+   * this key and short-circuit with the existing row before reaching here,
+   * so on this path the key is just stored for future replay lookups.
+   */
+  clientIdempotencyKey?: string
 }): Promise<Payment> {
   // Defense-in-depth: TS already requires clinicId, runtime guard catches
   // `as any` callers and stale JS bundles. Migration 047 documents the
@@ -1045,7 +1053,8 @@ export async function createPayment(params: {
       clinical_note_id: params.clinicalNoteId,
       notes: params.notes,
       payment_status: 'completed',
-      collected_by: user.data.user?.id
+      collected_by: user.data.user?.id,
+      client_idempotency_key: params.clientIdempotencyKey ?? null,
     })
     .select()
     .single()

@@ -13,7 +13,36 @@ export async function POST(request: Request) {
   try {
     const user = await requireApiRole('doctor')
 
-    const { patientId, queueId, appointmentId, noteData, keystrokeCount, durationSeconds, syncToPatient, sendPrescriptionSMS: sendSMS, clinicId: bodyClinicId } = await request.json()
+    const { patientId, queueId, appointmentId, noteData, keystrokeCount, durationSeconds, syncToPatient, sendPrescriptionSMS: sendSMS, clinicId: bodyClinicId, clientIdempotencyKey } = await request.json()
+
+    // ── Replay-safe idempotency (TD-008) ────────────────────────────────────
+    // Offline-write callers (useOfflineMutation hook) include a UUID per
+    // attempt in clientIdempotencyKey. On replay we look up first; if a row
+    // already exists for this key, return its id instead of inserting a
+    // duplicate. Migration 069 adds the column + partial unique index.
+    if (clientIdempotencyKey) {
+      // Admin client + explicit doctor_id scope: bypasses RLS for the lookup
+      // (so we can find the row by key without needing the same session
+      // context as the original write), but constrained to the same doctor's
+      // notes so cross-doctor key collisions are impossible.
+      const supabaseRead = createAdminClient('patient-dedup')
+      const { data: existing } = await supabaseRead
+        .from('clinical_notes')
+        .select('id')
+        .eq('client_idempotency_key', clientIdempotencyKey)
+        .eq('doctor_id', user.id)
+        .maybeSingle()
+
+      if (existing?.id) {
+        return NextResponse.json({
+          success: true,
+          deduped: true,
+          noteId: existing.id,
+          message: 'Clinical note already saved (offline replay deduped)',
+          reminderWarning: null,
+        })
+      }
+    }
 
     // Validation
     if (!patientId || !noteData) {
@@ -78,7 +107,8 @@ export async function POST(request: Request) {
       noteData,
       keystrokeCount: keystrokeCount || 0,
       durationSeconds: durationSeconds || 0,
-      syncToPatient: syncToPatient || false
+      syncToPatient: syncToPatient || false,
+      clientIdempotencyKey,  // TD-008 — persists for future replay lookups
     })
     
     // Create medication reminders if syncing to patient

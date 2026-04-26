@@ -1,14 +1,32 @@
 'use client'
 
 import { useState, useCallback, useEffect } from 'react'
+import {
+  addPendingWrite,
+  getPendingWrites,
+  getPendingWriteCount,
+  syncPendingWrites,
+  type PendingWrite,
+} from '@shared/lib/offline/idb-cache'
 
 /**
- * Offline-aware mutation hook for frontdesk operations.
+ * useOfflineMutation — offline-aware POST hook backed by IndexedDB.
  *
  * Wraps a fetch call with offline queue fallback:
- * 1. If online: makes the API call directly
- * 2. If offline: queues the mutation in IndexedDB/localStorage for later sync
- * 3. Returns { offline: boolean } so UI can show appropriate feedback
+ * 1. If online: makes the API call directly.
+ * 2. If offline (or fetch fails / times out): queues in idb-cache for later sync.
+ * 3. Returns { offline: boolean } so UI can show appropriate feedback.
+ *
+ * Storage: backed by `packages/shared/lib/offline/idb-cache.ts` (IndexedDB).
+ * The previous implementation used localStorage; that legacy queue is drained
+ * once on first hook mount (see migrateLegacyLocalStorageQueue below) so no
+ * pending writes are lost across the upgrade.
+ *
+ * Replay safety (TD-008): the server is responsible for idempotency.
+ *   - Check-in: natural dedupe in handler returns 200 on duplicate.
+ *   - Payments / clinical notes: callers should include a clientIdempotencyKey
+ *     (UUID/nanoid) in the body. Server enforces uniqueness via the
+ *     client_idempotency_key column added in migration 069.
  *
  * Usage:
  *   const { mutate, loading, error, isOffline } = useOfflineMutation('/api/frontdesk/checkin')
@@ -16,140 +34,111 @@ import { useState, useCallback, useEffect } from 'react'
  *   if (result?.offline) showOfflineToast()
  */
 
-const OFFLINE_QUEUE_KEY = 'medassist_offline_queue'
+const LEGACY_LS_KEY = 'medassist_offline_queue'
 
-interface QueuedMutation {
-  id: string
-  url: string
-  body: any
-  createdAt: string
-  retries: number
-  status: 'pending' | 'syncing' | 'failed'
-}
+// ─── Legacy localStorage queue migration ────────────────────────────────────
 
-// ── Offline Queue Storage (localStorage-based for simplicity) ──
-
-function getQueue(): QueuedMutation[] {
+/**
+ * One-shot drain: copy any items in the legacy localStorage queue into idb-cache,
+ * then clear localStorage. Idempotent — safe to call on every mount; only does
+ * real work the first time post-upgrade.
+ *
+ * Why this exists: pre-TD-008 the queue lived in localStorage. A clinic that
+ * was offline at the moment this code deploys would lose those queued check-ins
+ * if we simply switched storage. Draining preserves them.
+ */
+async function migrateLegacyLocalStorageQueue(): Promise<number> {
+  if (typeof window === 'undefined') return 0
+  let raw: string | null = null
   try {
-    const raw = localStorage.getItem(OFFLINE_QUEUE_KEY)
-    return raw ? JSON.parse(raw) : []
+    raw = localStorage.getItem(LEGACY_LS_KEY)
   } catch {
-    return []
+    return 0
   }
-}
+  if (!raw) return 0
 
-function saveQueue(queue: QueuedMutation[]): void {
+  let legacy: Array<{ url: string; body: unknown; method?: string }> = []
   try {
-    localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue))
+    legacy = JSON.parse(raw)
   } catch {
-    // Storage full — drop oldest
-    const trimmed = queue.slice(-50)
-    localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(trimmed))
+    // Corrupted — drop it; no point keeping unparseable bytes
+    try { localStorage.removeItem(LEGACY_LS_KEY) } catch {}
+    return 0
   }
+
+  if (!Array.isArray(legacy) || legacy.length === 0) {
+    try { localStorage.removeItem(LEGACY_LS_KEY) } catch {}
+    return 0
+  }
+
+  let migrated = 0
+  for (const item of legacy) {
+    if (!item?.url || !item?.body) continue
+    try {
+      await addPendingWrite(item.url, item.method || 'POST', item.body)
+      migrated++
+    } catch (err) {
+      console.warn('[useOfflineMutation] legacy migration: failed to enqueue item', err)
+    }
+  }
+
+  // Clear only after all items are migrated. If anything threw above, we'd
+  // rather re-attempt next mount than silently lose data.
+  try {
+    localStorage.removeItem(LEGACY_LS_KEY)
+  } catch {
+    /* ignore */
+  }
+
+  if (migrated > 0) {
+    console.log(`[useOfflineMutation] migrated ${migrated} legacy localStorage entries to idb-cache`)
+  }
+  return migrated
 }
 
-function addToQueue(url: string, body: any): string {
-  const id = `offline_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-  const queue = getQueue()
-  queue.push({
-    id,
-    url,
-    body,
-    createdAt: new Date().toISOString(),
-    retries: 0,
-    status: 'pending',
-  })
-  saveQueue(queue)
-  return id
+// Run the migration once per process. Multiple hook instances on the same
+// page should not re-drain — they share the same migrationPromise.
+let migrationPromise: Promise<number> | null = null
+function ensureLegacyMigrated(): Promise<number> {
+  if (!migrationPromise) {
+    migrationPromise = migrateLegacyLocalStorageQueue()
+  }
+  return migrationPromise
 }
 
-function removeFromQueue(id: string): void {
-  const queue = getQueue().filter(q => q.id !== id)
-  saveQueue(queue)
-}
-
-// ── Sync pending mutations when back online ──
+// ─── Sync pending mutations when back online ────────────────────────────────
 
 let syncInProgress = false
 
+/**
+ * Process all pending writes in the offline queue, calling each one's URL
+ * with its stored body. Resilient to network flaps mid-flush.
+ *
+ * Returns: { synced, failed } — synced includes both 2xx and 409 (server
+ * dedupe). Callers should treat 409 as success too, which is what idb-cache's
+ * syncPendingWrites already does.
+ */
 export async function syncOfflineQueue(): Promise<{ synced: number; failed: number }> {
   if (syncInProgress) return { synced: 0, failed: 0 }
   syncInProgress = true
-
-  let synced = 0
-  let failed = 0
-
-  // Process one item at a time, always re-reading from storage for consistency
-  const processNext = async (): Promise<boolean> => {
-    const queue = getQueue()
-    const item = queue.find(q => q.status === 'pending' || q.status === 'failed')
-    if (!item) return false
-
-    try {
-      // Mark as syncing
-      item.status = 'syncing'
-      saveQueue(queue)
-
-      const res = await fetch(item.url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item.body),
-      })
-
-      if (res.ok || res.status === 409) {
-        // Success or conflict (duplicate/already processed) — remove
-        removeFromQueue(item.id)
-        synced++
-      } else {
-        // Server error — mark failed with incremented retry
-        const freshQueue = getQueue()
-        const freshItem = freshQueue.find(q => q.id === item.id)
-        if (freshItem) {
-          freshItem.status = 'failed'
-          freshItem.retries = (freshItem.retries || 0) + 1
-          if (freshItem.retries >= 5) {
-            removeFromQueue(item.id)
-            failed++
-          } else {
-            saveQueue(freshQueue)
-          }
-        }
-      }
-    } catch {
-      // Network error — mark failed
-      const freshQueue = getQueue()
-      const freshItem = freshQueue.find(q => q.id === item.id)
-      if (freshItem) {
-        freshItem.status = 'failed'
-        freshItem.retries = (freshItem.retries || 0) + 1
-        saveQueue(freshQueue)
-      }
-      failed++
-      return false // Stop processing if network is down
-    }
-
-    return true
+  try {
+    await ensureLegacyMigrated()
+    return await syncPendingWrites()
+  } finally {
+    syncInProgress = false
   }
-
-  // Process all pending items sequentially
-  while (await processNext()) {
-    // Continue until no more pending items or network fails
-  }
-
-  syncInProgress = false
-  return { synced, failed }
 }
 
-// ── Auto-sync listener ──
+// ─── Auto-sync listener ─────────────────────────────────────────────────────
 
 if (typeof window !== 'undefined') {
   window.addEventListener('online', () => {
-    // Small delay to let connection stabilize
-    setTimeout(() => syncOfflineQueue(), 2000)
+    // Small delay to let connection stabilize (Wi-Fi reconnect can flap).
+    setTimeout(() => { void syncOfflineQueue() }, 2000)
   })
 }
 
-// ── React Hook ──
+// ─── React Hook ─────────────────────────────────────────────────────────────
 
 interface MutationResult<T = any> {
   data?: T
@@ -158,7 +147,7 @@ interface MutationResult<T = any> {
 }
 
 interface UseOfflineMutationReturn<T = any> {
-  mutate: (body: any) => Promise<MutationResult<T> | null>
+  mutate: (body: unknown) => Promise<MutationResult<T> | null>
   loading: boolean
   error: string | null
   isOffline: boolean
@@ -174,45 +163,58 @@ export function useOfflineMutation<T = any>(
   const [isOffline, setIsOffline] = useState(false)
   const [pendingCount, setPendingCount] = useState(0)
 
-  // Track online status
+  // Track online status + drain legacy queue on first mount.
   useEffect(() => {
-    const checkOnline = () => {
-      setIsOffline(!navigator.onLine)
-      setPendingCount(getQueue().filter(q => q.status !== 'syncing').length)
-    }
-    checkOnline()
+    let active = true
 
-    window.addEventListener('online', checkOnline)
-    window.addEventListener('offline', checkOnline)
-    const interval = setInterval(checkOnline, 10000)
+    const refresh = async () => {
+      if (!active) return
+      setIsOffline(typeof navigator !== 'undefined' && !navigator.onLine)
+      try {
+        const count = await getPendingWriteCount()
+        if (active) setPendingCount(count)
+      } catch {
+        /* ignore */
+      }
+    }
+
+    void ensureLegacyMigrated().then(() => refresh())
+
+    const onOnline = () => { void refresh() }
+    const onOffline = () => { void refresh() }
+    window.addEventListener('online', onOnline)
+    window.addEventListener('offline', onOffline)
+    const interval = setInterval(refresh, 10000)
 
     return () => {
-      window.removeEventListener('online', checkOnline)
-      window.removeEventListener('offline', checkOnline)
+      active = false
+      window.removeEventListener('online', onOnline)
+      window.removeEventListener('offline', onOffline)
       clearInterval(interval)
     }
   }, [])
 
-  const mutate = useCallback(async (body: any): Promise<MutationResult<T> | null> => {
+  const mutate = useCallback(async (body: unknown): Promise<MutationResult<T> | null> => {
     setLoading(true)
     setError(null)
+    const method = options?.method || 'POST'
 
-    // If clearly offline, queue immediately
-    if (!navigator.onLine) {
-      const offlineId = addToQueue(url, body)
+    // If clearly offline, queue immediately — no point even attempting fetch.
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      const offlineId = await addPendingWrite(url, method, body)
       setIsOffline(true)
-      setPendingCount(prev => prev + 1)
+      try { setPendingCount(await getPendingWriteCount()) } catch { /* ignore */ }
       setLoading(false)
       return { offline: true, offlineId }
     }
 
-    // Try the API call
+    // Try the API call.
     try {
       const controller = new AbortController()
       const timeout = setTimeout(() => controller.abort(), 8000)
 
       const res = await fetch(url, {
-        method: options?.method || 'POST',
+        method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
         signal: controller.signal,
@@ -231,17 +233,17 @@ export function useOfflineMutation<T = any>(
       setLoading(false)
       return { data, offline: false }
     } catch (err: any) {
-      // Network error — queue for offline sync
-      if (err.name === 'AbortError' || !navigator.onLine) {
-        const offlineId = addToQueue(url, body)
+      // Network error / timeout — queue for offline sync.
+      if (err?.name === 'AbortError' || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+        const offlineId = await addPendingWrite(url, method, body)
         setIsOffline(true)
-        setPendingCount(prev => prev + 1)
+        try { setPendingCount(await getPendingWriteCount()) } catch { /* ignore */ }
         setLoading(false)
         return { offline: true, offlineId }
       }
 
-      // Other error
-      setError(err.message || 'حدث خطأ غير متوقع')
+      // Other error — surface to UI.
+      setError(err?.message || 'حدث خطأ غير متوقع')
       setLoading(false)
       return null
     }
@@ -251,17 +253,24 @@ export function useOfflineMutation<T = any>(
 }
 
 /**
- * Get current offline queue statistics
+ * Get current offline queue statistics. Counts items in idb-cache
+ * (status='pending'). Failed items past max retries are not counted —
+ * idb-cache marks them 'failed' and they stay in the store for diagnostic
+ * inspection but do not appear in the pending-count badge.
  */
-export function getOfflineQueueStats(): {
+export async function getOfflineQueueStats(): Promise<{
   pending: number
   failed: number
   total: number
-} {
-  const queue = getQueue()
-  return {
-    pending: queue.filter(q => q.status === 'pending').length,
-    failed: queue.filter(q => q.status === 'failed').length,
-    total: queue.length,
+}> {
+  try {
+    await ensureLegacyMigrated()
+    const writes: PendingWrite[] = await getPendingWrites()
+    const all = writes.length
+    const pending = writes.filter((w) => w.status === 'pending').length
+    const failed = writes.filter((w) => w.status === 'failed').length
+    return { pending, failed, total: all }
+  } catch {
+    return { pending: 0, failed: 0, total: 0 }
   }
 }

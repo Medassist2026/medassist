@@ -38,6 +38,14 @@ export interface CreateClinicalNoteParams {
   keystrokeCount: number
   durationSeconds: number
   syncToPatient: boolean
+  /**
+   * Optional client-generated UUID for offline-write replay dedupe (TD-008).
+   * If supplied, persisted to clinical_notes.client_idempotency_key, which
+   * has a partial unique index (mig 069). Handler is expected to pre-check
+   * this key and short-circuit with the existing note id before reaching
+   * here, so on this path the key is just stored for future replay lookups.
+   */
+  clientIdempotencyKey?: string
 }
 
 /**
@@ -92,6 +100,7 @@ export async function createClinicalNote(params: CreateClinicalNoteParams) {
     keystroke_count: params.keystrokeCount,
     duration_seconds: params.durationSeconds,
     synced_to_patient: params.syncToPatient,
+    client_idempotency_key: params.clientIdempotencyKey ?? null,  // TD-008
   }
 
   const noteDataPayload = {

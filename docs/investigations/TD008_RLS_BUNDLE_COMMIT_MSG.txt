@@ -1,0 +1,161 @@
+feat(rls,offline): RLS rewrite + offline-write Phase 1 + phone/RLS doc catch-up
+
+Bundle commit covering three entangled work streams that were sitting
+together in the working tree. Splitting them by file would have left
+DECISIONS_LOG.md and ARCHITECTURE.md half-edited across PRs, so they
+ship together with explicit per-stream sections in this message.
+
+================================================================
+1. Offline-write Phase 1 (TD-008, D-050) — migration 069
+================================================================
+
+Resolves TD-008. After D-043/D-044 cleanup, idb-cache.ts had the
+offline-write primitives but no write surface enqueued. This commit
+wires the three high-frequency frontdesk surfaces (check-in, payment
+create, clinical-note save) onto the queue with replay-safe
+idempotency.
+
+Storage unification
+-------------------
+useOfflineMutation hook refactored from localStorage onto
+idb-cache.addPendingWrite / syncPendingWrites / getPendingWriteCount.
+Same hook API for components, different backend. One-shot legacy-
+localStorage drain runs on first hook mount post-deploy so any
+clinic that was offline at deploy time does not lose pending writes.
+
+Server idempotency by surface
+-----------------------------
+- Check-in: natural dedupe key already exists (patient_id +
+  doctor_id + Cairo-day-anchored "today"). Handler now returns 200
+  with `deduped: true` and the existing record instead of the
+  previous 409. The client surface treats deduped:true as an inline
+  banner instead of a hard error.
+- Payments + clinical_notes: no natural dedupe (a doctor can write
+  two notes in a visit; a patient can pay cash twice). Migration 069
+  adds `client_idempotency_key TEXT` with a partial unique index
+  `WHERE client_idempotency_key IS NOT NULL` on both tables. Client
+  surfaces (payments/new, SessionForm) generate nanoid() per submit;
+  handlers look up by key first, return existing record on hit.
+- Belt-and-suspenders: idb-cache.syncPendingWrites treats both 2xx
+  and 409 as success on replay, so any older pre-this-commit client
+  still in production also flushes correctly.
+
+Test discipline
+---------------
+New packages/shared/hooks/__tests__/useOfflineMutation.test.ts
+follows the existing compile-time-witness pattern (same as
+frontdesk/payments/create/__tests__/handler.test.ts). Locks the
+hook surface, the clientIdempotencyKey-as-optional data-layer
+contract, and the idb-cache 409-as-success invariant.
+
+Files
+-----
+  packages/shared/hooks/useOfflineMutation.ts                  (refactor)
+  packages/shared/lib/offline/idb-cache.ts                     (409 = success)
+  packages/shared/lib/api/handlers/frontdesk/checkin/handler.ts
+  packages/shared/lib/api/handlers/frontdesk/payments/create/handler.ts
+  packages/shared/lib/api/handlers/clinical/notes/handler.ts
+  packages/shared/lib/data/frontdesk.ts                        (createPayment +key)
+  packages/shared/lib/data/clinical-notes.ts                   (saveClinicalNote +key)
+  apps/clinic/app/(frontdesk)/frontdesk/checkin/page.tsx       (uses addPendingWrite)
+  apps/clinic/app/(frontdesk)/frontdesk/payments/new/page.tsx  (sends UUID)
+  packages/shared/components/clinical/SessionForm.tsx          (sends UUID)
+  packages/shared/hooks/__tests__/useOfflineMutation.test.ts   (new)
+  supabase/migrations/069_add_idempotency_keys.sql             (new — already applied to live DB)
+
+Phase 2 deferred: auth-refresh-mid-replay for outages longer than
+the JWT lifetime + per-row "queued" UI affordances. Re-evaluate when
+production telemetry shows outages long enough to justify it.
+
+================================================================
+2. RLS rewrite (D-048, D-049) — migrations 052-068
+================================================================
+
+Migrations 052-067 land here. They were applied to the live DB
+incrementally on 25 Apr (per Supabase MCP list_migrations) but the
+.sql files were sitting untracked. This commit brings git in sync
+with production.
+
+052  seed_patient_visibility               grants for the new model
+053  enums_and_clinic_extras                policy-readable enums
+054  access_control_functions               can_access_patient,
+                                             is_clinic_member,
+                                             get_clinic_role (SECURITY
+                                             DEFINER)
+055  vital_signs_clinic_policy              first per-table policy
+056  fix_clinic_memberships_recursion       broke an infinite-recursion
+                                             trap discovered during
+                                             055 testing
+057  enable_rls_on_dormant_tables           closes pre-existing gaps
+058  imaging_orders_clinic_policy           three-pattern selection
+059  lab_orders_clinic_policy               (D-049): can_access_patient
+060  lab_results_clinic_policy              triple-OR for clinical
+061  check_in_queue_clinic_policy           leaves; is_clinic_member
+062  conversations_clinic_policy            triple-OR for ops roots;
+063  messages_clinic_policy                 EXISTS-via-parent for
+064  payments_clinic_policy                 child tables that don't
+065  appointments_clinic_policy             carry clinic_id directly
+066  clinical_notes_clinic_policy           (lab_results, messages)
+067  patients_clinic_policy
+
+068  cleanup_legacy_policies                ── DESTRUCTIVE — DO NOT
+                                                APPLY YET. Header has
+                                                7-day soak warning;
+                                                earliest safe apply
+                                                ~2026-05-03.
+
+Decision log entries
+--------------------
+D-048 — additive-then-cleanup strategy: ship the new policies
+        (058-067) on top of the legacy ones first; verify in
+        production for 7 days; then drop the redundant legacy
+        policies (mig 068) once nothing is leaning on them.
+D-049 — three RLS patterns based on the table's position in the
+        schema graph. Pattern selection is deterministic.
+
+Process docs
+------------
+docs/investigations/RLS_REWRITE_PLAN.md     full plan (audit trail)
+docs/investigations/RLS_REWRITE_PROMPT.md   prompt for the agent run
+
+================================================================
+3. Phone validation doc catch-up (D-046, D-047)
+================================================================
+
+The phone validation work shipped in commits 8937b2e, cf7d465,
+8be5484, 1ab442d, cdfa3d3 — code already in main. The DECISIONS_LOG
+entries documenting it (D-046 audit, D-047 strict-vs-search helpers)
+were drafted later and have been sitting uncommitted. They land here.
+
+================================================================
+4. ARCHITECTURE updates
+================================================================
+
+- Version 0.5.0 → 0.6.0, dated 26 April 2026.
+- §3 Tech Stack: TypeScript row corrected from "6 residual @capacitor
+  errors" (stale since the Capacitor cleanup in a97a7c9) to "0 errors".
+- §5.1 multi-clinic: legacy table removal note updated to reference
+  the RLS rewrite supersession.
+- §10.2 offline: Phase 1 marked shipped (D-050) with the per-surface
+  idempotency strategy summarized; Phase 2 listed as deferred.
+- §17 TD table: TD-008 marked Resolved 26 Apr; tracking-summary line
+  updated.
+
+================================================================
+Verification (local, before push)
+================================================================
+
+  npx tsc --noEmit                              ->  0 errors
+  npm run type-check -w @medassist/clinic       ->  0 errors
+  npm run lint                                  ->  unchanged warnings
+  Migration 069 already applied to live DB
+    (verified via Supabase MCP list_migrations + execute_sql against
+    information_schema and pg_indexes — both columns + both partial
+    unique indexes confirmed in place).
+  Migration 068 NOT applied — soak window per its header.
+  next build not run via Claude (sandbox 45s timeout vs 60-90s build);
+    Mo verifies locally.
+  Pre-push hook will run root tsc + clinic tsc as gating step (D-042
+    + D-045) — both already verified above.
+
+Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
