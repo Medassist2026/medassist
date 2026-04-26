@@ -1625,7 +1625,9 @@ export type Database = {
       patient_phone_history: {
         Row: {
           added_at: string | null
+          change_reason: string | null
           changed_at: string
+          changed_by: string | null
           id: string
           is_current: boolean | null
           patient_id: string
@@ -1637,7 +1639,9 @@ export type Database = {
         }
         Insert: {
           added_at?: string | null
+          change_reason?: string | null
           changed_at?: string
+          changed_by?: string | null
           id?: string
           is_current?: boolean | null
           patient_id: string
@@ -1649,7 +1653,9 @@ export type Database = {
         }
         Update: {
           added_at?: string | null
+          change_reason?: string | null
           changed_at?: string
+          changed_by?: string | null
           id?: string
           is_current?: boolean | null
           patient_id?: string
@@ -1660,6 +1666,13 @@ export type Database = {
           verified_at?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "patient_phone_history_changed_by_fkey"
+            columns: ["changed_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "patient_phone_history_patient_id_fkey"
             columns: ["patient_id"]
@@ -1944,9 +1957,10 @@ export type Database = {
           old_phone: string
           old_phone_otp_hash: string | null
           old_phone_verified_at: string | null
-          patient_id: string
+          patient_id: string | null
           requested_at: string
           status: string | null
+          user_id: string | null
           verification_method: string | null
         }
         Insert: {
@@ -1960,9 +1974,10 @@ export type Database = {
           old_phone: string
           old_phone_otp_hash?: string | null
           old_phone_verified_at?: string | null
-          patient_id: string
+          patient_id?: string | null
           requested_at?: string
           status?: string | null
+          user_id?: string | null
           verification_method?: string | null
         }
         Update: {
@@ -1976,9 +1991,10 @@ export type Database = {
           old_phone?: string
           old_phone_otp_hash?: string | null
           old_phone_verified_at?: string | null
-          patient_id?: string
+          patient_id?: string | null
           requested_at?: string
           status?: string | null
+          user_id?: string | null
           verification_method?: string | null
         }
         Relationships: [
@@ -1987,6 +2003,13 @@ export type Database = {
             columns: ["patient_id"]
             isOneToOne: false
             referencedRelation: "patients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "phone_change_requests_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
             referencedColumns: ["id"]
           },
         ]
@@ -2153,6 +2176,8 @@ export type Database = {
           email: string | null
           id: string
           phone: string
+          phone_verified: boolean
+          phone_verified_at: string | null
           role: string
         }
         Insert: {
@@ -2160,6 +2185,8 @@ export type Database = {
           email?: string | null
           id: string
           phone: string
+          phone_verified?: boolean
+          phone_verified_at?: string | null
           role: string
         }
         Update: {
@@ -2167,6 +2194,8 @@ export type Database = {
           email?: string | null
           id?: string
           phone?: string
+          phone_verified?: boolean
+          phone_verified_at?: string | null
           role?: string
         }
         Relationships: []
@@ -2258,6 +2287,29 @@ export type Database = {
       calculate_bmi: {
         Args: { height_cm: number; weight_kg: number }
         Returns: number
+      }
+      change_phone_commit: {
+        Args: {
+          p_request_id: string
+          p_subject_id: string
+          p_subject_kind: string
+          p_old_phone: string
+          p_new_phone: string
+          p_actor_id: string
+          p_change_reason: string
+        }
+        Returns: Json
+      }
+      change_phone_rollback: {
+        Args: {
+          p_request_id: string
+          p_subject_id: string
+          p_subject_kind: string
+          p_old_phone: string
+          p_new_phone: string
+          p_actor_id: string
+        }
+        Returns: undefined
       }
       can_doctor_view_record: {
         Args: {
