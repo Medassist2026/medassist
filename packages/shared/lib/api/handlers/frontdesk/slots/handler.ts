@@ -30,11 +30,12 @@ export async function GET(request: Request) {
       )
     }
 
-    const slots = await getAvailableSlots(doctorId, date)
+    const { slots, reason } = await getAvailableSlots(doctorId, date)
 
     return NextResponse.json({
       success: true,
-      slots
+      slots,
+      reason
     })
 
   } catch (error: any) {

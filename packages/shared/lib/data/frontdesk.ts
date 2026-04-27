@@ -136,6 +136,22 @@ export interface AvailableSlot {
   appointment_id?: string
 }
 
+/**
+ * Why getAvailableSlots returned what it did. Used by the UI to render
+ * reason-aware empty states ("doctor's hours aren't set up" vs "doctor is off
+ * today" vs "we have slots for you"). Added 2026-04-26 after frontdesk tester
+ * report "مفيش اختيارات للمواعيد".
+ */
+export type SlotReason =
+  | 'ok'                          // slots returned (some entries may be is_booked=true)
+  | 'no_availability_configured'  // doctor has zero active availability rows on any day
+  | 'doctor_off_today'            // doctor has availability but not for this day_of_week
+
+export interface AvailableSlotsResult {
+  slots: AvailableSlot[]
+  reason: SlotReason
+}
+
 // ── Gap-aware schedule types ──
 
 /** A single block on the doctor's timeline */
@@ -605,24 +621,35 @@ export async function completeQueueSession(queueId: string): Promise<SessionComp
 export async function getAvailableSlots(
   doctorId: string,
   date: string // YYYY-MM-DD
-): Promise<AvailableSlot[]> {
+): Promise<AvailableSlotsResult> {
   const supabase = await createClient()
   const admin = createAdminClient('available-slots-gap-aware')
 
   // Get day of week (0 = Sunday)
   const dayOfWeek = new Date(date).getDay()
 
-  // Get doctor's availability for this day
-  const { data: availability } = await supabase
+  // Fetch all active availability rows for this doctor (across all days) so
+  // we can distinguish "doctor has no schedule at all" from "doctor is off
+  // today" — both yielded an empty slot list before, with no signal to the
+  // UI. Keeping a single round-trip avoids a follow-up query when the
+  // day-specific lookup misses.
+  const { data: allAvailability } = await supabase
     .from('doctor_availability')
-    .select('*')
+    .select('day_of_week, start_time, end_time, slot_duration_minutes')
     .eq('doctor_id', doctorId)
-    .eq('day_of_week', dayOfWeek)
     .eq('is_active', true)
-    .single()
 
+  if (!allAvailability || allAvailability.length === 0) {
+    return { slots: [], reason: 'no_availability_configured' }
+  }
+
+  // Multiple rows per day are permitted by the schema (UNIQUE is on
+  // doctor_id+day_of_week+start_time, allowing morning/evening shifts).
+  // The original code used .single() and would have errored on >1 row;
+  // we preserve the "first match wins" behavior with .find().
+  const availability = allAvailability.find(a => a.day_of_week === dayOfWeek)
   if (!availability) {
-    return [] // Doctor not available on this day
+    return { slots: [], reason: 'doctor_off_today' }
   }
 
   // Date range in Cairo timezone (UTC+2)
@@ -698,7 +725,7 @@ export async function getAvailableSlots(
     currentTime = slotEnd
   }
 
-  return slots
+  return { slots, reason: 'ok' }
 }
 
 /**

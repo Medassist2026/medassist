@@ -107,6 +107,40 @@ export async function createDoctorAccount(params: CreateDoctorParams) {
     throw new Error(doctorError.message)
   }
 
+  // 4. Seed default doctor_availability so the booking flow works out of the
+  // box. Without this, the frontdesk's slot picker returns [] for every date
+  // until an owner manually configures hours (see investigation 2026-04-26:
+  // 96% of doctors had no availability rows → "مفيش اختيارات للمواعيد").
+  // Default: Sun–Thu 09:00–17:00, 15-min slots — matches mig 043 seed and the
+  // typical Egyptian clinic week (Fri/Sat off). Owner can edit later.
+  // ON CONFLICT DO NOTHING via individual rows + ignored unique-violation,
+  // so re-running is safe. Failure here MUST NOT fail registration — the
+  // doctor account is already created; missing availability is recoverable.
+  const defaultAvailabilityRows = [0, 1, 2, 3, 4].map(day_of_week => ({
+    doctor_id: userId,
+    day_of_week,
+    start_time: '09:00:00',
+    end_time: '17:00:00',
+    slot_duration_minutes: 15,
+    is_active: true,
+  }))
+
+  const { error: availabilityError } = await adminSupabase
+    .from('doctor_availability')
+    .upsert(defaultAvailabilityRows, {
+      onConflict: 'doctor_id,day_of_week,start_time',
+      ignoreDuplicates: true,
+    })
+
+  if (availabilityError) {
+    // Log but don't throw — the doctor exists and can manually configure
+    // availability via the dashboard. Surfacing this would block signup
+    // for a recoverable issue.
+    console.warn(
+      `[createDoctorAccount] failed to seed default availability for ${userId}: ${availabilityError.message}`
+    )
+  }
+
   return {
     userId,
     doctorUniqueId

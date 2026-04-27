@@ -21,6 +21,11 @@ interface TimeSlot {
   is_booked: boolean
 }
 
+// Mirrors SlotReason in packages/shared/lib/data/frontdesk.ts. Kept in sync
+// manually rather than imported because this is a 'use client' component and
+// the shared module pulls in server-only deps.
+type SlotReason = 'ok' | 'no_availability_configured' | 'doctor_off_today'
+
 export default function AppointmentBookingForm() {
   const router = useRouter()
 
@@ -32,6 +37,7 @@ export default function AppointmentBookingForm() {
   const [selectedDoctor, setSelectedDoctor] = useState('')
   const [selectedDate, setSelectedDate] = useState('')
   const [slots, setSlots] = useState<TimeSlot[]>([])
+  const [slotsReason, setSlotsReason] = useState<SlotReason | null>(null)
   const [selectedSlot, setSelectedSlot] = useState<TimeSlot | null>(null)
   const [appointmentType, setAppointmentType] = useState<'regular' | 'followup' | 'consultation'>('regular')
   const [notes, setNotes] = useState('')
@@ -80,9 +86,11 @@ export default function AppointmentBookingForm() {
       const response = await fetch(`/api/frontdesk/slots?doctorId=${selectedDoctor}&date=${selectedDate}`)
       const data = await response.json()
       setSlots(data.slots || [])
+      setSlotsReason((data.reason as SlotReason | undefined) ?? null)
     } catch (error) {
       console.error('Failed to load slots:', error)
       setSlots([])
+      setSlotsReason(null)
     }
   }, [selectedDate, selectedDoctor])
 
@@ -360,8 +368,28 @@ export default function AppointmentBookingForm() {
               </label>
 
               {slots.length === 0 ? (
-                <div className="text-center py-8 text-gray-500 bg-gray-50 rounded-lg">
-                  No available slots for this day
+                <div
+                  dir="rtl"
+                  className={`text-center py-8 px-4 rounded-lg ${
+                    slotsReason === 'no_availability_configured'
+                      ? 'bg-amber-50 border border-amber-200 text-amber-900'
+                      : 'bg-gray-50 text-gray-600'
+                  }`}
+                >
+                  {slotsReason === 'no_availability_configured' ? (
+                    <>
+                      <div className="font-medium mb-1">
+                        لم يتم ضبط مواعيد عمل هذا الطبيب بعد
+                      </div>
+                      <div className="text-sm">
+                        يرجى التواصل مع مدير العيادة لإعداد جدول المواعيد.
+                      </div>
+                    </>
+                  ) : slotsReason === 'doctor_off_today' ? (
+                    <div>الطبيب غير متاح في هذا اليوم. اختر يوماً آخر من فضلك.</div>
+                  ) : (
+                    <div>لا توجد مواعيد متاحة في هذا اليوم</div>
+                  )}
                 </div>
               ) : (
                 <div className="grid grid-cols-4 gap-2">
