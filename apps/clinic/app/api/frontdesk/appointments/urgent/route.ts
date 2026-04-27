@@ -27,7 +27,7 @@ export const dynamic = 'force-dynamic'
 import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
 import { createClient } from '@shared/lib/supabase/server'
 import { createAdminClient } from '@shared/lib/supabase/admin'
-import { ensureDoctorInFrontdeskClinic, getUserClinicId } from '@shared/lib/data/frontdesk-scope'
+import { ensureDoctorInFrontdeskClinic, getFrontdeskClinicId } from '@shared/lib/data/frontdesk-scope'
 import { NextResponse } from 'next/server'
 
 export async function POST(request: Request) {
@@ -65,7 +65,17 @@ export async function POST(request: Request) {
       )
     }
 
-    const clinicId = await getUserClinicId(user.id)
+    // ── Server-resolved tenant scope (D-041) ──
+    // appointments.clinic_id NOT NULL since mig 053; check_in_queue.clinic_id
+    // NOT NULL since mig 051. Both inserts below depend on this. The pre-fix
+    // conditional spread silently produced 500s when clinicId was null.
+    const clinicId = await getFrontdeskClinicId(supabase as any, user.id)
+    if (!clinicId) {
+      return NextResponse.json(
+        { error: 'Clinic context not found' },
+        { status: 403 }
+      )
+    }
 
     // ── 1. Create the urgent appointment ─────────────────────────────────────
     const { data: appointment, error: aptErr } = await admin
@@ -73,13 +83,13 @@ export async function POST(request: Request) {
       .insert({
         patient_id:       patientId,
         doctor_id:        doctorId,
+        clinic_id:        clinicId,   // required — mig 053
         start_time:       startTime,
         duration_minutes: durationMinutes,
         appointment_type: 'urgent',
         notes:            notes ?? null,
         status:           'scheduled',
         created_by_role:  'frontdesk',
-        ...(clinicId ? { clinic_id: clinicId } : {}),
       })
       .select('id, start_time, duration_minutes, appointment_type')
       .single()
@@ -141,6 +151,7 @@ export async function POST(request: Request) {
         .insert({
           patient_id:       patientId,
           doctor_id:        doctorId,
+          clinic_id:        clinicId,   // required — mig 051
           appointment_id:   appointment.id,
           queue_number:     urgentPosition,
           queue_type:       'appointment',

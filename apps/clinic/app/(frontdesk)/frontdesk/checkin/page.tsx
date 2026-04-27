@@ -203,8 +203,19 @@ export default function CheckInPage() {
 
       const doc = doctors.find(d => d.id === selectedDoctor)
       const checkinDurationMs = Date.now() - pageStartTime
+      // Response shape: handler returns `{success, queueItem: {queue_number, ...}}`
+      // (and the dedupe branch returns the same with `deduped: true`).
+      // Offline path above sets `data = {queueNumber: '—', offline: true}`,
+      // so we honor that fallback after the real shape. Pre-fix this only
+      // read top-level `queueNumber`/`queue_number`, neither of which the
+      // handler emits — the success screen always rendered 0.
+      const resolvedQueueNumber =
+        data.queueItem?.queue_number
+        ?? data.queueNumber
+        ?? data.queue_number
+        ?? 0
       setSuccess({
-        queueNumber: data.queueNumber || data.queue_number || 0,
+        queueNumber: resolvedQueueNumber,
         patientName: selectedPatient.full_name || 'مريض',
         doctorName: doc?.full_name || 'طبيب',
         paymentRecorded,

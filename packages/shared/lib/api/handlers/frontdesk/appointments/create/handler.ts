@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic'
 import { createAppointment } from '@shared/lib/data/frontdesk'
 import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
 import { createClient } from '@shared/lib/supabase/server'
-import { ensureDoctorInFrontdeskClinic, getUserClinicId } from '@shared/lib/data/frontdesk-scope'
+import { ensureDoctorInFrontdeskClinic, getFrontdeskClinicId } from '@shared/lib/data/frontdesk-scope'
 import { validateClinicHours } from '@shared/lib/utils/clinic-hours'
 import { sendReminder } from '@shared/lib/sms/reminder-service'
 import { NextRequest, NextResponse } from 'next/server'
@@ -97,18 +97,30 @@ export async function POST(request: Request) {
       }
     }
 
-    // ── Resolve frontdesk's clinic for appointment scoping ──
-    const clinicId = await getUserClinicId(user.id)
+    // ── Server-resolved tenant scope (D-041) ──
+    // appointments.clinic_id has been NOT NULL since mig 053 — required for
+    // the INSERT. getFrontdeskClinicId is consistent with the auth gate
+    // above (FRONT_DESK/ASSISTANT memberships only). Pre-fix this used
+    // getUserClinicId, which on its own was fine for current testers but
+    // diverged from the architecture pattern; sticking with
+    // getFrontdeskClinicId per ARCHITECTURE.md D-041.
+    const clinicId = await getFrontdeskClinicId(supabase as any, user.id)
+    if (!clinicId) {
+      return NextResponse.json(
+        { error: 'Clinic context not found' },
+        { status: 403 }
+      )
+    }
 
     // ── Create appointment ──
     const appointment = await createAppointment({
       doctorId,
       patientId,
+      clinicId,
       startTime,
       durationMinutes,
       appointmentType: normalizedType,
       notes,
-      clinicId
     })
 
     // ── Post-insert verification (concurrent protection) ──

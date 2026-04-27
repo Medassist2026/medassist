@@ -4,7 +4,7 @@ import { checkInPatient } from '@shared/lib/data/frontdesk'
 import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
 import { createClient } from '@shared/lib/supabase/server'
 import { createAdminClient } from '@shared/lib/supabase/admin'
-import { ensureDoctorInFrontdeskClinic, getUserClinicId } from '@shared/lib/data/frontdesk-scope'
+import { ensureDoctorInFrontdeskClinic, getFrontdeskClinicId } from '@shared/lib/data/frontdesk-scope'
 import { logAuditEvent } from '@shared/lib/data/audit'
 import { cairoTodayStart } from '@shared/lib/date/cairo-date'
 import { sendReminder } from '@shared/lib/sms/reminder-service'
@@ -29,6 +29,21 @@ export async function POST(request: Request) {
     if (!doctorInScope) {
       return NextResponse.json(
         { error: 'Doctor is outside your clinic scope' },
+        { status: 403 }
+      )
+    }
+
+    // ── Server-resolved tenant scope (D-041) ──
+    // Required for the INSERT (check_in_queue.clinic_id is NOT NULL since
+    // mig 051) and reused for the audit log below. Uses getFrontdeskClinicId
+    // (FRONT_DESK/ASSISTANT-only) to stay consistent with the auth gate
+    // above; if ensureDoctorInFrontdeskClinic returned true this should
+    // never be null, but we guard explicitly to convert the would-be DB
+    // 500 into a clean 403 when it does.
+    const clinicId = await getFrontdeskClinicId(supabase as any, user.id)
+    if (!clinicId) {
+      return NextResponse.json(
+        { error: 'Clinic context not found' },
         { status: 403 }
       )
     }
@@ -68,6 +83,7 @@ export async function POST(request: Request) {
     const queueItem = await checkInPatient({
       patientId,
       doctorId,
+      clinicId,
       appointmentId,
       queueType
     })
@@ -99,10 +115,9 @@ export async function POST(request: Request) {
       }
     }
 
-    // Audit log
-    const clinicId = await getUserClinicId(user.id)
+    // Audit log — reuses the clinicId resolved above.
     logAuditEvent({
-      clinicId: clinicId || undefined,
+      clinicId,
       actorUserId: user.id,
       action: 'CREATE_PATIENT',
       entityType: 'check_in',

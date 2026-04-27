@@ -326,9 +326,22 @@ export async function getQueueByDateRange(
 export async function checkInPatient(params: {
   patientId: string
   doctorId: string
+  /**
+   * Owning clinic. REQUIRED — check_in_queue.clinic_id is NOT NULL since
+   * mig 051. Handler must resolve via getFrontdeskClinicId() before calling.
+   * Mirrors createPayment's contract (mig 047). Pre-fix shape silently
+   * dropped clinic_id from the INSERT and every save 500'd at the DB.
+   */
+  clinicId: string
   appointmentId?: string
   queueType: 'appointment' | 'walkin' | 'emergency'
 }): Promise<CheckInQueueItem> {
+  // Defense-in-depth: TS already requires clinicId, runtime guard catches
+  // `as any` callers and stale JS bundles.
+  if (!params.clinicId) {
+    throw new Error('checkInPatient: clinicId is required (no orphan queue rows)')
+  }
+
   const supabase = await createClient()
   const admin = createAdminClient('window-aware-checkin')
 
@@ -409,6 +422,7 @@ export async function checkInPatient(params: {
     .insert({
       patient_id: params.patientId,
       doctor_id: params.doctorId,
+      clinic_id: params.clinicId,   // required — see params doc + mig 051
       appointment_id: effectiveAppointmentId,
       queue_number: queueNumber,
       queue_type: effectiveQueueType,
@@ -962,17 +976,28 @@ export async function assignWalkinSlot(
 }
 
 /**
- * Create new appointment
+ * Create new appointment.
+ *
+ * `clinicId` is REQUIRED — appointments.clinic_id has been NOT NULL since
+ * mig 053. Handlers must resolve via getFrontdeskClinicId() before calling.
+ * Mirrors createPayment (mig 047) and checkInPatient (mig 051). The
+ * pre-fix `...(params.clinicId && { clinic_id })` conditional spread silently
+ * dropped clinic_id whenever the handler couldn't resolve a clinic and
+ * every such insert 500'd at the DB.
  */
 export async function createAppointment(params: {
   doctorId: string
   patientId: string
+  clinicId: string
   startTime: string
   durationMinutes: number
   appointmentType?: string
   notes?: string
-  clinicId?: string | null
 }): Promise<any> {
+  if (!params.clinicId) {
+    throw new Error('createAppointment: clinicId is required (no orphan appointments)')
+  }
+
   const supabase = await createClient()
 
   const { data, error } = await supabase
@@ -980,19 +1005,19 @@ export async function createAppointment(params: {
     .insert({
       doctor_id: params.doctorId,
       patient_id: params.patientId,
+      clinic_id: params.clinicId,   // required — see fn doc + mig 053
       start_time: params.startTime,
       duration_minutes: params.durationMinutes,
       appointment_type: params.appointmentType || 'regular',
       notes: params.notes,
       status: 'scheduled',
       created_by_role: 'frontdesk',
-      ...(params.clinicId && { clinic_id: params.clinicId })
     })
     .select()
     .single()
-  
+
   if (error) throw new Error(error.message)
-  
+
   return data
 }
 
