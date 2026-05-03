@@ -18,7 +18,7 @@
 | `lab-results` | 5 | **MIGRATE-TO-USER** | Has user context; will use RLS under Prompt 6 |
 | `memberships` | 5 | **MIGRATE-TO-USER** | Has user context; will use RLS under Prompt 6 |
 | `(default)` | 4 | **INVESTIGATE** | Ambiguous scope; per-callsite review required |
-| `patient-dedup` | 4 | **SECURITY-DEFINER** | Should move to SECURITY DEFINER RPC, not admin client |
+| `patient-dedup` | 4 | **MIXED** | 1 mis-tag → MIGRATE-TO-USER (`clinical/notes/handler.ts:28` is TD-008 offline-replay idempotency, not dedup); 3 → KEEP-ADMIN with module-level re-architecture flag (admin-only cross-clinic PII traversal of legacy `patients`; should be re-architected against `global_patients`+PCRs after Prompt 6.5). See per-callsite rows + session-16 ruling addendum. |
 | `clinic-staff` | 3 | **MIGRATE-TO-USER** | Has user context; will use RLS under Prompt 6 |
 | `patient-onboarding` | 3 | **KEEP-ADMIN** | Pre-auth lookup or invite code |
 | `phone-change-fallback` | 3 | **KEEP-ADMIN** | Mid-flow phone change (no session for new number) |
@@ -26,10 +26,10 @@
 | `clinic-registration` | 2 | **KEEP-ADMIN** | Pre-auth lookup or invite code |
 | `doctor-appointments` | 2 | **MIGRATE-TO-USER** | Has user context; will use RLS under Prompt 6 |
 | `doctor-settings` | 2 | **MIGRATE-TO-USER** | Has user context; will use RLS under Prompt 6 |
-| `global-patients-lookup` | 2 | **SECURITY-DEFINER** | Should move to SECURITY DEFINER RPC, not admin client |
+| `global-patients-lookup` | 2 | **MIXED** | `findGlobalPatientByPhone` (line 75) → KEEP-ADMIN at the createAdminClient site; the identity-resolution caller path moves to a new SECURITY DEFINER RPC `clinic_resolve_global_patient_by_phone(p_phone, p_clinic_id)` (mig 100, session 17). `findGlobalPatientById` (line 103) → KEEP-ADMIN-TRANSITIONAL; only caller is `resolveIdentityForLegacyPatient` which dies in Prompt 6.5. |
 | `notifications` | 2 | **MIGRATE-TO-USER** | Has user context; will use RLS under Prompt 6 |
 | `patient-appointments` | 2 | **MIGRATE-TO-USER** | Has user context; will use RLS under Prompt 6 |
-| `patient-code` | 2 | **SECURITY-DEFINER** | Should move to SECURITY DEFINER RPC, not admin client |
+| `patient-code` | 2 | **SECURITY-DEFINER (Option 3 — Full RPC)** | P1 finding (session 16): `patient_code` was built before the 2026-04-26 locked decisions and contradicts them on RNG (Math.random vs gen_random_bytes), TTL (indefinite vs 90d), rate limit (none vs 1/60s), audit (none vs audit-everything-sensitive), storage (plaintext vs bcrypt). Mo's Option 3 ruling: 2 SECURITY DEFINER RPCs `patient_get_my_code()` + `patient_regenerate_my_code()` (mig 099, session 17) + schema mig adding `global_patients.patient_code_hash/_generated_at/_expires_at` (mig 098). Consumer-side dual-hash (SHA-256 + bcrypt) at `lib/data/patients.ts:376` for transition window. |
 | `patient-sharing` | 2 | **MIGRATE-TO-USER** | Has user context; will use RLS under Prompt 6 |
 | `phone-change-verify` | 2 | **KEEP-ADMIN** | Mid-flow phone change (no session for new number) |
 | `phone-correction` | 2 | **INVESTIGATE** | Ambiguous scope; per-callsite review required |
@@ -42,11 +42,18 @@
 
 ## Verdict counts
 
-- **KEEP-ADMIN:** 60 callsites
-- **MIGRATE-TO-USER:** 119 callsites
-- **SECURITY-DEFINER:** 8 callsites (should move to RPC)
-- **INVESTIGATE:** 23 callsites (ambiguous scope)
-- **Total:** 210
+(Pre-session-16: KEEP-ADMIN 60 / MIGRATE-TO-USER 119 / SECURITY-DEFINER 8 / INVESTIGATE 23 / Total 210.)
+
+Post-session-16 reclassification of the 8 original SECURITY-DEFINER candidates (per per-callsite re-read; see session-16 ruling addendum in `audits/patient-identity-build-06-progress.md` and Empirical Lesson #6 in `audits/EXECUTION_PROMPTS.md`):
+
+- **KEEP-ADMIN:** 60 + 4 = **64 callsites** (4 added: 3 patient-dedup admin module + 1 `global-patients.ts:75` admin caller)
+- **KEEP-ADMIN-TRANSITIONAL:** **1 callsite** (new bucket: `global-patients.ts:103`, dies in Prompt 6.5)
+- **MIGRATE-TO-USER:** 119 + 1 = **120 callsites** (1 added: `clinical/notes/handler.ts:28` mis-tag)
+- **SECURITY-DEFINER:** 8 - 7 + (the 2 `my-code` Option 3 RPCs are still SECURITY-DEFINER + 1 new RPC for `clinic_resolve_global_patient_by_phone`) = **3 callsites mapped to 3 SECURITY DEFINER RPCs** (mig 099 patient_get_my_code, mig 099 patient_regenerate_my_code, mig 100 clinic_resolve_global_patient_by_phone)
+- **INVESTIGATE:** **23 callsites** (unchanged — session-18 work)
+- **Total:** **211** (one row added for the new clinic-resolve RPC's effective callsite, since the existing line-75 createAdminClient remains separately tracked under KEEP-ADMIN)
+
+Net effect of session-16 re-read: 7 reclassifications surfaced, 1 P1 security finding ruled (Option 3 Full RPC for patient_code), 0 RPCs designed under the original "8 SECURITY-DEFINER candidates" framing survive — only the clinic-resolve and patient_code RPCs are honest, and `my-code` was upgraded from "wrap with RPC" to "rebuild against locked decisions." Cost of the re-read: ~60 min.
 
 ## Per-callsite triage (all callsites)
 
@@ -113,8 +120,8 @@
 | `lib/data/frontdesk.ts` | 760 | `gap-aware-schedule` | **MIGRATE-TO-USER** | data-layer |
 | `lib/data/appointments.ts` | 78 | `get-appointment` | **MIGRATE-TO-USER** | data-layer |
 | `lib/data/appointments.ts` | 31 | `get-today-appointments` | **MIGRATE-TO-USER** | data-layer |
-| `lib/data/global-patients.ts` | 75 | `global-patients-lookup` | **SECURITY-DEFINER** | data-layer |
-| `lib/data/global-patients.ts` | 103 | `global-patients-lookup` | **SECURITY-DEFINER** | data-layer |
+| `lib/data/global-patients.ts` | 75 | `global-patients-lookup` | **KEEP-ADMIN** *(was SECURITY-DEFINER)* | data-layer | Session-16 re-read: function `findGlobalPatientByPhone` has TWO callers — (a) admin handler `GET /api/admin/global-patients/lookup` whose own header explicitly says exposing per-clinic = privacy regression (KEEP-ADMIN at this createAdminClient site is correct); (b) `lib/data/identity-resolution.ts:resolveOrCreateGlobalIdentity` called from frontdesk check-in. The (b) path is re-pointed to a new SECURITY DEFINER RPC `clinic_resolve_global_patient_by_phone(p_phone, p_clinic_id)` shipped in mig 100 (session 17). The createAdminClient at line 75 stays for (a). |
+| `lib/data/global-patients.ts` | 103 | `global-patients-lookup` | **KEEP-ADMIN-TRANSITIONAL** *(was SECURITY-DEFINER)* | data-layer | Session-16 re-read: only caller is `lib/data/identity-resolution.ts:resolveIdentityForLegacyPatient` — itself a transitional helper for dereferencing legacy `patients.id` → `global_patient_id` that becomes dead code when the legacy `patients` table drops in Prompt 6.5. No RPC; delete the function call alongside the legacy `patients` drop. |
 | `lib/data/identity-resolution.ts` | 108 | `identity-resolution-create` | **INVESTIGATE** | data-layer |
 | `lib/data/identity-resolution.ts` | 199 | `identity-resolution-legacy` | **INVESTIGATE** | data-layer |
 | `lib/utils/invite-code.ts` | 24 | `invite-code-gen` | **KEEP-ADMIN** | data-layer |
@@ -147,14 +154,14 @@
 | `lib/data/patient-clinic-records.ts` | 183 | `patient-clinic-records-list-clinic` | **MIGRATE-TO-USER** | data-layer |
 | `lib/data/patient-clinic-records.ts` | 154 | `patient-clinic-records-list-global` | **MIGRATE-TO-USER** | data-layer |
 | `lib/data/patient-clinic-records.ts` | 100 | `patient-clinic-records-upsert` | **MIGRATE-TO-USER** | data-layer |
-| `lib/api/handlers/patient/my-code/handler.ts` | 13 | `patient-code` | **SECURITY-DEFINER** | handler |
-| `lib/api/handlers/patient/my-code/handler.ts` | 41 | `patient-code` | **SECURITY-DEFINER** | handler |
+| `lib/api/handlers/patient/my-code/handler.ts` | 13 | `patient-code` | **SECURITY-DEFINER (Option 3 — Full RPC)** | handler | Session-16 P1 finding: built pre-2026-04-26 locked decisions; contradicts them on 5 axes (Math.random / no TTL / no rate limit / no audit / plaintext). Mo's Option 3 ruling: replace handler-side admin-client read with SECURITY DEFINER RPC `patient_get_my_code()` (mig 099). Returns plaintext one-time on regenerate; for backward-compat, returns existing plaintext from `patients.patient_code` synthesized as `generated_at = NULL, expires_at = NULL` for patients who haven't regenerated yet. |
+| `lib/api/handlers/patient/my-code/handler.ts` | 41 | `patient-code` | **SECURITY-DEFINER (Option 3 — Full RPC)** | handler | Session-16 P1 finding (same as line 13): replace handler-side admin-client write with SECURITY DEFINER RPC `patient_regenerate_my_code()` (mig 099). Atomic transaction: rate-limit CHECK (1/60s/patient, raises `RATE_LIMIT_EXCEEDED`) + UPDATE bcrypt hash + audit emission. Returns plaintext one-time. Schema home: `global_patients.patient_code_hash/_generated_at/_expires_at` (mig 098). |
 | `lib/api/handlers/patient/messages/conversations/handler.ts` | 12 | `patient-conversations-with-doctors` | **MIGRATE-TO-USER** | handler |
 | `lib/api/handlers/doctor/patients/create/handler.ts` | 81 | `patient-create-clinic` | **MIGRATE-TO-USER** | handler |
-| `lib/api/handlers/clinical/notes/handler.ts` | 28 | `patient-dedup` | **SECURITY-DEFINER** | handler |
-| `lib/data/patient-dedup.ts` | 91 | `patient-dedup` | **SECURITY-DEFINER** | data-layer |
-| `lib/data/patient-dedup.ts` | 217 | `patient-dedup` | **SECURITY-DEFINER** | data-layer |
-| `lib/data/patient-dedup.ts` | 303 | `patient-dedup` | **SECURITY-DEFINER** | data-layer |
+| `lib/api/handlers/clinical/notes/handler.ts` | 28 | `patient-dedup` *(scope arg, not operational)* | **MIGRATE-TO-USER** *(was SECURITY-DEFINER)* | handler | Session-16 re-read: the `'patient-dedup'` string is the scope arg to `createAdminClient(...)`, but the operation at line 28-34 is the **TD-008 offline-replay idempotency lookup** — reads `clinical_notes` by `(client_idempotency_key, doctor_id)` to dedup offline-replay attempts, with no patient-deduplication semantics. Doctor-self read on `clinical_notes` is already permitted by mig 094's policies (`can_view_patient_data_at_clinic` covers doctor reading their own notes). Switch to `createClient()`; the existing `.eq('doctor_id', user.id)` constraint matches the RLS policy. |
+| `lib/data/patient-dedup.ts` | 91 | `patient-dedup` | **KEEP-ADMIN** *(was SECURITY-DEFINER)* + **module-level re-architecture flag** | data-layer | Session-16 re-read: `findPotentialDuplicates`, used **only** by `lib/api/handlers/admin/patient-dedup/handler.ts` (admin-gated route). Function loads every active patient in the entire system across all clinics and runs Levenshtein/fuzzy matching on names/ages/sexes — i.e. cross-clinic PII traversal of legacy `patients`. Wrapping in SECURITY DEFINER RPC would smooth over a deeper architectural problem (cross-clinic name/phone matching shouldn't happen at all under the global-identity model) and let it survive Prompt 6.5. **Module-level re-architecture flag (Phase F task #21):** redesign against `global_patients` + `patient_clinic_records` after Prompt 6.5 drops legacy `patients`. Not in session-17 or session-18 scope. |
+| `lib/data/patient-dedup.ts` | 217 | `patient-dedup` | **KEEP-ADMIN** *(was SECURITY-DEFINER)* + **module-level re-architecture flag** | data-layer | Session-16 re-read: `mergePatients`, same admin-only module. Performs cross-row UPDATE on `clinical_notes`, `appointments`, `prescription_items` to repoint to a kept patient — could move clinical data across clinic boundaries if the two patients live at different clinics. This is identity-merge logic that should ideally be `global_patients.merged_into` driven, not legacy-`patients.account_status='merged'` driven. Same Phase F task #21 re-architecture flag as line 91. |
+| `lib/data/patient-dedup.ts` | 303 | `patient-dedup` | **KEEP-ADMIN** *(was SECURITY-DEFINER)* + **module-level re-architecture flag** | data-layer | Session-16 re-read: `searchPatientsForDedup`, same admin-only module, same cross-clinic search problem. Same Phase F task #21 re-architecture flag. |
 | `lib/api/handlers/doctor/patients/[id]/handler.ts` | 14 | `patient-details` | **MIGRATE-TO-USER** | handler |
 | `lib/data/messaging-consent.ts` | 197 | `patient-messaging-conversation` | **MIGRATE-TO-USER** | data-layer |
 | `lib/data/messaging-consent.ts` | 158 | `patient-messaging-eligibility` | **MIGRATE-TO-USER** | data-layer |
@@ -269,18 +276,22 @@
 - **apps/patient** (1 callsites): patient-privacy-page-server
 - **packages/** (103 callsites): assign-walkin-slot, available-slots-gap-aware, clinic-context, clinic-invite, clinic-join, clinic-settings-patch, clinic-staff, clinical-notes-clinic, complete-queue-session, conversations-with-patient-names, create-shares-for-grantors, doctor-appointments, doctor-conversation-create, doctor-income-stats, doctor-settings, doctor-stats-events, doctor-stats-notes, effective-messaging-consent-list, effective-messaging-consent-read, gap-aware-schedule, get-appointment, get-today-appointments, lab-results, memberships, messaging-consent-check, messaging-reconsent-decision, patient-appointments, patient-clinic-records-find, patient-clinic-records-list-clinic, patient-clinic-records-list-global, patient-clinic-records-upsert, patient-conversations-with-doctors, patient-create-clinic, patient-details, patient-messaging-conversation, patient-messaging-eligibility, patient-prescriptions, patient-privacy-checks, patient-reconsent-list, patient-reconsent-record, patient-search-access, patient-shares-auto-renew, patient-shares-create, patient-shares-extend, patient-shares-list-grantee, patient-shares-list-patient, patient-shares-mark-notified, patient-shares-read, patient-shares-revoke, patient-sharing, patient-sharing-extend-authz, patient-sharing-revoke-authz, patient-visits, prescription-sync, public-fee, queue-with-patient-names, session-appointment-completion, session-queue-completion, visibility
 
-## SECURITY-DEFINER candidates (Phase B follow-up)
+## SECURITY-DEFINER candidates (post-session-16 re-read)
 
-These scopes represent operations that should move into stored functions with SECURITY DEFINER, 
-so the callsite can use `createClient()` (user context) instead of `createAdminClient()`. 
-The RPC itself would perform the bypass transparently.
+**Original framing (Phase A.2):** 8 callsites tagged SECURITY-DEFINER, expected to all become RPCs.
 
-- **global-patients-lookup** (2 callsites)
-  - Example: `lib/data/global-patients.ts:75`
-- **patient-code** (2 callsites)
-  - Example: `lib/api/handlers/patient/my-code/handler.ts:13`
-- **patient-dedup** (4 callsites)
-  - Example: `lib/api/handlers/clinical/notes/handler.ts:28`
+**Post-re-read framing (session 16, 2026-05-02):** of the 8 original candidates:
+- **3 → SECURITY-DEFINER** (the only honest RPCs):
+  - `patient_get_my_code()` — covers `my-code/handler.ts:13` (GET); SECURITY DEFINER, claimed-patient gate, no audit, idempotent (mig 099 session 17)
+  - `patient_regenerate_my_code()` — covers `my-code/handler.ts:41` (POST); SECURITY DEFINER, rate-limited 1/60s/patient, gen_random_bytes + bcrypt, plaintext returned one-time, audit emitted (mig 099 session 17)
+  - `clinic_resolve_global_patient_by_phone(p_phone, p_clinic_id)` — covers identity-resolution caller of `findGlobalPatientByPhone:75`; SECURITY DEFINER, member-gate raises EXCEPTION on non-member, audit per call, idempotent (mig 100 session 17)
+- **4 → KEEP-ADMIN** (admin-endpoint-only; RPC wrap would smooth over architectural problems):
+  - `findGlobalPatientByPhone:75` admin caller (admin handler header explicitly says exposing this lookup per-clinic = privacy regression)
+  - `patient-dedup.ts:91/217/303` (admin-only module performing cross-clinic PII traversal of legacy `patients`; flag for module-level re-architecture against `global_patients` post-Prompt-6.5 — Phase F task #21)
+- **1 → KEEP-ADMIN-TRANSITIONAL** (`findGlobalPatientById:103`; only caller dies in Prompt 6.5)
+- **1 → MIGRATE-TO-USER** (`clinical/notes/handler.ts:28`; `'patient-dedup'` is the scope arg string, not the operation — actually TD-008 offline-replay idempotency lookup; doctor-self read already permitted by mig 094 policies)
+
+Cost of the re-read: ~60 min (session 16). Cost avoided: 7 wrong commitments + 1 P1 security finding shipping unfixed. See Empirical Lesson #6 in `audits/EXECUTION_PROMPTS.md`.
 
 ## Key findings
 
@@ -291,7 +302,7 @@ The RPC itself would perform the bypass transparently.
 
 2. **MIGRATE concentration:** 119 callsites (57% of total) depend on RLS policies. Largest scopes: patient-privacy-checks (14), clinic-context (7), visibility (7), prescription-sync (6), lab-results (5).
 
-3. **SECURITY-DEFINER pattern:** 8 callsites (patient-dedup, global-patients-lookup, patient-code) are lookups that should be public RPCs, not admin clients at the callsite. Blocks cross-doctor deduping, pre-auth phone validation, and code verification workflows.
+3. **SECURITY-DEFINER pattern (originally 8 candidates; post-session-16 re-read 3 honest RPCs):** the original Phase-A heuristic tagged 8 callsites SECURITY-DEFINER on the basis that they were "lookups that should be public RPCs." Session-16 per-callsite re-read found this conflated string-similar tags (the `'patient-dedup'` scope arg) with operational similarity AND obscured pre-locked-decision security debt (the `patient_code` callsite was built before the 2026-04-26 locked decisions, contradicting them on RNG/TTL/rate-limit/audit/storage). Final post-re-read distribution: 3 honest RPCs (mig 099/100), 4 KEEP-ADMIN (3 with module-level re-architecture flag for Prompt 6.5+), 1 KEEP-ADMIN-TRANSITIONAL, 1 MIGRATE-TO-USER. See `## SECURITY-DEFINER candidates (post-session-16 re-read)` above.
 
 4. **Phone-change flow:** 11 callsites across request/verify/commit/cancel/owner-approve/owner-reject. All correctly tagged KEEP-ADMIN because the flow operates without a valid session for the new phone.
 
@@ -304,6 +315,34 @@ The RPC itself would perform the bypass transparently.
 - **visibility** (7 callsites) — dependency for doctor/clinic patient-data reads
 - **prescription-sync** (6 callsites) — dependency for doctor/clinic patient-data reads
 - **lab-results** (5 callsites) — dependency for doctor/clinic patient-data reads
+
+---
+
+## Session-17 atomic edit (2026-05-02)
+
+This file was edited atomically as Step 2 of session 17 to apply the 7 reclassifications confirmed in the session-16 ruling addendum (`audits/patient-identity-build-06-progress.md`). The edits affect:
+
+| Row | Old verdict | New verdict |
+|---|---|---|
+| `clinical/notes/handler.ts:28` | SECURITY-DEFINER | MIGRATE-TO-USER |
+| `patient-dedup.ts:91` | SECURITY-DEFINER | KEEP-ADMIN + module-level re-architecture flag (Phase F task #21) |
+| `patient-dedup.ts:217` | SECURITY-DEFINER | KEEP-ADMIN + module-level re-architecture flag (Phase F task #21) |
+| `patient-dedup.ts:303` | SECURITY-DEFINER | KEEP-ADMIN + module-level re-architecture flag (Phase F task #21) |
+| `global-patients.ts:75` | SECURITY-DEFINER | KEEP-ADMIN (createAdminClient stays for admin handler caller; identity-resolution caller re-points to new RPC `clinic_resolve_global_patient_by_phone` mig 100) |
+| `global-patients.ts:103` | SECURITY-DEFINER | KEEP-ADMIN-TRANSITIONAL (caller dies in Prompt 6.5; no RPC) |
+| `my-code/handler.ts:13` | SECURITY-DEFINER (RPC wrap) | SECURITY-DEFINER (Option 3 — Full RPC `patient_get_my_code()` mig 099) |
+| `my-code/handler.ts:41` | SECURITY-DEFINER (RPC wrap) | SECURITY-DEFINER (Option 3 — Full RPC `patient_regenerate_my_code()` mig 099) |
+
+Source of truth: this file. The session-17 commit message references the session-16 ruling addendum for the rationale.
+
+Net counts changed (see updated `## Verdict counts` section above). The 7 reclassifications are the ones that change verdict; the 2 `my-code` rows stay tagged SECURITY-DEFINER but are annotated with Mo's Option 3 ruling (Full RPC build with the locked-decision conformance, vs. the earlier "wrap admin client in RPC" framing).
+
+Phase F task IDs created in session 16:
+- **#20** (session 17): my-code Option 3 ruled — Full RPC build (covered by mig 098 schema + mig 099 RPCs + step 6 consumer dual-hash + step 7 backfill).
+- **#21** (Prompt 6.5+): patient-dedup module re-architecture against global-identity model.
+- **#22** (Prompt 6.5): `resolveIdentityForLegacyPatient` cleanup.
+- **#23** (session 17): bcrypt-comparison migration for `patients.ts:376` consumer side.
+- **#24** (session 17): schema migration for `global_patients.patient_code_hash` columns.
 
 ---
 *End of Phase A.2 triage report.*
