@@ -1,0 +1,247 @@
+-- ============================================================
+-- Phase D — RLS test matrix
+-- Date: 2026-04-30 (scaffolded session 4; populated in subsequent sessions)
+--
+-- Run THREE times per Mo's § D3:
+--   Run #1 — BEFORE any v2 policies (baseline regression check)
+--   Run #2 — AFTER mig 092-097 applied (PERMISSIVE-OR coexistence)
+--   Run #3 — AFTER mig 101 (legacy policies dropped)
+--
+-- Single FAIL at run #3 = STOP, do NOT ship mig 101.
+-- (Slot 098 was originally assigned to the legacy-drop in the Prompt 6
+-- spec; renumbered to 101 per session-16 ruling 2026-05-02 because
+-- Phase F added 098/099/100 for patient_code work + clinic-resolve RPC.)
+--
+-- Per Mo's session-2 close: Phase D matrix is the FIRST real RLS
+-- test surface in the codebase (zero pre-existing coverage per A.4).
+-- Treat the "8+ scenarios per patient-joined table" floor as a HARD
+-- floor.  Skipping any scenario means shipping with that scenario
+-- untested.
+--
+-- Per Mo's session-3 close: clinical-data tables MUST include
+-- scenarios 9-10 (cross-clinic READ ≠ WRITE asymmetry).  These are
+-- the boundary tests for the directional-consent model.
+--
+-- ============================================================
+--
+-- TEST HARNESS — Option A confirmed working (Phase D step 2, 2026-04-30)
+-- but with one critical pattern requirement:
+--
+-- ⚠️  Use the SET LOCAL ROLE keyword as a SEPARATE STATEMENT before the
+--     SELECT — do NOT inline set_config('role', 'authenticated', TRUE)
+--     into a CTE / WITH clause.  Why: the Supabase MCP session runs as
+--     `postgres` (which has BYPASSRLS=TRUE).  When set_config is in a
+--     WITH clause, Postgres has already built the query plan with the
+--     session_user's BYPASSRLS attribute in effect — the role switch
+--     is cosmetic and RLS is bypassed.  Empirically verified on
+--     staging: inline set_config returns 4 rows (RLS bypassed) for the
+--     same probe that returns 3 rows (RLS active) when SET LOCAL ROLE
+--     is a separate statement before the SELECT.
+--
+-- CORRECT PATTERN (use this in every scenario block):
+--
+--   SET LOCAL ROLE 'authenticated';
+--   SET LOCAL "request.jwt.claims" TO '{"sub":"<user_id>","role":"authenticated"}';
+--   <SELECT or INSERT or UPDATE under spoofed user>
+--
+-- Each execute_sql call wraps the statements in one transaction, so
+-- SET LOCAL persists for the whole call.  The next call resets to the
+-- session role (postgres BYPASSRLS) automatically.
+--
+-- INCORRECT PATTERN (cosmetic role switch, RLS bypassed):
+--
+--   WITH probe AS (SELECT set_config('role','authenticated',TRUE) ...)
+--   SELECT ... FROM probe, public.<table> WHERE ...;
+--
+-- This pattern was caught BEFORE matrix authoring because Phase D
+-- step 2 was a prototype probe.  Don't use it.
+--
+-- Option B fallback (if Option A breaks for INSERT/UPDATE scenarios
+-- where SET LOCAL ROLE doesn't fully apply): wrap each test in a
+-- SECURITY DEFINER test_as_user(p_user_id, p_query) helper.  Not
+-- needed for SELECT scenarios per the verification above.
+--
+-- Each test row reports PASS / FAIL plus the actual row count returned.
+-- A test PASSES iff the returned row count matches expected_count.
+--
+-- ============================================================
+
+-- ────────────────────────────────────────────────────────────────────
+-- 0. Test harness — utility functions
+-- ────────────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS public._rls_test_results (
+  run_no            INTEGER NOT NULL,
+  scenario          TEXT NOT NULL,
+  table_name        TEXT NOT NULL,
+  description       TEXT NOT NULL,
+  expected_outcome  TEXT NOT NULL CHECK (expected_outcome IN ('SUCCESS','FAIL')),
+  actual_outcome    TEXT,
+  actual_rows       INTEGER,
+  notes             TEXT,
+  ran_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Reset per-run state (truncate before each of runs #1, #2, #3)
+-- TRUNCATE public._rls_test_results;
+
+
+-- ────────────────────────────────────────────────────────────────────
+-- 1. Scenario catalogue (10 mandatory scenarios per patient-joined table)
+-- ────────────────────────────────────────────────────────────────────
+--
+-- Per Mo's § D1 (8 mandatory) + § D3 close-out (scenarios 9-10 added
+-- for clinical-data tables specifically — the cross-clinic READ ≠
+-- WRITE asymmetry):
+--
+-- Scenario 1  — Self-clinic SELECT positive
+--   Doctor in clinic A reads patient record at clinic A → MUST succeed
+--
+-- Scenario 2  — Self-clinic SELECT negative
+--   Doctor in clinic A reads patient record at clinic B (no share) → MUST fail (0 rows)
+--
+-- Scenario 3  — Cross-clinic SELECT with active share
+--   Doctor in clinic B reads clinic A's record where active share A→B exists → MUST succeed
+--
+-- Scenario 4  — Cross-clinic SELECT with revoked share
+--   Same setup as 3 but share's revoked_at IS NOT NULL → MUST fail (0 rows)
+--
+-- Scenario 5  — Cross-clinic SELECT with expired share
+--   Same setup as 3 but share's expires_at < NOW() → MUST fail (0 rows)
+--
+-- Scenario 6  — Patient SELF SELECT
+--   Claimed patient reads their own clinical_notes across multiple clinics → MUST succeed
+--
+-- Scenario 7  — Patient OTHER SELECT
+--   Claimed patient X tries to read patient Y's records → MUST fail (0 rows)
+--
+-- Scenario 8  — Frontdesk SELECT same clinic
+--   Frontdesk staff at clinic A reads clinic A's records → MUST succeed
+--
+-- Scenario 9  — CROSS-CLINIC SHARE INSERT BLOCKED  (clinical-data tables only)
+--   Doctor at clinic B with active share A→B INSERTs clinical_notes WHERE clinic_id=A → MUST FAIL
+--   This verifies the RESTRICTIVE *_write_clinic_member_only policy from mig 094.
+--   Without this scenario, we ship without verifying the read-allowed-but-write-denied
+--   semantic.  HARD requirement per Mo session 3.
+--
+-- Scenario 10 — CROSS-CLINIC SHARE UPDATE BLOCKED  (clinical-data tables only)
+--   Doctor at clinic B with active share A→B UPDATEs an existing clinical_notes row
+--   WHERE clinic_id=A → MUST FAIL.  Verifies the RESTRICTIVE *_update_clinic_member_only
+--   policy.  HARD requirement per Mo session 3.
+--
+-- Optional supplemental (per § D1) — not blocking but recommended:
+--   11. INSERT positive (clinic member writes to their own clinic)
+--   12. UPDATE positive/negative
+--   13. DELETE attempted (must fail for all roles)
+--   14. Anonymous SELECT (unauthenticated → must fail)
+--   15. Wrong-role SELECT (patient role reading clinic-internal payments → must fail)
+--
+-- ════════════════════════════════════════════════════════════════════
+-- TEMPLATE — copy this section per patient-joined table.
+-- Replace <TABLE>, <SCHEMA-SPECIFIC-COLUMNS> as appropriate.
+-- ════════════════════════════════════════════════════════════════════
+
+-- Per execute_sql call (each call = one persona's scenario):
+--
+-- SET LOCAL ROLE 'authenticated';
+-- SET LOCAL "request.jwt.claims" TO '{"sub":"<persona_user_id>","role":"authenticated"}';
+--
+-- INSERT INTO public._rls_test_results (run_no, scenario, table_name, description, expected_outcome, actual_outcome, actual_rows)
+-- SELECT
+--   <RUN_NO>, 'S1', '<TABLE>', '<scenario description>',
+--   'SUCCESS',
+--   CASE WHEN COUNT(*) >= 1 THEN 'SUCCESS' ELSE 'FAIL' END,
+--   COUNT(*)
+-- FROM public.<TABLE>
+-- WHERE clinic_id = '<clinic_a_id>' AND global_patient_id = '<patient_x_id>';
+--
+-- Note: the INSERT INTO _rls_test_results runs as 'authenticated' role,
+-- which doesn't have INSERT permission on the postgres-owned results
+-- table.  Either (a) GRANT INSERT TO authenticated on _rls_test_results
+-- before scenarios run, or (b) capture results in a SECURITY DEFINER
+-- harness function.  Option (b) is cleaner — to add when authoring.
+
+
+-- ════════════════════════════════════════════════════════════════════
+-- TABLES TO COVER — checklist (each gets its own DO $body$ block)
+-- ════════════════════════════════════════════════════════════════════
+--
+-- mig 093 (patient identity):  ⏳ scenarios to author next session
+--   [ ] global_patients
+--   [ ] patient_clinic_records
+--   [ ] patient_data_shares
+--   [ ] privacy_code_attempts            (S1, S6, S7, S8 + clinic OWNER vs DOCTOR diff)
+--   [ ] patient_privacy_codes            (DENY-ALL — only need S1/S2/S6/S7 negative)
+--   [ ] privacy_code_sms_tokens          (DENY-ALL — same)
+--   [ ] patients (legacy)                (mirror clinical_notes; verify v2 alone passes)
+--
+-- mig 094 (clinical data):  ⏳ scenarios to author next session
+--   [ ] clinical_notes                   (S1-10 — INCLUDING 9, 10)
+--   [ ] prescription_items               (S1-10)
+--   [ ] lab_results                      (S1-10)
+--   [ ] lab_orders                       (S1-10)
+--   [ ] imaging_orders                   (S1-10)
+--   [ ] vital_signs                      (S1-10)
+--
+-- mig 095 (operations) — when shipped:  ⏳
+--   [ ] appointments                     (S1, S2, S6, S7, S8 — no cross-clinic; S11-13)
+--   [ ] check_in_queue
+--   [ ] payments
+--   [ ] doctor_availability
+--
+-- mig 096 (communication + audit_events) — when shipped:  ⏳
+--   [ ] messages
+--   [ ] conversations
+--   [ ] notifications
+--   [ ] audit_events                     (patient-self via resolved_global_patient_id; S6, S7)
+--
+-- mig 097 (non-patient) — when shipped:  ⏳
+--   [ ] clinics
+--   [ ] clinic_memberships
+--   [ ] users
+--   [ ] doctors
+--   [ ] doctor_templates
+--   [ ] prescription_templates
+--
+-- ════════════════════════════════════════════════════════════════════
+-- Seed data needed (constants populated at start of each run)
+-- ════════════════════════════════════════════════════════════════════
+--
+-- For 10-scenario coverage we need seed data on staging:
+--   * 2 clinics: clinic_a, clinic_b
+--   * 1 doctor in each: doctor_a (member of A), doctor_b (member of B)
+--   * 1 frontdesk in clinic_a: frontdesk_a
+--   * 1 patient (global_patient_x) with PCRs at both clinics
+--   * 1 claimed patient (claimed_patient_y, claimed_user_id set)
+--   * 1 unclaimed third patient (patient_z) — for "OTHER SELECT" cases
+--   * Active share: clinic_a → clinic_b for global_patient_x (expires_at NULL)
+--   * Revoked share: clinic_a → clinic_b for patient_z (revoked_at NOT NULL)
+--   * Expired share: clinic_a → clinic_b for some test patient (expires_at < NOW())
+--
+-- Today's staging has 0 claimed patients and 0 active shares.
+-- Phase D run #1 must FIRST seed this data via a __seed_rls_matrix.sql script
+-- (and tear down after run #3).  Document the seed script before
+-- run #1 so the matrix is reproducible.
+--
+-- ============================================================
+-- Reporting query (run after each of #1, #2, #3):
+-- ============================================================
+--
+-- SELECT
+--   run_no,
+--   table_name,
+--   COUNT(*) AS scenarios_run,
+--   COUNT(*) FILTER (WHERE actual_outcome = expected_outcome) AS pass,
+--   COUNT(*) FILTER (WHERE actual_outcome <> expected_outcome) AS fail,
+--   string_agg(scenario, ',' ORDER BY scenario) FILTER (WHERE actual_outcome <> expected_outcome) AS failing_scenarios
+-- FROM public._rls_test_results
+-- WHERE run_no = <RUN_NO>
+-- GROUP BY run_no, table_name
+-- ORDER BY table_name;
+--
+-- For run #3 specifically: any non-empty `failing_scenarios` for ANY
+-- table = STOP, do not ship mig 101.
+
+-- ============================================================
+-- End of Phase D test matrix scaffold.
+-- ============================================================
