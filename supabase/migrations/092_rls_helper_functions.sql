@@ -11,12 +11,70 @@
 --
 -- Hybrid security model per Mo's 2026-04-30 ruling (saved in memory
 -- file project_prompt_06_architecture_rulings.md), refined for the
--- recursion-safety issue surfaced during cowork session 2:
+-- recursion-safety issue surfaced during cowork session 2.
+--
+-- VERIFIED 2026-05-03 PART 2 — see header subsection below for the
+-- post-rulings reconciliation that REVERTED the R2 file edit.
 --
 --   1. is_clinic_member            — SECURITY DEFINER STABLE (kept)
 --   2. can_clinic_access_global_patient — SECURITY INVOKER STABLE (new)
---   3. can_patient_access_global_patient — SECURITY INVOKER STABLE (new)
+--   3. can_patient_access_global_patient — SECURITY INVOKER STABLE (R2-reverted, see below)
 --   4. can_view_patient_data_at_clinic   — SECURITY DEFINER STABLE (new)
+--
+-- ----------------------------------------------------------------------------
+-- VERIFIED 2026-05-03 PART 2 (post-rulings continuation, R2 REVERTED)
+-- ----------------------------------------------------------------------------
+-- This subsection records the reversal of Session C's R2 edit, which had
+-- declared `can_patient_access_global_patient` as SECURITY DEFINER on the
+-- (mistaken) inference that DEFINER was intentional and that staging's
+-- DEFINER state was the authoritative source of truth. The R2 inference
+-- was based on a recursion-cycle rationale that does not hold under the
+-- post-mig-094a `global_patients` SELECT policy.
+--
+-- Reference: `audits/database-audit/preapply-verif-r2.md` § "Verdict:
+-- CONTRADICTED" (V2 verification 2026-05-03).
+--
+-- R2 ruling reverted. Documented intent is INVOKER per
+-- EXECUTION_PROMPTS.md § B3 + the 2026-04-30 hybrid 3-INVOKER ruling.
+-- Staging's drift to DEFINER (introduced preemptively by mig 094a's
+-- "uniform DEFINER" amendment, which mig 094a's own policy rewrites
+-- subsequently rendered unnecessary) is reverted by mig 106
+-- (`106_forensic_revert_helper_definer_drift.sql`) via
+-- `ALTER FUNCTION ... SECURITY INVOKER`.
+--
+-- Helper #2 (`can_clinic_access_global_patient`) had the same shape of
+-- staging drift (file INVOKER, staging DEFINER from mig 094a). Per
+-- `audits/database-audit/preapply-verif-q2.md` § 1.5 verdict CONFIRMED
+-- INVOKER, mig 106 reverts both helpers in a single ALTER FUNCTION pair.
+--
+-- After this header reversal + mig 106 apply: file declarations and
+-- staging both report SECURITY INVOKER for helpers #2 and #3, and re-
+-- applying this file is once again safely a no-op for the prosecdef
+-- attribute. The post-condition assertions at the bottom of this file
+-- have been flipped accordingly to assert prosecdef = FALSE for both
+-- helpers.
+--
+-- Option B applied 2026-05-03 (Mo ruling, post-amendment-2 + Ask 4):
+-- SET search_path = public, pg_temp added to BOTH helper #2
+-- (`can_clinic_access_global_patient`) and helper #3
+-- (`can_patient_access_global_patient`) INVOKER declarations per
+-- defense-in-depth alignment. After mig 106 applies, staging preserves
+-- the SET clause for both helpers (it was set in mig 094a's DEFINER
+-- bodies and ALTER FUNCTION ... SECURITY INVOKER does not strip SET
+-- clauses), so the file declarations match staging byte-for-byte for
+-- this attribute too.
+--
+-- Helper #2 was added in Ask 4 (post-greenlight from Mo) after the
+-- post-Step-0.5 verification surfaced that the original amendment-2
+-- premise ("the other 3 helpers in mig 092 all have SET search_path
+-- declarations") was factually inaccurate — only helpers #1 (DEFINER)
+-- and #4 (DEFINER) had it before today. Ask 4 closes the gap so all
+-- four helpers in mig 092 now declare SET search_path.
+--
+-- See runbook § 5 "Future reconciliation options — Option B" + Step
+-- 4.5 ("Verify mig 092 file matches staging post-apply") for the
+-- ruling and verification gates.
+-- ----------------------------------------------------------------------------
 --
 -- DEVIATION FROM PROMPT 6 § B1 (documented):
 --   Mo's prompt B1 specifies SECURITY INVOKER for is_clinic_member.
@@ -101,6 +159,17 @@ COMMENT ON FUNCTION public.is_clinic_member(UUID, UUID) IS
 --    INVOKER is safe because every reachable call path has the
 --    caller as a member of p_clinic_id (i.e. they can already SELECT
 --    the relevant PCR / share rows under the new RLS).
+--
+--    SET search_path = public, pg_temp is declared explicitly per Mo
+--    "Option B from runbook § 5" ruling 2026-05-03 (defense-in-depth
+--    alignment): although search-path injection is primarily a DEFINER
+--    concern, pinning the path under INVOKER is consistent with the
+--    other helpers in this file and forecloses any future
+--    search-path-rebinding attack vector irrespective of SECURITY mode.
+--    After mig 106 applies, staging will report the same SET clause
+--    (preserved by ALTER FUNCTION ... SECURITY INVOKER from mig 094a's
+--    DEFINER body), so the file declaration matches staging byte-for-
+--    byte for this attribute.
 -- ──────────────────────────────────────────────────────────────────
 
 CREATE OR REPLACE FUNCTION public.can_clinic_access_global_patient(
@@ -110,6 +179,7 @@ CREATE OR REPLACE FUNCTION public.can_clinic_access_global_patient(
 LANGUAGE sql
 STABLE
 SECURITY INVOKER
+SET search_path = public, pg_temp
 PARALLEL SAFE
 AS $$
   SELECT EXISTS (
@@ -126,14 +196,43 @@ AS $$
 $$;
 
 COMMENT ON FUNCTION public.can_clinic_access_global_patient(UUID, UUID) IS
-  'Prompt 6 mig 092: true if the clinic can access the patient (PCR exists OR active grantee share). INVOKER — caller must be member of the clinic for downstream SELECTs to clear RLS.';
+  'Prompt 6 mig 092: true if the clinic can access the patient (PCR exists OR active grantee share). INVOKER — caller must be member of the clinic for downstream SELECTs to clear RLS. SET search_path = public, pg_temp declared per Mo Option-B ruling 2026-05-03 (defense-in-depth alignment).';
 
 
 -- ──────────────────────────────────────────────────────────────────
 -- 3. can_patient_access_global_patient — INVOKER STABLE
---    True if the user is the claimed patient.  Under INVOKER the
---    SELECT against global_patients clears RLS via the patient-self
---    branch of the new global_patients SELECT policy (mig 093).
+--    True if the user is the claimed patient.
+--
+--    HISTORY: Session C originally edited this declaration to DEFINER
+--    (R2 ruling, 2026-05-03) on the inference that staging's DEFINER
+--    state was the authoritative source of truth and that DEFINER was
+--    needed to break a recursion cycle with privacy_code_attempts /
+--    global_patients SELECT policies. Pre-apply verification V2 found
+--    that inference was faulty: under the post-094a `global_patients`
+--    SELECT policy (which uses `claimed_user_id = auth.uid()` directly
+--    + the DEFINER `user_has_clinic_path_to_gp` helper for the clinic
+--    branch), there is no recursion path through this helper. R2
+--    reverted 2026-05-03 PART 2 (Mo Q1 A1 ruling); see header
+--    "VERIFIED 2026-05-03 PART 2" subsection above.
+--
+--    Why INVOKER (per documented intent — EXECUTION_PROMPTS.md § B3 +
+--    2026-04-30 hybrid 3-INVOKER ruling): the helper runs as the
+--    calling user. We're checking whether THEY are the claimed patient
+--    for this global_patient. No bypass needed — the user can either
+--    SEE their own claimed_user_id row in global_patients (under the
+--    self-branch of global_patients_select_v2) or they can't, and the
+--    EXISTS reflects that visibility.
+--
+--    SET search_path = public, pg_temp is declared explicitly per Mo
+--    "Option B from runbook § 5" ruling 2026-05-03 (defense-in-depth
+--    alignment): although search-path injection is primarily a DEFINER
+--    concern, pinning the path under INVOKER is consistent with the
+--    other helpers in this file and forecloses any future
+--    search-path-rebinding attack vector irrespective of SECURITY mode.
+--    After mig 106 applies, staging will report the same SET clause
+--    (preserved by ALTER FUNCTION ... SECURITY INVOKER from mig 094a's
+--    DEFINER body), so the file declaration matches staging byte-for-
+--    byte for this attribute.
 -- ──────────────────────────────────────────────────────────────────
 
 CREATE OR REPLACE FUNCTION public.can_patient_access_global_patient(
@@ -143,6 +242,7 @@ CREATE OR REPLACE FUNCTION public.can_patient_access_global_patient(
 LANGUAGE sql
 STABLE
 SECURITY INVOKER
+SET search_path = public, pg_temp
 PARALLEL SAFE
 AS $$
   SELECT EXISTS (
@@ -153,7 +253,7 @@ AS $$
 $$;
 
 COMMENT ON FUNCTION public.can_patient_access_global_patient(UUID, UUID) IS
-  'Prompt 6 mig 092: true if the user is the claimed patient for this global_patient row. INVOKER — relies on global_patients RLS allowing patient self-view.';
+  'Prompt 6 mig 092: true if the user is the claimed patient for this global_patient row. SECURITY INVOKER STABLE per documented intent (EXECUTION_PROMPTS § B3, 2026-04-30 hybrid ruling). R2 DEFINER edit reverted 2026-05-03 PART 2; staging realignment via mig 106 (ALTER FUNCTION ... SECURITY INVOKER). SET search_path = public, pg_temp declared per Mo Option-B ruling 2026-05-03 (defense-in-depth alignment).';
 
 
 -- ──────────────────────────────────────────────────────────────────

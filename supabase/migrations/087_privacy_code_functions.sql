@@ -10,6 +10,47 @@
 -- Per audits/patient-identity-migration-plan.md Steps 6 + 8.
 -- Per audits/EXECUTION_PROMPTS.md.md Prompt 4 § B4.
 --
+-- ----------------------------------------------------------------------------
+-- VERIFIED 2026-05-03 (Audit Session C, ruling R6)
+-- ----------------------------------------------------------------------------
+-- The schema_migrations tracking table on staging has THREE rows for this
+-- migration:
+--    087_privacy_code_functions             (original)
+--    087_privacy_code_functions_search_path_fix (hot-patch added SET search_path)
+--    087_privacy_code_function_grants_hardening  (hot-patch tightened REVOKE/GRANT)
+-- Only one .sql file ever existed in the repo. Session A flagged this as
+-- "live function/view bodies are authoritative; file no longer reliable."
+--
+-- Audit Session C dumped the live function definitions from staging via
+-- pg_get_functiondef on 2026-05-03 and compared body, search_path, and grant
+-- state against this file. Result: the file content already incorporates
+-- both hot-patches:
+--   * SET search_path = public, extensions, pg_temp present on every body.
+--   * REVOKE EXECUTE ... FROM PUBLIC, anon, authenticated on internal helpers.
+--   * GRANT EXECUTE TO authenticated on the user-facing functions.
+--   * GRANT EXECUTE TO anon, authenticated on check_phone_uniform.
+-- These match staging's live grant state exactly (verified via
+-- information_schema.routine_privileges).
+--
+-- One narrow body difference was found: verify_privacy_code declared and
+-- selected an unused local variable v_pc_revoked_at. Live staging does not.
+-- The variable was never referenced in the function body — safe to drop.
+-- This file edit removes that dead variable to bring the file fully into
+-- byte-level alignment with the deployed function.
+--
+-- 2026-05-03 (continuation, Q3 ruling): a second body diff was caught by
+-- the pre-apply re-verification (audits/database-audit/preapply-verif-087.md).
+-- The wrong-code branch's terminal RETURN was missing its uniform-timing pad
+-- statement (`PERFORM pg_sleep(GREATEST(0, ...))`) that every other branch
+-- in verify_privacy_code emits before its RETURN. Added the missing pg_sleep
+-- pad in wrong-code branch terminal RETURN per preapply-verif-087.md so the
+-- file body matches live byte-for-byte. After this edit `PERFORM pg_sleep`
+-- count = 7 in both file and live (verified Step "Re-verify" in
+-- audits/database-audit/mig-087-edit-confirmation.md).
+--
+-- This file is now CANONICAL. Re-applying via Supabase migrations CLI is a
+-- no-op (CREATE OR REPLACE FUNCTION + same body + same grants).
+--
 -- INVARIANTS (load-bearing for the entire privacy model)
 --   - Uniform shape: every failure of verify_* / check_* returns the
 --     same JSONB { exists/success: false, requires_code: true }. NO
@@ -264,7 +305,9 @@ DECLARE
   v_pc_hash TEXT;
   v_pc_attempts INT;
   v_pc_locked_until TIMESTAMPTZ;
-  v_pc_revoked_at TIMESTAMPTZ;
+  -- v_pc_revoked_at removed 2026-05-03 (Audit Session C R6) — variable was
+  -- declared and SELECTed into but never referenced. Live staging function
+  -- already lacks it; this edit aligns the file.
   v_match BOOLEAN;
   v_new_attempts INT;
   v_actual_ms NUMERIC;
@@ -320,8 +363,11 @@ BEGIN
   END IF;
 
   -- Step 1: per-code lockout.
-  SELECT id, code_hash, attempts_count, locked_until, revoked_at
-    INTO v_pc_id, v_pc_hash, v_pc_attempts, v_pc_locked_until, v_pc_revoked_at
+  -- (revoked_at no longer SELECTed into a variable — the WHERE clause
+  -- revoked_at IS NULL already filters out revoked rows. Aligned with
+  -- live staging definition 2026-05-03 by Audit Session C R6.)
+  SELECT id, code_hash, attempts_count, locked_until
+    INTO v_pc_id, v_pc_hash, v_pc_attempts, v_pc_locked_until
     FROM public.patient_privacy_codes
    WHERE global_patient_id = v_gpid
      AND revoked_at IS NULL
@@ -436,6 +482,7 @@ BEGIN
     );
   END IF;
 
+  PERFORM pg_sleep(GREATEST(0, (v_min_ms - EXTRACT(EPOCH FROM (clock_timestamp() - v_start)) * 1000) / 1000.0));
   RETURN v_failure_payload;
 END;
 $$;

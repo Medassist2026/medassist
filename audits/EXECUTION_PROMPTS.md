@@ -95,6 +95,40 @@ The cost of the re-read pass was ~60 minutes. The cost of *not* doing it would h
 
 **Amendment (session 17, 2026-05-02):** This rule extends to verifying assumed file/migration state matches actual repo state before executing on rename/restructure plans. Spec-level shorthands (e.g., "mig 098 = drop legacy") can be misread as file-level facts; verify before rename. Empirical proof (session 17): the session-16 ruling described `098_drop_legacy_policies.sql` as a "designed-but-not-applied artifact" and locked a rename plan around it. Pre-execution `Glob` showed the file had never been written — slot 098 was always empty, "mig 098" was a Prompt 6 spec convention used as planning shorthand. The phantom-mv was caught before any commit because Step 1 began with a state check rather than a state-changing action.
 
+### Lesson 7 (Foundation Audit Session A, 2026-05-03)
+
+**Verify schema state independently of the migration tree. Schema is ground truth, not migration files.**
+
+When the migration tree and the deployed schema diverge — and they will, the moment any DDL is applied outside the migrations CLI — the migration files become a partial description of intent, not an authoritative record of state. A claim in a migration file that table X exists is a hypothesis about staging; it must be verified before being relied on. The same is true for column shapes, function bodies, security_definer flags, RLS policy USING/WITH CHECK clauses, and trigger bindings.
+
+**Empirical proof (Audit Session A + B + C):** Session A's claims-vs-reality audit ran every `CREATE`/`ALTER` statement in `supabase/migrations/` against `information_schema` and `pg_catalog` on staging. Of 831 claims across files 001-098, 76 were MISSING (object absent) and the audit independently surfaced 6 EXTRA tables, 111 EXTRA columns, 136 EXTRA policies, and 9 EXTRA functions on staging — none of which appeared in any committed file. Session B's structural drift spot-check on 15 random MATCH-category claims found 2 of them (13%) had subtle shape divergences not visible at the name level: a `front_desk_staff`-table-based policy USING clause rewritten on staging to use `clinic_memberships`, and a function declared `SECURITY INVOKER` in the file but `SECURITY DEFINER` on the live database. Session C verified the 087 trio's live function bodies via `pg_get_functiondef` against staging and found the file already incorporated 2 hot-patches that had been applied via separate tracking rows — but the only way to know that was to dump the live bodies and diff.
+
+**Apply to every audit, every Phase F session, every restructure plan:**
+
+1. Before claiming "X exists" / "X has shape Y" / "X behaves Z" based on a migration file, query staging via `information_schema`, `pg_catalog.pg_proc`, `pg_policies`, or `pg_get_functiondef` and confirm.
+2. When a migration file and staging disagree, **staging wins by default.** Either patch the file forward (the divergence happened on purpose and the file needs to catch up) or patch staging forward (the divergence was a hot-fix that needs to be undone). Never resolve by assuming the file is right.
+3. Architectural decisions about staging schema must be backed by a recent schema snapshot, not by reading migration files. The snapshot lives in `audits/database-audit/staging-schema-2026-05-03.sql` (or its successor); refresh whenever the divergence question matters.
+
+The cost of not doing this: Phase F was within one PR of locking RLS policy rewrites against an INVOKER function that was actually DEFINER on staging, which would have made every reference to the helper in the new policies fail differently than the test harness would predict.
+
+### Lesson 8 (Foundation Audit Session A + C, 2026-05-03)
+
+**All schema changes go through committed migration files. No dashboard SQL editor applies. No `supabase db push` of uncommitted SQL.**
+
+Every operational rule that produced the foundation-audit drift surface — 5 unclaimed tables, 9 unclaimed functions, 136 unclaimed policies, 2 tracking rows with no committed file — traces to one root cause: SQL was applied to staging without first being committed as a `.sql` file in `supabase/migrations/`. Sometimes via the dashboard's SQL editor (no tracking row created at all), sometimes via the migrations CLI but with the local file deleted before commit (tracking row created, file lost). Either path leaves staging with state that the repo cannot reproduce.
+
+**Empirical proof:** the entire reason Audit Session C exists is to backfill schema that was applied to staging out-of-band. The two 2026-04-08 RLS hardening fixes were applied via the migrations CLI but never committed; the 5 unclaimed tables were applied via the dashboard SQL editor with no tracking row. Each of these was justifiable in isolation — security pass under time pressure; quick fix during a dev session — but the cumulative effect was a migration tree that no longer described production schema. Audit Session C had to author 6 forensic backfill migrations + 2 in-place file edits to reconcile, which took ~6 hours of work that would not have been needed if every schema change had gone through a committed file from the start.
+
+**Operational rule, codified:**
+
+1. **Every schema change must originate as a `.sql` file in `supabase/migrations/` BEFORE it is applied anywhere.** Author the file, commit it (or at minimum stage it locally with a clear name), then apply via `supabase db push` or `supabase migration up`.
+2. **The dashboard SQL editor is read-only for schema operations.** It is acceptable for ad-hoc SELECT, COUNT, and read-only debugging. It is NOT acceptable for `CREATE`, `ALTER`, `DROP`, `INSERT`/`UPDATE`/`DELETE` against schema metadata, `CREATE POLICY`, `CREATE FUNCTION`, `CREATE TRIGGER`, or any operation that mutates the catalog.
+3. **No `supabase migration repair --status applied <version>`** without a corresponding committed file at the matching version. If the file is missing, write the file first; only then mark applied.
+4. **If an emergency hotfix has to be applied via dashboard** (the rare case where committing-then-deploying is genuinely too slow), the SQL is committed as a forensic backfill migration in the SAME PR as the hotfix, with a header comment recording the dashboard-apply timestamp. No "I'll commit it later." Later doesn't happen.
+5. **Audit pre-flight before any release-pace work** — a 30-minute schema-vs-migration-tree comparison surfaces drift before it accumulates. Catching divergence at 1 row is cheap; catching it at 5 tables + 9 functions + 136 policies is what produced this 6-hour reconciliation session.
+
+The cost of not doing this is what Audit Session C just spent its budget undoing. Don't do it again.
+
 ---
 
 ## Sequence
