@@ -5,11 +5,26 @@ import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
 import { getPatientSharingStatus, revokeVisibility } from '@shared/lib/data/visibility'
 import { logAuditEvent } from '@shared/lib/data/audit'
 import { createAdminClient } from '@shared/lib/supabase/admin'
+import { listSharesForPatient } from '@shared/lib/data/patient-shares'
 
 /**
- * GET /api/patient/sharing — Get all active visibility grants for patient
+ * GET /api/patient/sharing — Get all sharing-related state for the patient.
+ *
+ * Build 04 + 05 hybrid response:
+ *   {
+ *     success: true,
+ *     // Legacy patient_visibility grants (per-doctor, intra-clinic).
+ *     // Drained by Prompt 6.5; new client code should ignore this field.
+ *     grants: [...],
+ *     // Build 05 patient_data_shares (cross-clinic directional grants).
+ *     // The new patient-app sharing UI reads this field.
+ *     shares: [...]
+ *   }
+ *
+ * Query: ?include_expired=true → also returns expired/revoked shares for
+ * the patient app's history view.
  */
-export async function GET() {
+export async function GET(request?: Request) {
   try {
     const user = await requireApiRole('patient')
     const { grants } = await getPatientSharingStatus(user.id)
@@ -49,7 +64,70 @@ export async function GET() {
       doctor_name: g.grantee_user_id ? (doctorMap[g.grantee_user_id] || 'Doctor') : null,
     }))
 
-    return NextResponse.json({ success: true, grants: enrichedGrants })
+    // ─── Build 05 § B10: also return patient_data_shares ─────────────────
+    // Resolve gpid via global_patients.claimed_user_id = user.id.
+    let shares: Array<Record<string, unknown>> = []
+    try {
+      const url = request ? new URL(request.url) : null
+      const includeExpired = url?.searchParams.get('include_expired') === 'true'
+
+      const { data: gp } = await admin
+        .from('global_patients')
+        .select('id')
+        .eq('claimed_user_id', user.id)
+        .maybeSingle()
+      const gpid = (gp as { id?: string } | null)?.id
+      if (gpid) {
+        const rawShares = await listSharesForPatient({
+          globalPatientId: gpid,
+          includeExpired,
+        })
+
+        // Enrich each share with grantor + grantee clinic names.
+        const shareClinicIds = Array.from(
+          new Set(
+            rawShares.flatMap((s) => [s.grantor_clinic_id, s.grantee_clinic_id])
+          )
+        )
+        let shareClinicMap: Record<string, string> = clinicMap
+        if (shareClinicIds.length > 0) {
+          const { data: clinicsForShares } = await admin
+            .from('clinics')
+            .select('id, name')
+            .in('id', shareClinicIds)
+          if (clinicsForShares) {
+            for (const c of clinicsForShares as Array<{ id: string; name: string }>) {
+              shareClinicMap[c.id] = c.name
+            }
+          }
+        }
+
+        shares = rawShares.map((s) => {
+          const isActive =
+            s.revoked_at === null &&
+            (s.expires_at === null || new Date(s.expires_at) > new Date())
+          return {
+            id: s.id,
+            global_patient_id: s.global_patient_id,
+            grantor_clinic_id: s.grantor_clinic_id,
+            grantor_clinic_name: shareClinicMap[s.grantor_clinic_id] ?? 'Unknown Clinic',
+            grantee_clinic_id: s.grantee_clinic_id,
+            grantee_clinic_name: shareClinicMap[s.grantee_clinic_id] ?? 'Unknown Clinic',
+            granted_at: s.granted_at,
+            expires_at: s.expires_at,
+            revoked_at: s.revoked_at,
+            granted_via: s.granted_via,
+            grant_reason: s.grant_reason,
+            is_active: isActive,
+            is_permanent: s.expires_at === null && s.revoked_at === null,
+          }
+        })
+      }
+    } catch (err) {
+      console.error('GET /patient/sharing: shares enrichment failed (non-fatal):', err)
+    }
+
+    return NextResponse.json({ success: true, grants: enrichedGrants, shares })
   } catch (error) {
     return toApiErrorResponse(error, 'Failed to get sharing info')
   }

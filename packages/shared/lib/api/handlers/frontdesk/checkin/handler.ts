@@ -125,6 +125,47 @@ export async function POST(request: Request) {
       metadata: { doctorId, queueType }
     })
 
+    // ── Build 05 § B7: auto-renew patient_data_shares on visit ───────────────
+    // Encounter-triggered renewal extends every active, non-permanent share
+    // for (gpid, this clinic) to NOW+90d. The DB function (mig 090) writes
+    // one SHARE_AUTO_RENEWED audit + one expires_at update per share, all
+    // atomic per share.
+    //
+    // EXPLICIT EXCEPTION TO SYNC+TRANSACTIONAL RULE (Build 05 § B7):
+    //   This is the only place in Prompt 5 where audit failure is allowed
+    //   to be non-fatal. The reasoning: preserving an encounter (already
+    //   inserted at this point) is more important than guaranteeing the
+    //   renewal audit. If renewal silently fails, the share will eventually
+    //   expire on its normal schedule and a notification will fire — not a
+    //   privacy hole, just a UX gap.
+    ;(async () => {
+      try {
+        const { autoRenewOnVisit } = await import('@shared/lib/data/patient-shares')
+        // Resolve gpid via the patient row (legacy patients carry global_patient_id since mig 074).
+        const admin = createAdminClient('auto-renew-on-visit-gpid-lookup')
+        const { data: patient } = await admin
+          .from('patients')
+          .select('global_patient_id')
+          .eq('id', patientId)
+          .maybeSingle()
+        const gpid = (patient as { global_patient_id?: string } | null)?.global_patient_id
+        if (!gpid) {
+          // No gpid — the patient pre-dates global_patients, or backfill
+          // missed this row. Skip silently; legacy data will be reconciled
+          // by the cleanup migrations Prompt 6.5 owns.
+          return
+        }
+        await autoRenewOnVisit({
+          globalPatientId: gpid,
+          granteeClinicId: clinicId,
+          encounterId: queueItem.id,
+        })
+      } catch (err) {
+        // Log only — do not propagate. See exception note above.
+        console.error('checkin: autoRenewOnVisit failed (non-fatal):', err)
+      }
+    })()
+
     // ── SMS Invitation for first-time patients (fire-and-forget) ──────────────
     ;(async () => {
       try {
