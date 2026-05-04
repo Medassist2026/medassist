@@ -17,6 +17,7 @@ dist/
 **/public/workbox-*.js.map
 **/public/worker-*.js
 **/public/worker-*.js.map
+**/public/fallback-*.js
 
 # Environment & secrets
 .env
@@ -60,3 +61,9 @@ cookies.txt
 *.pdf
 *.docx
 FIX_VERIFICATION_REPORT.md
+
+# Cowork commit-message scratch files
+.commit-msg-*.txt
+
+# Stale auto-generated migration list (use `ls supabase/migrations/` instead)
+supabase/migrations_list.txt
