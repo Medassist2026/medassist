@@ -19,13 +19,19 @@ PostgreSQL 17.6, region eu-central-1, status ACTIVE_HEALTHY.
 No production environment yet. Current project becomes launch foundation.
 
 ## Current Blocker
-Forensic-fix migrations (100-105) authored by Session C must apply cleanly
-to staging before Phase F resumes. After apply, the migration tree describes
-real staging state and Phase F Step 2 can proceed.
+**Phase D matrix reconstruction.** All 7 forensic migs (100-106) applied
+to staging cleanly 2026-05-03. The runbook's Phase D run #1.5 validation
+gate cannot run because `audits/rls-test-matrix.sql` is a scaffold without
+executable SQL — the run #1 matrix was authored interactively across cowork
+sessions with outcomes recorded but SQL not persisted (Empirical Lesson
+#12). Templating reconstruction is viable per `preapply-scan-mig100-101-102.md`
+Phase D pre-flight analysis. Estimated effort: 2-4 hours focused work in
+a fresh session. Push to remote held until Phase D #1.5 = 177/177 PASS.
 
 ## Active Pause Point
-Prompt 6, Phase F, between Step 1 (audit corpus commit, DONE) and
-Step 2 (atomic triage edit, NOT STARTED).
+**Audit detour Day 1 complete (2026-05-03).** Forensic apply done.
+Phase D matrix reconstruction is the gate for resuming Phase F.
+Specifics in `audits/database-audit/PHASE_D_RECONSTRUCTION_HANDOFF.md`.
 
 ## What is shipped to medassist-egypt (verified by Session A audit; unchanged by Session C)
 - 65 tables in `public` (excludes 3 views, 2 internal `_dedup_plan`/`_phone_normalize_quarantine`/`_rls_test_results` tables created outside formal migrations).
@@ -138,12 +144,13 @@ These tasks land in code-side cleanup PRs after forensic migrations 100-105 appl
 5. **`front_desk_staff`-in-policy targeted re-scan.** Session B's structural-drift spot-check found that `invoice_requests::frontdesk_invoice_requests` was rewritten on staging to use `clinic_memberships` instead of `front_desk_staff`, with the file body never updated. The pattern is likely systematic. A `grep` across `supabase/migrations/04*.sql` for policies referencing `front_desk_staff` followed by per-policy structural verification against staging would surface other forgotten rewrites. (Session B recommendation #2.)
 6. **Resolve mig 068 (`068_cleanup_legacy_policies.sql`) status.** Memory says apply was aborted; superseded by 092-097. Decide: delete from repo, or leave as a known-skipped file with a `.RETIRED` annotation header.
 7. **Resolve mig 099 (`099_patient_code_rpcs.sql`) status.** Drafted but not applied. With `patient_code` column gone (R7 retirement), the RPCs are dead. Delete from repo.
-8. **`SET search_path` audit on RLS helpers.** Verify all RLS helper functions (DEFINER and INVOKER) have explicit `SET search_path = public, pg_temp` declarations. Defense-in-depth against search-path injection — pinning the path holds regardless of SECURITY mode. Currently only DEFINER helpers (mig 092 #1 `is_clinic_member`, #4 `can_view_patient_data_at_clinic`) and the just-added INVOKER helpers in mig 092 (#3 `can_patient_access_global_patient` per Mo Option-B 2026-05-03; #2 `can_clinic_access_global_patient` pending Mo confirmation) have it. Hardening pass before launch — confirm the same pattern is applied to any helpers introduced in migs 093-097, plus the post-094a helper `user_has_clinic_path_to_gp` (which is DEFINER and should already have it — verify) and the privacy-code SECURITY DEFINER functions in mig 087 (verify per `audits/database-audit/preapply-verif-087.md`). Output: a one-pass enumeration of every `CREATE OR REPLACE FUNCTION` in `supabase/migrations/` that touches RLS-relevant authorization with a TRUE/FALSE column for "has SET search_path."
+8. **`SET search_path` audit on RLS helpers.** Verify all RLS helper functions (DEFINER and INVOKER) have explicit `SET search_path = public, pg_temp` declarations. Defense-in-depth against search-path injection — pinning the path holds regardless of SECURITY mode. Currently only DEFINER helpers (mig 092 #1 `is_clinic_member`, #4 `can_view_patient_data_at_clinic`) and the just-added INVOKER helpers in mig 092 (#2 `can_clinic_access_global_patient` and #3 `can_patient_access_global_patient` per Mo Option-B 2026-05-03 + Ask 4) have it. Hardening pass before launch — confirm the same pattern is applied to any helpers introduced in migs 093-097, plus the post-094a helper `user_has_clinic_path_to_gp` (which is DEFINER and should already have it — verify) and the privacy-code SECURITY DEFINER functions in mig 087 (verify per `audits/database-audit/preapply-verif-087.md`). Output: a one-pass enumeration of every `CREATE OR REPLACE FUNCTION` in `supabase/migrations/` that touches RLS-relevant authorization with a TRUE/FALSE column for "has SET search_path."
+9. **Compute precise EXTRA_ON_STAGING reconciliation post-forensic-apply.** Confirm the policy-count shrinkage from 136 EXTRA pre-apply to expected ~122 EXTRA post-apply via a migration tree CREATE POLICY parser + `pg_policies` diff. Tooling pass — not blocking. Useful for `audits/database-audit/AUDIT_FINAL.md` narrative completeness. Same reconciliation also applies to EXTRA functions (9 → 3, test-harness only) and EXTRA tables (5 → 0). Run after Phase F closes; the absolute counts (Q1-Q6a per runbook v2 Step 6) already confirm correct state changes.
 
 ## Next Action
-**READY to apply, awaiting Mo's go-ahead.** Run
-`audits/database-audit/apply-runbook-v2.md` end-to-end (with Mo's two
-amendments 2026-05-03 incorporated):
+**Open fresh cowork session 2026-05-04. Read `audits/database-audit/PHASE_D_RECONSTRUCTION_HANDOFF.md` as the entry point. Reconstruct the Phase D matrix per the templating theory. Run matrix as run_no = 1.5 against staging. Push to remote if 177/177 PASS. Resume Phase F Step 2 after push.**
+
+**Historical record (frozen at 2026-05-03 close-out — kept for context):** the apply-phase plan that ran today is below. All steps complete except Step 7 (Phase D #1.5) which is queued for the fresh session.
 
 1. Step 0 sanity check (read-only probes against staging).
 2. Step 0.5 — mig 092 R2 reversal (working-tree edit, completed 2026-05-03;

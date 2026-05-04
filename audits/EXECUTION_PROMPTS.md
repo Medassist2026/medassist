@@ -129,6 +129,85 @@ Every operational rule that produced the foundation-audit drift surface — 5 un
 
 The cost of not doing this is what Audit Session C just spent its budget undoing. Don't do it again.
 
+### Lesson 9 (Audit Session C apply phase, 2026-05-03)
+
+**Audit the temporal sequence of dashboard SQL applies, not just current state.**
+
+A schema dump captures what's there NOW. It doesn't capture what was there last month and got changed. When backfilling untracked SQL applies (like the 2026-04-08 RLS hardening fixes), verify each referenced object STILL EXISTS in the form the SQL expects. Between the original apply and today, columns can be dropped, policies can be rewritten, and tables can be modified — all silently if the dashboard SQL editor is the apply path. Backfilling original SQL verbatim against drifted state will fail at apply time. Verify schema state at backfill time matches the SQL's expectations BEFORE applying.
+
+**Empirical proof (Audit Session C apply phase, 2026-05-03):** mig 100 application failed with `ERROR: 42703: column "clinic_id" does not exist` on the `front_desk_staff` table. Investigation found:
+- The 2026-04-08 SQL (recovered verbatim from `schema_migrations.statements` row 20260408145102 by Session B) referenced `front_desk_staff.clinic_id`, which existed at that time.
+- Between 2026-04-08 and 2026-05-03, the column was dropped via untracked dashboard SQL and the dependent policy `Clinic members can view frontdesk staff in same clinic` was simultaneously rewritten to a `clinic_memberships`-mediated form.
+- Session B had already flagged the same systematic-rewrite pattern for `invoice_requests::frontdesk_invoice_requests` but hadn't applied that observation to mig 100's inputs pre-apply.
+
+**Fix taken:** edit mig 100 to capture the post-rewrite policy body, document the temporal drift in `audits/database-audit/out-of-band-post-2026-04-08.md`. Re-applied cleanly as a no-op against current state.
+
+**Apply to every backfill of dashboard-applied SQL:**
+
+1. Before re-running any recovered SQL against current staging, enumerate every column / function / table the SQL references and confirm it still exists with the expected shape.
+2. The check is mechanical: parse the recovered SQL for object references, compare against `information_schema.columns`, `pg_proc`, `pg_policies`. A mismatch is a STOP signal until the divergence is understood.
+3. Capture mismatches in an audit doc (today: `audits/database-audit/preapply-scan-mig100-101-102.md` was the discovery vehicle; `audits/database-audit/out-of-band-post-2026-04-08.md` is the running drift record).
+
+The cost of not doing this: mig 100 failed loudly at apply, which is the good outcome. The bad outcome would have been mig 100 succeeding with a silent semantic divergence (e.g., the policy ran but referenced a column that was logically renamed) — that flavor of bug is much harder to catch.
+
+### Lesson 10 (Audit Session C apply phase, 2026-05-03)
+
+**When verifying caller surface for any RLS helper or shared function, use programmatic enumeration, not manual audit-doc reading.**
+
+Manual enumeration is incomplete by default. SQL enumeration is exhaustive by definition. The two approaches produce the same answer when the manual reviewer happens to look at every relevant migration; the SQL approach produces the same answer regardless. For a helper function used by N policies across M migrations, manual reading scales as O(M × policy density per migration); SQL enumeration scales as O(1 query). Same correctness, different reliability.
+
+**Empirical proof (mig 106 post-apply caller verification, 2026-05-03):** Verifications 2 and Q2 manually enumerated 5 callers of `can_patient_access_global_patient` from mig 094a's body. The post-mig-106 programmatic `pg_policies` query found 6 callers — the 6th one (`audit_events::audit_events_patient_self_select_v2`) was created by mig 096 (a different Phase C migration that the verifications didn't cross-reference). The architectural conclusion (INVOKER is safe) held for the new caller too — same recursion-free chain — but the docs underspecified the impact surface.
+
+**Apply to every helper/shared-function review:**
+
+1. **Always run** `SELECT schemaname, tablename, policyname FROM pg_policies WHERE qual::text ILIKE '%<helper_name>%' OR with_check::text ILIKE '%<helper_name>%'` against current staging.
+2. **Always run** `grep -rn "<helper_name>" supabase/migrations/` against the repo (catches callers that exist in committed migrations but haven't been applied yet).
+3. The enumeration belongs in the verification doc verbatim, with row count. Future reviewers can re-run and verify the count matches.
+
+A future-proofed verification doc has the SQL query in it. A verification doc that says "I read mig 094a and found these callers" is a snapshot of one reviewer's reading at one moment.
+
+### Lesson 11 (Audit Session C apply phase, 2026-05-03)
+
+**MCP `apply_migration` and CLI `supabase migration up` have different tracking-row semantics. Pick the right tool for the goal.**
+
+CLI's `supabase migration up` checks `schema_migrations` first and skips already-tracked migration versions silently — no new tracking row added. MCP's `apply_migration` always creates a new tracking row regardless of whether the version was previously tracked. Both produce the same live state when the SQL is identical; they produce different tracking-history state.
+
+**Empirical proof (mig 087 in-place re-apply decision, 2026-05-03):** the apply-runbook-v2 Step 4 prescribed an "in-place re-apply" of mig 087 to re-emit the function bodies after the Part 2 pg_sleep edit. Via CLI this would have been a true no-op (already-tracked version, no new row). Via MCP it would have added a 4th 087-related tracking row commemorating an edit timestamp without behavioral change. Step 0b had already verified file/live alignment (`pg_sleep_count = 7` both sides). The re-apply was SKIPPED — alignment-without-state-change doesn't warrant a tracking record, and the file was already committed to git via commit 797a5c3 so future fresh-DB resets via CLI will use the corrected file.
+
+**Decision matrix for tracking-history hygiene:**
+
+| Goal | Live state matches file? | Tool | Action |
+|---|---|---|---|
+| Apply a state change (file's intent is new) | No | MCP `apply_migration` OR CLI `migration up` | Apply via either; tracking row records the state change |
+| Re-emit bodies for an existing migration after a file edit | Yes (verified) | — | SKIP both. File commit + future fresh-DB reset will pick up the corrected file. |
+| Re-emit bodies for an existing migration after a file edit | No (drift suspected) | CLI `migration up` if version-tracked already, OR MCP with distinguished tracking name | Apply; verify alignment post-apply; document in doc |
+| Apply a migration not yet on staging | No (file is new) | MCP `apply_migration` (this session's pattern) OR CLI | Apply; tracking row gets created either way |
+
+**Apply to every apply-phase decision:**
+
+1. Before invoking `apply_migration` or `migration up`, ask: is the goal a state change, or alignment-without-state-change? If the latter, and live already matches file, and file is committed — skip both.
+2. When mixing CLI and MCP in the same sequence, expect the tracking-history shapes to differ. The CLI's "already tracked, skipped" log line and the MCP's "added tracking row" telemetry are both expected; they're not symptoms of an error.
+3. When a runbook prescribes "in-place re-apply" to commemorate alignment, evaluate via the matrix above. The "in-place" framing usually maps to "alignment-without-state-change" — which, if file/live match and file is committed, doesn't need a tool invocation at all.
+
+### Lesson 12 (Audit Session C apply phase + Phase D #1.5 pre-flight, 2026-05-03)
+
+**Test scaffolding must be persisted as durable executable code, not ephemeral SQL.**
+
+If a test matrix is authored interactively (cowork sessions, MCP-driven, REPL-style) and only the outcomes are persisted (e.g., to a `_test_results` table), the matrix becomes irreproducible the moment the session ends. Future re-runs require re-authoring from scratch — and re-authoring without the original SQL produces a *different* matrix that may have different coverage or different bugs. The persisted outcomes are then a snapshot of one matrix's truth, not a regression baseline against which future runs can be diffed apples-to-apples.
+
+**Empirical proof (Phase D #1.5 pre-flight, 2026-05-03):** Phase D run #1 (2026-05-02) recorded 177 PASS rows in `public._rls_test_results` across 23 patient-joined tables. The actual SELECT/INSERT/UPDATE statements that produced those rows were authored interactively across cowork sessions 5, 7, 10, 11, 13 — sent to the database via MCP `execute_sql`, generated the result rows, and then dissipated. The repo file `audits/rls-test-matrix.sql` (247 lines) is a scaffold doc with the scenario semantics (S1–S10 spec) and a CORRECT PATTERN template, but every per-table block is marked `⏳ scenarios to author next session`. There are zero `INSERT INTO public._rls_test_results` statements anywhere in the committed repo (grep-confirmed). When mig 106's behavioral change required a Phase D re-run as #1.5 to validate, the matrix could not be re-executed mechanically — only its outcomes survived.
+
+**Recovery cost:** ~2–4 hours of templating-based reconstruction, recovering executable SQL from the scaffold structure + run #1 description trail + persona UUIDs + per-table column shape. Recoverable because the scaffold is highly templated; would have been unrecoverable if the scenarios had been more bespoke.
+
+**Operational rule:**
+
+1. **Persist the SQL alongside the outcomes.** Any test scenario that ends with an `INSERT INTO _<test_table>_results` should be authored as a committed `.sql` file (or DO-block-per-table loop) BEFORE it runs. The MCP execution then executes the committed file, not improvised SQL.
+2. **Outcomes-only persistence is a regression-baseline anti-pattern.** A `_test_results` row says "the test passed" but doesn't say "here is the SQL that passed." Future runs need the SQL to confirm they're testing the same thing.
+3. **Templated matrices warrant authored DO-blocks-per-table loops.** If the test surface is N tables × M scenarios = N×M cells with shared CORRECT PATTERN, the matrix should be a single parameterized `.sql` file that loops over a `(persona, table, scenario, filter, expected_outcome)` tuple list — not 177 hand-typed copies of the template.
+4. **Outcomes table additionally records the source-of-truth file ref.** If `_rls_test_results` had a column `source_file TEXT` referencing the committed file path + line number that produced each row, today's reconstruction problem would have been a `git checkout` away. Add this column going forward.
+
+The cost of not doing this: today's pre-flight would have been a 5-minute "run the matrix script" → instead it's a queued 2–4 hour reconstruction in a fresh session, with the apply-phase push held until reconstruction completes.
+
 ---
 
 ## Sequence

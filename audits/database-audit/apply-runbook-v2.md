@@ -184,6 +184,41 @@ git commit -F /tmp/forensic-v2-commit.txt
 
 ---
 
+## Step 1.5 — Pre-apply policy body + column verification scan (CRITICAL)
+
+**Added 2026-05-03 per Audit Session C continuation, after mig 100 application failure surfaced this gap.**
+
+Before applying any forensic migration that backfills untracked SQL, scan each target table's live policy bodies and column shapes against the file content. Capture findings in a per-session pre-apply-scan doc. Triage any BODY-DRIFT, COLUMN-MISSING, or NAME-MISSING findings before edit + apply.
+
+See `audits/database-audit/preapply-scan-mig100-101-102.md` for today's reference example. The scan that surfaced `front_desk_staff.clinic_id` as a missing column took ~30 minutes and prevented mig 100's failure-recovery from blocking the rest of the apply sequence.
+
+**Workflow:**
+
+1. **Enumerate referenced objects.** For each migration in scope, list every table, column, policy name, function name, and FK constraint name the file references in its body.
+2. **Probe live state.** For each object:
+   - Tables: `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = '<X>'`.
+   - Columns: `SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '<X>'`.
+   - Policies: `SELECT tablename, policyname, qual::text, with_check::text FROM pg_policies WHERE schemaname = 'public' AND tablename = '<X>'`.
+   - Functions: `SELECT pg_get_functiondef(p.oid) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = '<X>'`.
+   - FK constraints: `SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = '<X>'::regclass AND contype = 'f'`.
+3. **Compare body-by-body.** For each policy / function the migration creates or replaces, compare the file body against the live body modulo whitespace and `public.`-prefix normalization.
+4. **Categorize findings:**
+   - **MATCH** — file and live align (modulo formatting). Migration is a true no-op for this artifact.
+   - **NAME-MISSING** — file references a name that doesn't exist on staging. May be intentional (the migration creates it) — check.
+   - **BODY-DRIFT** — file and live both have the artifact but bodies diverge structurally. May indicate untracked schema evolution. Triage required.
+   - **COLUMN-MISSING** — file references a column that doesn't exist on staging. STOP and surface; this would fail at apply time.
+   - **NEW** — file creates an artifact that the audit determined should not exist on staging yet (intentional gap-fill).
+5. **Triage BODY-DRIFT and COLUMN-MISSING findings.** For each, determine whether to (a) edit the file to match live, (b) accept that the file diverges and document why, (c) write a forward migration that brings live to match the file.
+6. **Capture in scan doc.** Save findings to `audits/database-audit/preapply-scan-<scope>-<date>.md` with the structure used by `preapply-scan-mig100-101-102.md`.
+
+**Required for any backfill of dashboard-applied SQL.** Optional but recommended for any in-place file edit re-apply.
+
+**Time budget:** scope-dependent. For 3 migrations × 14 tables (today's scope), ~30 minutes. Scale linearly with object count.
+
+**Empirical Lesson #9 (in EXECUTION_PROMPTS.md) codifies the discipline this step enforces.**
+
+---
+
 ## Step 2 — Apply forensic migrations 100-105 in order
 
 For each migration, run:
@@ -251,11 +286,13 @@ If either `can_*_access_global_patient` row shows TRUE, mig 106 did not apply co
 
 ---
 
-## Step 4 — Apply mig 087 in-place edit (true no-op)
+## Step 4 — Mig 087 in-place re-apply: SKIPPED per Mo ruling 2026-05-03
 
-After Part 2's edit (added `PERFORM pg_sleep` in wrong-code branch), the file body now matches live byte-for-byte. Re-applying via `supabase migration repair` / `db push`-style in-place re-application of `087_privacy_code_functions.sql` should leave the live function bodies unchanged.
+The mig 087 file body was aligned with live at edit time (Part 2 edit, see `audits/database-audit/mig-087-edit-confirmation.md`). Step 0b verified file/live match at `pg_sleep_count = 7`. Commit `797a5c3` includes the aligned file. Future fresh-DB resets via `supabase migration up` will use the committed file and produce identical live state.
 
-This step does NOT add a new tracking row. The intent is to ensure the file body that ships in the migration tree is the body that applies on a green-field deploy. Confirm by re-running the live-body probe:
+Re-applying via MCP `apply_migration` would add a 4th 087-related tracking row commemorating an edit timestamp without behavioral change. Tracking history exists to record state changes, not edit timestamps. Skip authorized.
+
+**Verification before skipping (run post-mig-106):** re-query of `pg_sleep_count` confirmed alignment maintained (no concurrent drift):
 
 ```sql
 WITH live AS (
@@ -268,9 +305,9 @@ SELECT
 FROM live;
 ```
 
-Expected: `7`. (Same as pre-apply.)
+Result: `pg_sleep_count = 7` (matches file). Alignment intact across the 100-106 apply window. None of migs 100-106 touched `verify_privacy_code`, as expected.
 
-If the file is re-applied via `CREATE OR REPLACE` and live now reports a count other than 7, the file diverged again — STOP and surface.
+**Tracking-semantic note (Empirical Lesson #11):** MCP `apply_migration` and CLI `migration up` have different tracking semantics. CLI's `supabase migration up` skips already-tracked migration versions and adds nothing. MCP's `apply_migration` always creates a new tracking row regardless of whether the version was previously tracked. Runbook design should account for which apply path is used: CLI for production-style re-runs, MCP for explicit state changes that warrant a tracking record. When the goal is alignment-without-state-change AND the file is already committed AND live already matches, neither path is needed — skip and document.
 
 ---
 

@@ -4,6 +4,41 @@
 -- Audit reference: audits/database-audit/out-of-band-2026-04-08.md
 -- Originated by:   Audit Session C (2026-05-03)
 --
+-- ----------------------------------------------------------------------------
+-- VERIFIED 2026-05-03 PART 3 (post-failure recovery, third-policy body drift)
+-- ----------------------------------------------------------------------------
+-- Initial application of this migration on 2026-05-03 FAILED with
+--   ERROR:  42703: column "clinic_id" does not exist
+-- on the third front_desk_staff policy ("Clinic members can view frontdesk
+-- staff in same clinic"). Pre-apply scan
+-- (audits/database-audit/preapply-scan-mig100-101-102.md) discovered:
+--
+--   * front_desk_staff.clinic_id was dropped via dashboard SQL between
+--     2026-04-08 (when the original out-of-band SQL referenced it
+--     successfully — see schema_migrations.statements row 20260408145102)
+--     and 2026-05-03 (today's scan). The drop was untracked.
+--   * The dependent policy "Clinic members can view frontdesk staff in
+--     same clinic" was simultaneously rewritten to a clinic_memberships-
+--     mediated form that joins via cm_target.user_id (FRONT_DESK or
+--     ASSISTANT role, in any clinic the auth user is a member of) instead
+--     of the now-missing front_desk_staff.clinic_id direct lookup.
+--   * This is the same systematic-rewrite pattern Session B's structural-
+--     drift spot-check flagged for invoice_requests::frontdesk_invoice_requests.
+--
+-- R3 ruling reverted for the third policy only: this file captures the LIVE
+-- post-rewrite policy body, not the 2026-04-08 verbatim. The 2026-04-08
+-- verbatim is preserved in schema_migrations.statements (tracking row
+-- 20260408145102) for forensic reference. The other 8 mig 100 policies
+-- (check_in_queue x3, payments x2, front_desk_staff "read own record" /
+-- "update own record", otp_codes "Users can view own phone-based otp")
+-- match staging byte-for-byte modulo whitespace; they re-apply as no-ops.
+--
+-- The out-of-band schema drift between 2026-04-08 and 2026-05-03 is
+-- documented separately in audits/database-audit/out-of-band-post-2026-04-08.md
+-- (Session C continuation). Empirical Lesson #9 codifies the temporal-
+-- verification discipline this discovery surfaces.
+-- ----------------------------------------------------------------------------
+--
 -- Purpose
 -- -------
 -- Restore the two out-of-band RLS-hardening fixes applied via the migrations
@@ -126,15 +161,27 @@ CREATE POLICY "Front desk staff can update own record"
   WITH CHECK (id = auth.uid());
 
 DROP POLICY IF EXISTS "Clinic members can view frontdesk staff in same clinic" ON public.front_desk_staff;
+-- Body diverges from the 2026-04-08 verbatim because front_desk_staff.clinic_id
+-- was dropped via dashboard SQL between 2026-04-08 and 2026-05-03 along with a
+-- structural rewrite of this policy. See the "VERIFIED 2026-05-03 PART 3"
+-- header subsection and audits/database-audit/preapply-scan-mig100-101-102.md
+-- for the discovery + rationale. This file captures live, not 2026-04-08
+-- verbatim — a documentation-fix, not a behavior change.
 CREATE POLICY "Clinic members can view frontdesk staff in same clinic"
   ON public.front_desk_staff
   FOR SELECT
   USING (
-    clinic_id IN (
-      SELECT cm.clinic_id
-      FROM public.clinic_memberships cm
-      WHERE cm.user_id = auth.uid()
-        AND cm.status = 'ACTIVE'
+    id IN (
+      SELECT cm_target.user_id
+      FROM public.clinic_memberships cm_target
+      WHERE cm_target.role = ANY (ARRAY['FRONT_DESK'::clinic_role, 'ASSISTANT'::clinic_role])
+        AND cm_target.status = 'ACTIVE'::membership_status
+        AND cm_target.clinic_id IN (
+          SELECT clinic_memberships.clinic_id
+          FROM public.clinic_memberships
+          WHERE clinic_memberships.user_id = auth.uid()
+            AND clinic_memberships.status = 'ACTIVE'::membership_status
+        )
     )
   );
 
