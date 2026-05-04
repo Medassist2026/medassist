@@ -514,4 +514,42 @@ export const en = {
   approvalInboxRejectReason: 'Rejection reason (will be shown to the staff member)',
   approvalInboxApproved: 'Approved and number changed',
   approvalInboxRejected: 'Request rejected',
+
+  // ============ Privacy code (Build prompt 04) ============
+  privacyCode_modalTitle: 'Enter Privacy Code',
+  privacyCode_modalBody: 'Ask the patient for their privacy code, or send them a code via SMS',
+  privacyCode_inputLabel: 'Privacy code',
+  privacyCode_inputPlaceholder: 'e.g. A4K9PM',
+  privacyCode_submit: 'Verify code',
+  privacyCode_smsButton: 'Send SMS code',
+  privacyCode_smsModalTitle: 'Enter SMS Code',
+  privacyCode_smsModalBody: 'We sent a 4-digit code to the patient. Ask them to read it back to you.',
+  privacyCode_smsInputPlaceholder: '0000',
+  privacyCode_smsResend: 'Resend',
+  privacyCode_smsExpiresIn: 'Code valid for 5 minutes',
+  privacyCode_uniformError: 'Invalid code or no record found',
+  privacyCode_genericError: 'Something went wrong, please try again',
+  privacyCode_unlockSuccess: 'Patient record unlocked',
+
+  // Patient app
+  patientPrivacy_title: 'Privacy Code',
+  patientPrivacy_explainer: 'This is the code you give the front desk when you visit a new clinic and want the doctor to see your records.',
+  patientPrivacy_codeLabel: 'Current code',
+  patientPrivacy_copyCode: 'Copy code',
+  patientPrivacy_copied: 'Copied',
+  patientPrivacy_regenerateButton: 'Change code',
+  patientPrivacy_regenerateConfirmTitle: 'Change your privacy code?',
+  patientPrivacy_regenerateConfirmBody: 'If you change your code, the old one will stop working. You\'ll need to give the new code to any clinic that wants to see your records.',
+  patientPrivacy_regenerateConfirm: 'Yes, change it',
+  patientPrivacy_regenerateCancel: 'Keep the current code',
+  patientPrivacy_noCodeYet: 'You don\'t have a code yet',
+  patientPrivacy_mintFirst: 'Create code',
+  patientPrivacy_warningOnce: 'We show this code only once. If you forget it, you\'ll need to create a new one.',
+
+  // Re-consent prompt
+  reconsent_title: 'Confirm Messaging Consent',
+  reconsent_bodyTemplate: '{clinicName} used to be able to message you before our system update. Want to keep that, or stop messages from this clinic?',
+  reconsent_keepOn: 'Yes, keep messaging on',
+  reconsent_turnOff: 'No, stop messages',
+  reconsent_progress: 'Clinic {current} of {total}',
 }

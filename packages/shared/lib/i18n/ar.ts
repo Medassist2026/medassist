@@ -631,4 +631,105 @@ export const ar = {
   prescriptionCreated: 'تم إنشاء الروشتة',
   vitalsRecorded: 'تم تسجيل العلامات الحيوية',
   labOrderCreated: 'تم إنشاء أمر التحليل',
+
+  // ============ Privacy code (Build prompt 04 / mig 082-087) ============
+  // NATIVE EGYPTIAN ARABIC SPEAKER REVIEW PENDING — ORPH-V4-07.
+  // The strings below are draft Egyptian dialect (NOT MSA). Mo to confirm
+  // a named native speaker review before merge; revise if needed.
+  privacyCode_modalTitle: 'إدخال كود الخصوصية',
+  privacyCode_modalBody: 'اطلبي من المريض كود الخصوصية بتاعه أو ابعتي له كود عبر SMS',
+  privacyCode_inputLabel: 'كود الخصوصية',
+  privacyCode_inputPlaceholder: 'مثال: A4K9PM',
+  privacyCode_submit: 'تأكيد الكود',
+  privacyCode_smsButton: 'إرسال كود عبر SMS',
+  privacyCode_smsModalTitle: 'إدخال كود الـ SMS',
+  privacyCode_smsModalBody: 'بعتنا للمريض كود ٤ أرقام على رقمه. اطلبي منه يقولك الكود.',
+  privacyCode_smsInputPlaceholder: '٠٠٠٠',
+  privacyCode_smsResend: 'إعادة الإرسال',
+  privacyCode_smsExpiresIn: 'الكود صالح لمدة ٥ دقايق',
+  privacyCode_uniformError: 'الكود غير صحيح أو لا يوجد سجل',
+  privacyCode_genericError: 'حصل خطأ، حاولي تاني',
+  privacyCode_unlockSuccess: 'تم فتح الوصول لسجل المريض',
+
+  // ============ Patient app — privacy code surface (B16) ============
+  patientPrivacy_title: 'كود الخصوصية',
+  patientPrivacy_explainer: 'ده الكود اللي بتديه للسكرتيرة لما تروح عيادة جديدة وعايز الدكتور يشوف سجلك.',
+  patientPrivacy_codeLabel: 'الكود الحالي',
+  patientPrivacy_copyCode: 'نسخ الكود',
+  patientPrivacy_copied: 'تم النسخ',
+  patientPrivacy_regenerateButton: 'تغيير الكود',
+  patientPrivacy_regenerateConfirmTitle: 'متأكد إنك عايز تغيير الكود؟',
+  patientPrivacy_regenerateConfirmBody: 'لو غيّرت الكود، الكود القديم مش هيشتغل تاني. لازم تدي الكود الجديد لأي عيادة عايزة تشوف سجلك.',
+  patientPrivacy_regenerateConfirm: 'أيوه، غيّر',
+  patientPrivacy_regenerateCancel: 'لا، خليه زي ما هو',
+  patientPrivacy_noCodeYet: 'لسه ماعندكش كود',
+  patientPrivacy_mintFirst: 'إنشاء الكود',
+  patientPrivacy_warningOnce: 'الكود ده بنعرضه مرة واحدة بس. لو نسيته، هتحتاج تنشئ كود جديد.',
+
+  // ============ Re-consent prompt (B17) ============
+  reconsent_title: 'تأكيد الموافقة على الرسائل',
+  // {clinicName} interpolation handled at render time
+  reconsent_bodyTemplate: 'عيادة {clinicName} كانت بتقدر تبعتلك رسائل قبل تحديث النظام. تحب تكمل كده، ولا توقف الرسايل من العيادة دي؟',
+  reconsent_keepOn: 'أيوه، كمل',
+  reconsent_turnOff: 'لا، اوقف الرسايل',
+  reconsent_progress: 'العيادة {current} من {total}',
+
+  // ============ Build 05 — Patient data shares lifecycle (sharing) ============
+  // ORPH-V5-04 (Mo to native-speaker review). Pattern follows reconsent_*
+  // and patientPrivacy_*: explanatory, plain Egyptian Arabic, no formality.
+  sharing_title: 'العيادات اللي بتشوف سجلاتك',
+  sharing_subtitle: 'هنا تقدر تتحكم في مين عنده صلاحية يشوف سجلك الطبي',
+  sharing_activeHeader: 'صلاحيات شغّالة',
+  sharing_historyHeader: 'السجلات السابقة',
+  sharing_emptyActive:
+    'ما فيش عيادة عندها صلاحية تشوف سجلك دلوقتي. لو رحت عيادة وأديتها كود الخصوصية بتاعك، هتظهر هنا.',
+  sharing_emptyHistory: 'ما فيش سجل سابق لمشاركات.',
+
+  // Card labels
+  sharing_grantedAt: 'بدأت',
+  sharing_expiresAt: 'بتنتهي',
+  sharing_expiresPermanent: 'مفتوحة (للأبد)',
+  sharing_expiredOn: 'انتهت',
+  sharing_revokedOn: 'تم الإلغاء',
+  sharing_grantedViaLabel: 'الطريقة',
+  sharing_via_PRIVACY_CODE: 'كود خصوصية',
+  sharing_via_SMS_CODE: 'كود رسالة',
+  sharing_via_PATIENT_APP: 'مباشرة من التطبيق',
+  sharing_via_AUTO_RENEW: 'تجديد تلقائي',
+
+  sharing_actionRevoke: 'إلغاء الوصول',
+  sharing_actionExtend: 'مدة أطول',
+  sharing_status_active: 'شغّالة',
+  sharing_status_expired: 'انتهت',
+  sharing_status_revoked: 'تم إلغاؤها',
+  sharing_status_permanent: 'دائمة',
+
+  // Revoke modal (B13)
+  sharing_revokeModalTitle: 'إلغاء الوصول لـ {clinicName}',
+  sharing_revokeModalBody:
+    'لو ألغيت الوصول، {clinicName} مش هتقدر تشوف سجلاتك بعد كده. أي ملاحظات الدكتور كتبها قبل النهاردة هتفضل في سجل العيادة بتاعتها (مش هتمسح من نظامهم).',
+  sharing_revokeModalReasonLabel: 'سبب الإلغاء (اختياري)',
+  sharing_revokeModalReasonPlaceholder: 'لو حابب توضّح ليه بتلغي',
+  sharing_revokeModalConfirm: 'إلغاء الوصول',
+  sharing_revokeModalCancel: 'متراجع',
+
+  // Extend modal (B14)
+  sharing_extendModalTitle: 'مدة الوصول لـ {clinicName}',
+  sharing_extendModalBody: 'اختار المدة الجديدة:',
+  sharing_extendOption_90: 'كمان ٩٠ يوم',
+  sharing_extendOption_90_help: 'الصلاحية هتنتهي بعد ٩٠ يوم من النهاردة.',
+  sharing_extendOption_year: 'سنة كاملة',
+  sharing_extendOption_year_help: 'الصلاحية هتنتهي بعد سنة من النهاردة.',
+  sharing_extendOption_permanent: 'للأبد',
+  sharing_extendOption_permanent_help:
+    'الصلاحية هتفضل شغّالة من غير تاريخ انتهاء، لحد ما تلغيها بنفسك.',
+  sharing_extendModalConfirm: 'تأكيد',
+  sharing_extendModalCancel: 'مش دلوقتي',
+
+  // Toast/feedback
+  sharing_toast_revoked: 'تم إلغاء الوصول',
+  sharing_toast_extended: 'تم تمديد المدة',
+  sharing_toast_alreadyRevoked: 'الصلاحية كانت متلغية أصلاً',
+  sharing_toast_alreadyPermanent: 'الصلاحية دائمة بالفعل',
+  sharing_toast_genericError: 'حصل خطأ، حاول تاني',
 }

@@ -1,6 +1,7 @@
 import { createClient } from '@shared/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { NextResponse } from 'next/server'
+import { timingSafeEqual } from 'node:crypto'
 
 export type UserRole = 'doctor' | 'patient' | 'frontdesk'
 
@@ -112,6 +113,53 @@ export async function requireApiRole(requiredRole: UserRole | UserRole[]): Promi
   }
 
   return user
+}
+
+/**
+ * Require a Supabase service-role bearer for an API route.
+ *
+ * Use this for endpoints that are reachable only via internal admin /
+ * verification tooling — not by any authenticated end-user role. Intended
+ * for `/api/admin/*` paths where even a doctor token must NOT grant
+ * access (e.g. global identity lookups that resolve any phone in the
+ * network — a privacy regression if exposed to per-clinic operators).
+ *
+ * Contract:
+ *   - Header `Authorization: Bearer <token>` is required.
+ *   - `<token>` must equal `process.env.SUPABASE_SERVICE_ROLE_KEY` byte for
+ *     byte (timing-safe compare).
+ *   - Any other shape (missing header, wrong scheme, wrong token, missing
+ *     env var) throws `ApiAuthError(401)`. We deliberately surface 401
+ *     (not 403) for "wrong token" — there is exactly one acceptable
+ *     credential, and we don't want to leak whether the env var is set
+ *     by responding 500 in misconfigured environments.
+ *
+ * Side note: returning 401 for both "no header" and "wrong token" makes
+ * the endpoint indistinguishable from "endpoint doesn't accept user
+ * auth" to a doctor token, which is what we want.
+ */
+export function requireServiceRole(request: Request): void {
+  const expected = process.env.SUPABASE_SERVICE_ROLE_KEY
+  // Even if the env var is missing we 401 rather than 500 — see contract
+  // above. The deployment health-check is a separate concern.
+  if (!expected || expected.length === 0) {
+    throw new ApiAuthError('Unauthorized', 401)
+  }
+
+  const header = request.headers.get('authorization') ?? request.headers.get('Authorization') ?? ''
+  const match = header.match(/^Bearer\s+(.+)$/i)
+  const token = match?.[1]
+  if (!token || token.length === 0) {
+    throw new ApiAuthError('Unauthorized', 401)
+  }
+
+  // Timing-safe compare requires equal-length buffers; we explicitly
+  // length-check first to avoid throwing inside timingSafeEqual.
+  const a = Buffer.from(token, 'utf8')
+  const b = Buffer.from(expected, 'utf8')
+  if (a.length !== b.length || !timingSafeEqual(a, b)) {
+    throw new ApiAuthError('Unauthorized', 401)
+  }
 }
 
 /**

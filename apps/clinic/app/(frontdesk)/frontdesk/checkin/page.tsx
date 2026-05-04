@@ -3,9 +3,12 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ChevronRight, Search, UserPlus, Check, AlertTriangle, ChevronDown, Banknote, CreditCard, Building2, ArrowLeftRight, WifiOff } from 'lucide-react'
+import { ChevronRight, Search, UserPlus, Check, AlertTriangle, ChevronDown, Banknote, CreditCard, Building2, ArrowLeftRight, WifiOff, Lock } from 'lucide-react'
 import { addPendingWrite } from '@shared/lib/offline/idb-cache'
 import { translateSpecialty } from '@shared/lib/utils/specialty-labels'
+import { normalizeEgyptianPhone } from '@shared/lib/utils/phone-normalize'
+import { ar } from '@shared/lib/i18n/ar'
+import { PrivacyCodeEntryModal } from '../../../../components/frontdesk/PrivacyCodeEntryModal'
 
 // ============================================================================
 // TYPES
@@ -68,9 +71,56 @@ export default function CheckInPage() {
   const [insuranceCompany, setInsuranceCompany] = useState('')
   const [insurancePolicyNumber, setInsurancePolicyNumber] = useState('')
 
+  // ── Privacy code unlock flow (Build 04 D7 wire-up) ──
+  // The page can land in three new states beyond the existing in-clinic /
+  // not-found branches:
+  //   - requires_code: searched a phone-shaped value with no local match;
+  //                    we offer "Request access" alongside the existing
+  //                    "Register new patient" link. The privacy invariant
+  //                    means BOTH "patient at another clinic" and
+  //                    "patient at no clinic" land here with identical UI.
+  //   - unlock_modal_open: PrivacyCodeEntryModal mounted; the user is
+  //                        entering a 6-char code or requesting an SMS.
+  //   - unlocked: verify_*_code succeeded; we show a brief confirmation
+  //               and route the front desk into the existing register
+  //               flow (which mints patients.id + DPR for THIS clinic so
+  //               the standard check-in path can take over). See § 4 of
+  //               audits/patient-identity-build-04-d7-results.md for why
+  //               we navigate to /register rather than auto-resolving in
+  //               place: the modal contract only forwards
+  //               global_patient_id, and the existing check-in flow keys
+  //               on patients.id.
+  const [clinicId, setClinicId] = useState<string | null>(null)
+  const [unlockModalOpen, setUnlockModalOpen] = useState(false)
+  const [unlockPhone, setUnlockPhone] = useState('')
+  const [unlocked, setUnlocked] = useState<{ gpid: string; phone: string } | null>(null)
+
   useEffect(() => {
     loadDoctorsWithStats()
+    loadClinicId()
   }, [])
+
+  // Source the active clinic ID for the privacy code modal.
+  //
+  // Why /api/frontdesk/profile? It already returns the user's
+  // memberships (the profile page consumes it). The first ACTIVE
+  // membership is the canonical "this front desk's clinic" — matching
+  // getFrontdeskClinicId's server-side LIMIT 1 / status='ACTIVE' query.
+  // Adding a fetch instead of threading the layout-level clinic context
+  // through props keeps this change contained to one file (per the
+  // D7 prompt's "one file edited" constraint).
+  const loadClinicId = async () => {
+    try {
+      const res = await fetch('/api/frontdesk/profile')
+      if (!res.ok) return
+      const data = await res.json()
+      const active = (data.memberships || []).find((m: any) => m.status === 'ACTIVE')
+      if (active?.clinicId) setClinicId(active.clinicId)
+    } catch {
+      // Non-fatal — the privacy code CTA stays disabled until clinicId
+      // resolves. The rest of the check-in page works without it.
+    }
+  }
 
   const loadDoctorsWithStats = async () => {
     try {
@@ -385,14 +435,59 @@ export default function CheckInPage() {
                 </div>
               )}
               {searching && searchQuery.length >= 1 && <p className="font-cairo text-[12px] text-[#9CA3AF] mt-2 text-center">جاري البحث...</p>}
-              {searchQuery.length >= 2 && !searching && searchResults.length === 0 && (
-                <div className="mt-3 text-center">
-                  <p className="font-cairo text-[13px] text-[#6B7280] mb-2">لم يتم العثور على المريض</p>
-                  <Link href="/frontdesk/patients/register" className="inline-flex items-center gap-1.5 font-cairo text-[13px] font-medium text-[#16A34A]">
-                    <UserPlus className="w-4 h-4" />تسجيل مريض جديد
-                  </Link>
-                </div>
-              )}
+              {searchQuery.length >= 2 && !searching && searchResults.length === 0 && (() => {
+                // Privacy invariant: this branch must render IDENTICALLY for
+                // "patient at another clinic" and "patient at no clinic at all".
+                // We do NOT call any leaky API here; we simply key on whether
+                // the input shape is a valid Egyptian mobile (which is purely
+                // a client-side regex/parse — reveals nothing about server state).
+                //
+                // If phone-shaped: surface BOTH "Request access" (privacy code
+                // unlock) and the existing register flow. If name-shaped:
+                // existing register-only UX is unchanged.
+                const normalizedPhone = normalizeEgyptianPhone(searchQuery.trim())
+                const isPhoneShaped = normalizedPhone !== null
+                // Doctor selection happens BELOW the search box. To avoid
+                // gating "Request access" on doctor pick (a UX regression),
+                // we fall back to the first loaded doctor as a default for
+                // the SMS-path's requesting_doctor_id. The manual code path
+                // does not surface doctor name to the patient. See § 1 of
+                // patient-identity-build-04-d7-results.md.
+                const fallbackDoctorId = selectedDoctor || doctors[0]?.id || ''
+                const canOpenModal = !!clinicId && !!fallbackDoctorId
+                return (
+                  <div className="mt-3 text-center space-y-3">
+                    {isPhoneShaped ? (
+                      <>
+                        {/* TODO(Mo, ORPH-V4-07): replace hardcoded Arabic
+                            with i18n keys (e.g. privacyCode_requiresCodeBody,
+                            privacyCode_openModalCta) once added to ar.ts.
+                            Wording is intentionally uniform — it does NOT
+                            tell the front desk whether the patient exists
+                            elsewhere. */}
+                        <p className="font-cairo text-[13px] text-[#6B7280]">لو المريض عنده كود خصوصية</p>
+                        <button
+                          onClick={() => {
+                            if (!canOpenModal) return
+                            setUnlockPhone(normalizedPhone!)
+                            setUnlockModalOpen(true)
+                          }}
+                          disabled={!canOpenModal}
+                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-[10px] border-[0.8px] border-[#16A34A] bg-[#F0FDF4] text-[#16A34A] font-cairo text-[13px] font-medium disabled:opacity-50"
+                        >
+                          <Lock className="w-4 h-4" />طلب الوصول
+                        </button>
+                        <p className="font-cairo text-[12px] text-[#9CA3AF]">أو</p>
+                      </>
+                    ) : (
+                      <p className="font-cairo text-[13px] text-[#6B7280] mb-2">لم يتم العثور على المريض</p>
+                    )}
+                    <Link href="/frontdesk/patients/register" className="inline-flex items-center gap-1.5 font-cairo text-[13px] font-medium text-[#16A34A]">
+                      <UserPlus className="w-4 h-4" />تسجيل مريض جديد
+                    </Link>
+                  </div>
+                )
+              })()}
             </>
           )}
         </div>
@@ -576,6 +671,88 @@ export default function CheckInPage() {
           ) : 'تسجيل وصول المريض'}
         </button>
       </div>
+
+      {/* ── Privacy code unlock modal (Build 04 D7) ───────────────────
+          Mounted unconditionally; visibility is controlled by the
+          `open` prop. The modal itself runs the verify-* fetch on its
+          own and only forwards `global_patient_id` to onUnlock —
+          consequently the per-clinic patients.id resolution is done
+          server-side inside the (extended) verify-* handlers, and
+          the page's onUnlock handler then routes to the existing
+          register flow to materialize patients.id + DPR for THIS
+          clinic before the standard check-in path takes over.
+          See audits/patient-identity-build-04-d7-results.md § 2. */}
+      <PrivacyCodeEntryModal
+        open={unlockModalOpen}
+        phone={unlockPhone}
+        clinicId={clinicId || ''}
+        doctorId={selectedDoctor || doctors[0]?.id || ''}
+        onClose={() => setUnlockModalOpen(false)}
+        onUnlock={(gpid: string) => {
+          setUnlockModalOpen(false)
+          setUnlocked({ gpid, phone: unlockPhone })
+        }}
+      />
+
+      {/* Post-unlock confirmation banner. The verify-* handlers have
+          already created the patient_clinic_records row + audit; the
+          per-clinic legacy patients.id may or may not exist. We hand
+          off to the existing register flow which onboardPatient()
+          links to the global identity layer (mig 081 compat shim
+          ensures the existing global_patients row is used, not a
+          duplicate). After registration, the standard check-in path
+          can pick up the patient.
+
+          NOTE: the existing register page does NOT yet read ?phone=
+          from the URL — the front desk will retype the phone there.
+          Tracked in deliverable § 5 as a small follow-up. */}
+      {unlocked && (
+        <div
+          dir="rtl"
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1100] px-4"
+          onClick={() => setUnlocked(null)}
+        >
+          <div
+            className="bg-white rounded-[12px] p-6 max-w-[400px] w-full"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+          >
+            <div className="w-14 h-14 bg-[#F0FDF4] rounded-full flex items-center justify-center mx-auto mb-3">
+              <Check className="w-7 h-7 text-[#16A34A]" />
+            </div>
+            {/* Existing key in ar.ts */}
+            <h3 className="font-cairo text-[16px] font-bold text-[#030712] text-center mb-2">
+              {ar.privacyCode_unlockSuccess}
+            </h3>
+            {/* TODO(Mo, ORPH-V4-07): add an i18n key for this hand-off
+                copy, e.g. privacyCode_unlockNextStep. Hardcoded for now. */}
+            <p className="font-cairo text-[13px] text-[#6B7280] text-center mb-4 leading-relaxed">
+              تم التحقق. كمّلي تسجيل المريض في عيادتك علشان نضيفه للطابور.
+            </p>
+            <div className="space-y-2">
+              <button
+                onClick={() => {
+                  // Navigate to register with phone pre-filled in the URL.
+                  // The register page does not consume ?phone= today; this
+                  // is forward-compatible and documented as a follow-up.
+                  const phoneForUrl = encodeURIComponent(unlocked.phone)
+                  router.push(`/frontdesk/patients/register?phone=${phoneForUrl}&unlocked=1`)
+                }}
+                className="w-full h-[44px] bg-[#16A34A] hover:bg-[#15803D] text-white rounded-[12px] font-cairo text-[14px] font-bold transition-colors"
+              >
+                تسجيل مريض جديد
+              </button>
+              <button
+                onClick={() => setUnlocked(null)}
+                className="w-full h-[40px] bg-[#F3F4F6] text-[#4B5563] rounded-[12px] font-cairo text-[13px] font-medium"
+              >
+                {ar.cancel}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

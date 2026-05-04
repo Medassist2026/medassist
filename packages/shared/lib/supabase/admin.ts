@@ -35,6 +35,8 @@ const ALLOWED_ADMIN_SCOPES = new Set([
   'phone-change-owner-approve',    // same surface as commit
   'phone-change-owner-reject',     // UPDATE phone_change_requests.status='rejected'
   'phone-correction',              // UPDATE patients + INSERT phone_corrections + history (Phase C)
+  // ── Global patient identity (mig 072 / Build prompt 02) ──────────────────
+  'global-patients-lookup',        // SELECT global_patients by id / normalized_phone
 ])
 
 /**
