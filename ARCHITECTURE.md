@@ -38,6 +38,7 @@ medassist/
 │   │       ├── api/handlers/      # Shared API handler logic (doctor/appointments, frontdesk/checkin, queue, payments)
 │   │       ├── audit/             # Audit trail logger
 │   │       ├── notifications/     # Push notification creation
+│   │       ├── hooks/              # Shared React hooks (useOfflineMutation — IDB-backed offline write queue)
 │   │       ├── offline/           # IndexedDB cache + pending-writes queue (idb-cache.ts only)
 │   │       ├── privacy/           # Schema health checks
 │   │       ├── realtime/          # Supabase realtime subscriptions
@@ -76,7 +77,7 @@ medassist/
 | Framework | Next.js (App Router) | 14.2.25 | Server components + client islands |
 | Language | TypeScript | 5.x | Strict mode, 0 errors (D-043 cleanup; root + workspace tsc gated in CI per D-045) |
 | Styling | Tailwind CSS | 3.4 | Custom design tokens, Cairo font, RTL-first |
-| Database | PostgreSQL (Supabase) | 15 | RLS policies (clinic-scoped, 052–067), 67 migrations |
+| Database | PostgreSQL (Supabase) | 15 | RLS policies (clinic-scoped, 052–067), 70 migrations (068 staged for cleanup) |
 | Auth | Supabase Auth | — | Email/phone + password, OTP verification |
 | Realtime | Supabase Realtime | — | Queue subscriptions, live updates |
 | Storage | Supabase Storage | — | Attachments bucket |
@@ -85,7 +86,7 @@ medassist/
 | Error Tracking | Sentry | 10.38 | `@sentry/nextjs` integration |
 | Package Manager | npm | 10.2.4 | Workspaces for monorepo |
 | Build | Turborepo | — | Pipeline: lint → type-check → build |
-| Git Hooks | Husky | — | `pre-push`: runs `npm run type-check -w @medassist/clinic` to catch type errors before they reach Vercel. Added after `b724eb1` incident (see D-042). Activates via `prepare: husky` script. |
+| Git Hooks | Husky | — | `pre-push`: runs root `npm run type-check` (monorepo-wide `tsc --noEmit`) + per-workspace `type-check -w @medassist/clinic`. Root gate catches phantom imports invisible to per-workspace tsconfig (D-045). Originally added after `b724eb1` incident (D-042). |
 
 ---
 
@@ -199,7 +200,7 @@ createAdminClient(scope) → Bypasses RLS (scope param for audit trail)
 | `patients.ts` | Patient CRUD, doctor-patient relationships, onboarding |
 | `clinical-notes.ts` | Clinical session notes, save with Rx intelligence |
 | `clinical.ts` | Prescription data, patient summaries |
-| `frontdesk.ts` | Queue management, check-in, appointments, payments |
+| `frontdesk.ts` | Queue management, check-in, appointments, payments. `getAvailableSlots()` returns `AvailableSlotsResult` with `SlotReason` enum (`'ok' \| 'no_availability_configured' \| 'doctor_off_today'`) so the UI can render reason-specific Arabic messages instead of a silent empty list. See D-058. |
 | `frontdesk-scope.ts` | Clinic scoping for frontdesk operations |
 | `clinic-context.ts` | Clinic resolution, active clinic, doctor lists |
 | `memberships.ts` | Clinic membership management |
@@ -214,7 +215,7 @@ createAdminClient(scope) → Bypasses RLS (scope param for audit trail)
 | `lab-results.ts` | Lab result storage and retrieval |
 | `patient-dedup.ts` | Duplicate patient detection |
 | `payments.ts` | Payment status constants (`PAYMENT_STATUS`: `pending \| completed \| refunded \| cancelled`), `isCollectedPayment` predicate. Single source of truth for payment status checks — never hardcode status strings in queries. |
-| `users.ts` | User account creation per role |
+| `users.ts` | User account creation per role. `createDoctorAccount()` auto-seeds 5 default `doctor_availability` rows (Sun–Thu 09:00–17:00, 15-min slots) on doctor registration. Idempotent via `upsert` with `ignoreDuplicates`. Failure logs but does not fail registration. See D-058. |
 | `phone-changes.ts` | Phone-change workflow engine (~1100 lines, 8 public functions). Covers the full lifecycle: `requestPhoneChange`, `verifyPhoneChangeOtp`, `cancelPhoneChange`, `openFallbackPhoneChange`, `approvePhoneChangeRequest`, `rejectPhoneChangeRequest`, `commitPhoneChange`, `correctPatientPhone`. Orchestrates dual-OTP verification (old phone + new phone), auth-admin sync (`supabase.auth.admin.updateUserById`), cross-clinic patient propagation via `change_phone_commit` RPC, compensating rollback via `change_phone_rollback` RPC on auth-admin failure, and per-clinic audit fan-out. All endpoints gated behind `FEATURE_PHONE_CHANGE_V2` env flag. See D-051. |
 
 **Analytics module** (`packages/shared/lib/analytics/`):
@@ -467,7 +468,7 @@ Created via Migration 043. All passwords: `Test1234!`
 - **Strict mode**: Enabled
 - **CI gate**: `npm run type-check` (root) and per-workspace `type-check -w @medassist/clinic` / `-w @medassist/patient` are required CI checks. Pre-push hook runs the same root + clinic-workspace combo locally (D-042 + D-045).
 - **Verification**: `npx tsc --noEmit` from project root → 0 errors.
-- **Test runner**: Mixed. `doctor-stats.test.ts` (31 tests) and `drug-interactions.test.ts` use a hand-rolled `test()` harness via `npx tsx <file>`. `frontdesk/payments/create/__tests__/handler.test.ts` uses Vitest with compile-time witnesses + `@ts-expect-error` regression guards — first Vitest usage in the repo. Full Vitest migration recommended before CI enforcement.
+- **Test runner**: Mixed. `doctor-stats.test.ts` (31 tests) and `drug-interactions.test.ts` use a hand-rolled `test()` harness via `npx tsx <file>`. `frontdesk/payments/create/__tests__/handler.test.ts` and `packages/shared/hooks/__tests__/useOfflineMutation.test.ts` use Vitest with compile-time witnesses + `@ts-expect-error` regression guards. The `useOfflineMutation` test locks the hook surface, the optional `clientIdempotencyKey` data-layer contract, and the idb-cache 409-as-success invariant (D-050). Full Vitest migration recommended before CI enforcement.
 
 ---
 
@@ -497,12 +498,16 @@ Created via Migration 043. All passwords: `Test1234!`
 | Feature flag gating | Phone-change endpoints | `FEATURE_PHONE_CHANGE_V2` env var. When falsy, all 8 handlers return 404 — code is deployed but dormant. Flip the flag to activate without a deploy. Pattern reusable for future gated features. See D-051 |
 | Frontdesk-as-proxy | Phone-change Flow E | For patient identity-phone changes, the frontdesk staffer initiates the change and the patient provides the OTPs verbally. Handler validates `actor.role === 'frontdesk' AND patient.clinic_id === getFrontdeskClinicId(actor)` and records `actorRole='frontdesk_proxy'` in audit metadata. Mirrors the existing physical-world workflow. See D-051, D-055 |
 | Compensating rollback | `change_phone_commit` + `change_phone_rollback` RPCs | After SQL commit succeeds, auth-admin sync may fail. On failure, `change_phone_rollback` fires to revert `users.phone` + `patients.phone` changes. Rollback keyed by `subject_id` (not by phone value) to avoid clobbering unrelated users. See D-051 |
+| Phone-first identity | Register page (`/frontdesk/patients/register`) | Phone field renders first with `autoFocus`; name, age, sex inputs disabled until `isValidEgyptianLocalPhone(phone)` returns true. Enforces phone-as-identity at the UI layer — existing-patient detection happens at the phone field, never at submit. Do not add name typeahead to identity-establishing forms. See D-057 |
+| Discovery vs. identity | Check-in (discovery) vs. Register (identity) | Name search is a discovery aid on the Check-in page only. Identity is established exclusively via phone on the Register page. Do not promote name to a discovery primitive on registration forms. See D-057 |
+| Onboarding auto-seed | `createDoctorAccount()` in `users.ts` | New doctors get 5 default `doctor_availability` rows (Sun–Thu 09:00–17:00, 15-min slots). Prevents empty appointment slot picker on first use. Idempotent `upsert` — failure logs but does not fail registration. See D-058 |
+| API reason enum for empty states | `getAvailableSlots()` → `AvailableSlotsResult` | When a list endpoint returns empty, distinguish *why* via a `reason` enum field instead of a bare `[]`. Enables the UI to render actionable Arabic messages per cause. See D-058 |
 
 ---
 
 ## 16. Known Technical Debt
 
-> Tracking table for identified issues. TD-001–005 resolved; TD-007 superseded; TD-008 resolved 26 Apr (D-050); TD-006, TD-009, TD-010, TD-011, TD-012, TD-013, TD-014, TD-015 open.
+> Tracking table for identified issues. TD-001–005 resolved; TD-007 superseded; TD-008 resolved 26 Apr (D-050); TD-006, TD-009, TD-010, TD-011, TD-012, TD-013, TD-014, TD-015, TD-016 open.
 
 | ID | Issue | Location | Impact | Status |
 |----|-------|----------|--------|--------|
@@ -521,3 +526,4 @@ Created via Migration 043. All passwords: `Test1234!`
 | TD-013 | **Dual audit modules: `audit_log` (legacy) vs `audit_events` (clinic-scoped).** `audit_log` is service-role-only, invisible to OWNERs. `audit_events` is clinic-scoped, OWNER-readable. Phone changes (Phase A + B) use `logAuditEvent` (audit_events). Legacy `auditLog` still used by older surfaces. | `packages/shared/lib/audit/`, multiple handler files | Audit data split across two tables with different access models; OWNER cannot see legacy audit entries | Open — deprecate `auditLog` and migrate callers to `logAuditEvent`. |
 | TD-014 | **Phase A frontdesk profile PATCH has a 30-day removal trigger.** Top-of-file SECURITY NOTE documents that once Phase B is live and PR-3 ships, the legacy no-OTP path should be removed. `metadata.pathway: 'phase_a_legacy_no_otp'` marker distinguishes legacy changes in audit queries. | Frontdesk patient profile PATCH handler | Security: Phase A allows phone changes without OTP verification, relying only on frontdesk trust | Open — remove 30 days after `FEATURE_PHONE_CHANGE_V2` flag flip. |
 | TD-015 | **1 already-divergent `auth.users.phone` row in production.** Found during phone-change investigation: 1 of 288 rows where `auth.users.phone` differs from `public.users.phone`. Root cause unknown (likely prior manual fix or migration gap). `change_phone_commit` now syncs both tables going forward, but the pre-existing divergence was not remediated. | `auth.users` table, production DB | That user's login could fail depending on which table's phone value the code path reads | Open — investigate and reconcile manually. |
+| TD-016 | **Several write handlers still use `getUserClinicId` instead of `getFrontdeskClinicId` for tenant resolution.** D-059 fixed `checkInPatient` and `createAppointment` handlers but the same pattern divergence from D-041 exists in: `patients/create`, `patients/[id]`, `patients/onboard`, `patients/my-patients`, `doctor/patients/add`, frontdesk layout. `getUserClinicId` silently returns null when the user has no matching membership, causing downstream writes to either 500 (NOT NULL constraint) or scope incorrectly. | Multiple handler files across `api/frontdesk/` and `api/doctor/` | D-041 violation; writes may fail or mis-scope under edge cases | Open — audit and swap to `getFrontdeskClinicId`/`getClinicContext` per D-041. |

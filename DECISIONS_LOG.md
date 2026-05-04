@@ -597,5 +597,32 @@
 
 ---
 
-*Last entry: D-057 | 26 April 2026*
+## D-058: Appointment empty-slots fix — onboarding auto-seed + API reason field + Arabic UX
+
+**When**: 26 April 2026
+**Context**: Frontdesk tester reported "مفيش اختيارات للمواعيد" (no options for appointments) — the time-slot picker rendered empty in the booking flow. Investigation via Supabase MCP against production revealed an onboarding gap, not a code bug: only 4 of 109 doctors (3.7%) had active `doctor_availability` rows. The remaining 105 had zero rows, so `getAvailableSlots()` correctly returned `[]`, and the UI displayed a silent generic English message with no actionable guidance. `clinics.settings` (D-025) was also empty for every clinic — the jsonb fields never shipped. Three ranked hypotheses confirmed with SQL evidence before proposing any fix.
+**Decision**: Fix three layers simultaneously:
+1. **Onboarding auto-seed**: `createDoctorAccount()` in `users.ts` now seeds 5 default `doctor_availability` rows (Sun–Thu 09:00–17:00, 15-min slots, matching mig 043 dev accounts). Uses `upsert` with `onConflict: 'doctor_id,day_of_week,start_time'` and `ignoreDuplicates: true` for idempotency. Failure logs but does NOT fail registration — availability is a feature, not an identity prerequisite.
+2. **API reason field**: `getAvailableSlots()` return type changed from `AvailableSlot[]` to `AvailableSlotsResult` with a `SlotReason` enum (`'ok' | 'no_availability_configured' | 'doctor_off_today'`). Replaced per-day `.single()` query with one fetch of all active rows + `.find()` by dayOfWeek — both empty cases distinguishable in a single round-trip.
+3. **Arabic UX**: `AppointmentBookingForm.tsx` renders reason-specific RTL Arabic messages — amber callout for `no_availability_configured` ("لم يتم ضبط مواعيد عمل هذا الطبيب بعد") surfacing the actionable next step, gray callout for `doctor_off_today` ("الطبيب غير متاح في هذا اليوم").
+**Alternatives**: Backfill all 105 existing zero-availability doctors (rejected — Mo's explicit choice; owners should configure manually), seed via migration instead of onboarding code (only helps new doctors, doesn't establish the pattern for future role-specific defaults), add a "set up availability" wizard to the onboarding flow (over-engineering for Phase 1).
+**Outcome**: New doctors get working slots immediately. Existing empty-availability doctors see an actionable Arabic message instead of a silent blank. API reason-enum pattern is reusable for other empty-state endpoints. 105 existing doctors NOT backfilled by design — onboarding auto-seed only applies to new registrations.
+
+---
+
+## D-059: clinic_id write-path fix — check-in and appointments silently broken for ~36 hours
+
+**When**: 26 April 2026
+**Context**: Frontdesk tester reported "مش بيحفظ المواعيد في تسجيل وصول / ولا بيحفظ في المواعيد" — neither check-in nor appointment was saving. Investigation traced to a direct consequence of the D-041 migrations: mig 051 added `check_in_queue.clinic_id NOT NULL` and mig 053 added `appointments.clinic_id NOT NULL`, but the data-layer functions in `frontdesk.ts` were never updated to supply the value. `checkInPatient()` never set `clinic_id` at all — every check-in 500'd at the DB constraint. `createAppointment()` used a conditional spread (`...(params.clinicId && { clinic_id })`) that silently dropped the column whenever the handler couldn't resolve a clinic. Direct DB repro confirmed: `INSERT INTO check_in_queue` without `clinic_id` → `23502: null value violates not-null constraint`. Live evidence: zero rows in either table since 2026-04-25 (constraints went live), ~36h silent outage across the fleet.
+**Decision**: Fix both data-layer functions and their upstream handlers in a single commit:
+1. `checkInPatient()` and `createAppointment()` now take `clinicId` as required. Runtime guard throws before reaching the DB. Mirrors the `createPayment` pattern from mig 047.
+2. Both frontdesk handlers (`checkin/handler.ts`, `appointments/create/handler.ts`) swap `getUserClinicId` → `getFrontdeskClinicId` (D-041 server-resolved tenant scope). Return clean 403 "Clinic context not found" instead of letting the DB 500.
+3. `urgent/route.ts` — same pattern, plus a second latent bug: the inline `check_in_queue` INSERT (when `patientAlreadyPresent=true`) was also missing `clinic_id`.
+4. Cosmetic: check-in success screen was reading `data.queueNumber`/`data.queue_number` but the handler returns `{queueItem: {queue_number}}`. The "رقم الانتظار" badge was never rendering on real check-ins. Now reads `queueItem.queue_number`.
+**Alternatives**: Backfill `clinic_id` via database trigger or default (rejected — hides the application-layer gap; the handler must resolve the correct clinic, not the DB), fix only `checkInPatient` and defer appointments (rejected — same root cause, same fix pattern, no reason to split), add a migration to make `clinic_id` nullable again as a rollback (rejected — D-041 constraint is correct, the handlers were wrong).
+**Outcome**: Both high-frequency frontdesk flows restored. Five files changed, all following the D-041 pattern. Remaining handlers still using `getUserClinicId` flagged as TD-016 for a follow-up audit.
+
+---
+
+*Last entry: D-059 | 26 April 2026*
 *Add new decisions at the bottom with sequential ID.*
