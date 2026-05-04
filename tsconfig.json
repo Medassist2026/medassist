@@ -16,7 +16,9 @@
     "incremental": true,
     "paths": {
       "@shared/*": ["./packages/shared/*"],
-      "@ui-clinic/*": ["./packages/ui-clinic/*"]
+      "@ui-clinic/*": ["./packages/ui-clinic/*"],
+      "@patient/*": ["./apps/patient/*"],
+      "@clinic/*": ["./apps/clinic/*"]
     }
   },
   "include": ["**/*.ts", "**/*.tsx"],
