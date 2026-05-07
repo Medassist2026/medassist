@@ -2,8 +2,8 @@
 > Living document. Updated at the START and END of every cowork session.
 > Source of truth for "what are we working on, what's done, what's next, what's blocked."
 
-**Last updated:** 2026-05-07T04:11Z (cowork session — STATE_OF_WORK setup)
-**Last session:** Setup of this living state-of-work document; no Phase D / Phase F / build work in this session.
+**Last updated:** 2026-05-06 (cowork session — Phase D #1.5 matrix reconstruction COMPLETE; 177/177 PASS; D-074 + mig 107 shipped)
+**Last session:** Phase D #1.5 reconstruction. Authored `audits/rls-test-matrix-reconstructed.sql` (executable, 177 scenarios, 24 tables); applied mig 107 (`run_no INTEGER → NUMERIC` + `source_file TEXT` + recorder fn re-creation); ran the matrix end-to-end on staging at `run_no = 1.5` with 177/177 PASS, fail = 0 across all tables. Comparison-vs-run-#1 returned a single-row divergence on `audit_events.S6` (row count 8→10) — explained as seed-cycle drift from incomplete `rls_test_teardown()` cleanup of `entity_type='patient_clinic_record'` audit rows; outcome match (SUCCESS=SUCCESS) preserved, NOT an RLS regression. Push gate released. D-074 added; ARCHITECTURE §8.6 + §12 updated; mig 107 + rollback committed to repo.
 
 ---
 
@@ -13,29 +13,7 @@
 with a defined end state. When a workstream is fully done, MOVE its section to
 "Completed workstreams" below; do not delete.)
 
-### Workstream: Phase D #1.5 matrix reconstruction
-- **Status:** Not started (this session is setup-only — reconstruction begins next session)
-- **Owner session:** TBD (next cowork session)
-- **Started:** Queued 2026-05-03 at end of forensic apply window; reconstruction not yet begun
-- **Goal:** Produce an executable RLS test matrix at `audits/rls-test-matrix-reconstructed.sql` that reproduces Phase D run #1's 177 PASS scenarios, then execute against staging as `run_no = 1.5` and confirm 177/177 outcome agreement before pushing the audit-detour commit chain.
-- **Done when:**
-  - Reconstructed `.sql` file is committed to repo with header documenting scenario semantics inherited from the scaffold.
-  - `_rls_test_results WHERE run_no = 1.5` contains 177 rows.
-  - Comparison query against `run_no = 1` returns zero divergent rows (per `PHASE_D_RECONSTRUCTION_HANDOFF.md` § "Comparison query").
-  - Push gate to `origin/main` released; Phase F Step 2 cleared to resume.
-- **Currently doing:** Nothing — pending session pickup. Entry point is `audits/database-audit/PHASE_D_RECONSTRUCTION_HANDOFF.md` per the handoff doc's "Last word" instruction.
-- **Last commit:** `23229f8` (2026-05-03) feat(audit): forensic apply complete on staging + Phase D matrix reconstruction queued
-- **Next action:** Open fresh cowork session. Read `audits/database-audit/PHASE_D_RECONSTRUCTION_HANDOFF.md` end-to-end. Reconstruct matrix per the templating theory (per-table DO-block loop over `(persona, scenario, filter, expected_outcome)` tuples). Refresh seed via `SELECT public.rls_test_teardown(); SELECT public.rls_test_seed();` then execute as `run_no = 1.5`.
-- **Blockers:** None — reconstruction inputs (scaffold, seed file, run #1 results, schema snapshot) are all on disk / on staging.
-- **Cross-refs:**
-  - `audits/database-audit/PHASE_D_RECONSTRUCTION_HANDOFF.md` (entry point)
-  - `audits/rls-test-matrix.sql` (scaffold — scenario semantics S1–S10 at lines 97–130; tables-to-cover at lines 165–204)
-  - `audits/rls-test-seed.sql` (stable persona UUIDs starting at line 79)
-  - `audits/database-audit/staging-schema-2026-05-03.sql` (per-table column shapes — note: pre-mig-104/105 snapshot)
-  - `audits/database-audit/apply-runbook-v2.md` § Step 7 (failure-class triage)
-  - `audits/PROGRAM_STATE.md` § "Current Blocker"
-  - Empirical Lesson #12 (test scaffolding must be persisted as durable executable code) — root cause of the reconstruction need
-  - D-064 (hybrid 3 DEFINER + 2 INVOKER RLS architecture) — the behavioral change mig 106 introduced that requires regression coverage
+(none — Phase D #1.5 moved to "Completed workstreams" below.)
 
 ---
 
@@ -127,6 +105,7 @@ None currently — Phase D #1.5 was queued but is now classified as Active above
 - **2026-05-04:** Per-app TypeScript path aliases — `@patient/*` and `@clinic/*` retire shared `@/*`. Codified by D-065. Commit `bb50305`. Empirical Lesson #14 captures the trap.
 - **2026-05-04 (later, by author timestamp = 2026-05-07 UTC):** Phase 5 deep audit reconciliation — ARCHITECTURE.md / DECISIONS_LOG.md / PRODUCT_SPEC.md brought current with shipped reality (Builds 02–05); Empirical Lessons #13 and #16 codified. Commit `19fb148`.
 - **2026-05-04 (latest, commit `6934db3`):** Audit corpus artifacts tracked in git — finalizes the audit detour. HEAD as of this STATE_OF_WORK setup.
+- **2026-05-06:** Phase D #1.5 matrix reconstruction. **Outcome:** 177/177 PASS at `run_no = 1.5`, fail = 0 across all 24 tables. Push gate to `origin/main` released. **Shipped:** mig 107 (`run_no INTEGER → NUMERIC` + `source_file TEXT` + `rls_test_record(...)` re-creation) + `audits/rls-test-matrix-reconstructed.sql` (executable matrix; per-table DO blocks; tuple loops; SET-LOCAL-ROLE harness pattern). **Comparison vs run #1:** one row diverges, `audit_events.S6` count 8 → 10, attributed to seed-cycle accumulation of `entity_type='patient_clinic_record'` audit events not cleaned by `rls_test_teardown()`; outcomes match (SUCCESS=SUCCESS); NOT an RLS regression. **Architectural ruling:** D-074 (the matrix is the canonical RLS regression artifact for the hybrid 3-DEFINER + 2-INVOKER mode going forward; future RLS-touching changes re-run it before push). **Files changed:** `supabase/migrations/107_alter_rls_test_results_run_no_to_numeric.sql` + `.rollback.sql`, `audits/rls-test-matrix-reconstructed.sql`, `audits/STATE_OF_WORK.md`, `ARCHITECTURE.md` (§8.6 timeline + Database row + §12 regression coverage paragraph), `DECISIONS_LOG.md` (D-074).
 
 ---
 
