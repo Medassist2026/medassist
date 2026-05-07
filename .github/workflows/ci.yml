@@ -64,13 +64,27 @@ jobs:
         run: npm install
 
       - name: Build clinic app
-        run: npm run build:clinic
+        run: |
+          set -o pipefail
+          npm run build:clinic 2>&1 | tee /tmp/clinic-build.log
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: clinic-build
           path: apps/clinic/.next
+          retention-days: 7
+
+      - name: Upload clinic build log
+        # Always upload — admin scope is required for raw job logs, but
+        # artifacts are downloadable by anyone with read access. See CI run
+        # 25475031898 — opaque "Process completed with exit code 1." was the
+        # only externally visible signal.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clinic-build-log
+          path: /tmp/clinic-build.log
           retention-days: 7
 
   build-patient:
@@ -93,11 +107,22 @@ jobs:
         run: npm install
 
       - name: Build patient app
-        run: npm run build:patient
+        run: |
+          set -o pipefail
+          npm run build:patient 2>&1 | tee /tmp/patient-build.log
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: patient-build
           path: apps/patient/.next
+          retention-days: 7
+
+      - name: Upload patient build log
+        # Always upload — same rationale as the clinic log step above.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patient-build-log
+          path: /tmp/patient-build.log
           retention-days: 7

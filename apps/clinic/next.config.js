@@ -99,6 +99,11 @@ const nextConfig = {
       ...config.resolve.alias,
       '@shared': path.resolve(__dirname, '../../packages/shared'),
       '@ui-clinic': path.resolve(__dirname, '../../packages/ui-clinic'),
+      // Mirror tsconfig "@clinic/*": ["./*"] — defensive parity with patient
+      // (Empirical Lesson #14). No clinic file imports via @clinic/ today, but
+      // the moment one does, tsconfig-only alias resolution can fail at the
+      // bundler level (see CI run 25475031898 on the patient side).
+      '@clinic': path.resolve(__dirname, '.'),
     }
     return config
   },
