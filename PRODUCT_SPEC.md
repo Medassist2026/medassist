@@ -79,14 +79,16 @@ Doctor + Assistant/Front Desk portal. Covers prescription workflow, patient regi
 
 **Platform:** Web-first for v1. Single platform done well beats three platforms done poorly.
 
-### Patient App (Phase 2 — After clinic adoption proven)
-Patient mini-portal for accessing their health records, prescriptions, and booking follow-ups.
+### Patient App (Phase 1 — SHIPPED, narrowed scope per D-072)
+Patient mini-portal for accessing their health records and managing cross-clinic record sharing consent. **Promoted from Phase 2 to Phase 1 by D-072 (26 April 2026)** — the directional consent model (D-068) requires a patient-facing surface to grant/revoke shares, so the patient app is load-bearing for Layer 2, not optional.
 
-**Implementation:** PWA/web link delivered via WhatsApp — no app download required. OTP login with phone number. Patient sees all visits across ALL MedAssist doctors (chronological health timeline). Can share records with any doctor via QR code or link.
+**Phase 1 scope (shipped):** records read-only, consent UI (privacy code regenerate, share grant/revoke/extend, messaging consent), Rx PDFs, basic messaging. Lives at `apps/patient/` as a separate Next.js app per D-060.
 
-**Note from Mo:** Patient app is still planned and desired — it's not abandoned, it's sequenced after clinic adoption is validated. The patient app becomes the network effect engine: Patient visits Dr. A (MedAssist) → gets digital records → visits Dr. B (not MedAssist) → shows records → Dr. B sees value → Dr. B signs up. This is how you beat Vezeeta without spending millions on marketing.
+**Deferred to later phases:** appointment booking from the patient side, lab-result push notifications, chronic-condition tracking, fuller engagement features.
 
-**Decision point:** Build patient app when 50+ clinics are active and generating prescription data consistently.
+**Implementation:** PWA/web link delivered via WhatsApp — no app download required. OTP login with phone number. Patient sees all visits across ALL MedAssist doctors (chronological health timeline). Can share records with any doctor via the privacy code or via patient-app share grants.
+
+**Network effect rationale (preserved from earlier framing):** Patient visits Dr. A (MedAssist) → gets digital records → visits Dr. B (not MedAssist) → shows records via privacy code → Dr. B sees value → Dr. B signs up. This is how you beat Vezeeta without spending millions on marketing.
 
 ## Three Adoption Hooks (The Combined Pitch)
 
@@ -147,15 +149,15 @@ Free removes one objection (money) but speed is what drives adoption. Free ≠ a
 - Week 4: Get 5 paying customers (not beta users, not free trials — paying)
 - Month 2-3: Iterate based on actual usage data
 - Month 4: 100 clinics target or assess pivot
-- Month 5-8: Patient mini-portal (Phase 2) — network effect activation
+- Month 5-8: Patient engagement expansion (Phase 2) — appointment booking, lab notifications, chronic-condition tracking on top of the Phase 1 patient-app foundation
 
 ## Phased Expansion
 
-### Phase 1: Clinic Adoption (Months 1-4)
-Doctor portal with smart prescription UI, drug interactions, patient registration (phone-based global identity), basic encounter notes, PDF prescription generation.
+### Phase 1: Clinic Adoption + Patient Identity Foundation (Months 1-4)
+Doctor portal with smart prescription UI, drug interactions, patient registration (phone-based global identity), basic encounter notes, PDF prescription generation. **Plus** (per D-072) the narrowed-scope patient mini-portal (PWA via WhatsApp link, OTP login) covering records read-only, consent UI (privacy code regenerate, share grant/revoke/extend, messaging consent), Rx PDFs, and basic messaging — load-bearing for the directional consent model (D-068).
 
-### Phase 2: Patient Identity Network (Months 5-8)
-Patient mini-portal (PWA via WhatsApp link, OTP login), cross-doctor record visibility, follow-up booking with previously visited doctors only.
+### Phase 2: Patient Engagement Expansion (Months 5-8)
+Cross-doctor record visibility surfaces, follow-up booking from the patient side, lab-result push notifications, chronic-condition tracking, fuller engagement features layered on the Phase 1 patient-app foundation.
 
 ### Phase 3: Lab & Pharmacy Integration (Months 9-14)
 Lab: Doctor creates order → patient receives on WhatsApp with QR → partner lab processes → results sent to MedAssist → doctor notified → patient receives results. Revenue: labs pay per referral (10-20 EGP/test) or monthly subscription.

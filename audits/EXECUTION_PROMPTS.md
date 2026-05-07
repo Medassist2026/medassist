@@ -74,6 +74,8 @@ Standing rules promoted from cowork sessions. Each was learned the hard way and 
 Lessons 1–5 are documented in full in `audits/patient-identity-build-06-results.md` § 3.1 with the recursion proof and harness debugging trace that produced them. Summary:
 
 1. **All helpers in RLS predicates are SECURITY DEFINER, no exceptions.** SECURITY INVOKER helpers that join across RLS-protected tables can deadlock on cross-table EXISTS recursion (Postgres 42P17). DEFINER bypasses RLS during the helper's internal joins, breaking the cycle.
+
+   > **Amendment 2026-04-30 → 2026-05-03**: The original "all DEFINER" rule is amended to **3 DEFINER + 2 INVOKER** based on the Prompt 6 RLS rewrite (mig 092-097 + 094a) and forensic mig 106. INVOKER is allowed for helpers whose internal queries provably do NOT trigger RLS recursion through the helper itself; DEFINER remains the default; burden of proof is on the engineer proposing INVOKER. Current helper set: `is_clinic_member` (DEFINER), `can_view_patient_data_at_clinic` (DEFINER), `user_has_clinic_path_to_gp` (DEFINER post-094a), `can_clinic_access_global_patient` (INVOKER post-mig-106), `can_patient_access_global_patient` (INVOKER post-mig-106). Helpers #2 and #3 drifted to DEFINER on staging between mig 092 authoring and 2026-05-03; mig 106 restored them to INVOKER per the original architectural intent. The drift detection itself is what justifies the amendment — uniform rules don't account for cases where the rule is over-conservative. See D-064.
 2. **Smoke-probe assertion in every RLS migration.** Post-condition runs `SET LOCAL ROLE 'authenticated'` + a real SELECT/INSERT against each affected table inside the migration's transaction. Structure-only assertions (policy exists, permissive flag set) cannot catch query-time recursion.
 3. **Test harness pattern: `SET LOCAL ROLE 'authenticated'` as a separate statement.** Inline `set_config('role', 'authenticated', TRUE)` inside a WITH clause leaves the query plan built under the session_user's BYPASSRLS attribute — the role switch becomes cosmetic and RLS never engages.
 4. **Prototype-before-author for any RLS work touching cross-table predicates.** A 10-minute harness probe is cheaper than authoring scenarios against a recursion-broken policy.
@@ -210,7 +212,75 @@ The cost of not doing this: today's pre-flight would have been a 5-minute "run t
 
 ---
 
-## Sequence
+### Lesson 13 (Doc reconciliation pass, 2026-05-04)
+
+**Source-of-truth documentation must be maintained in lockstep with the code and schema it describes — half-maintaining is the failure mode.**
+
+When ARCHITECTURE.md / DECISIONS_LOG.md / PRODUCT_SPEC.md drift from shipped reality, downstream debugging and architecture decisions get made against documentation that no longer matches the system. The drift is invisible until a future engineer (or future-Claude) reads the doc, makes a recommendation against it, and lands a fix that contradicts an architectural commitment the doc didn't capture. "Half-maintained" docs (some sections current, others months stale) are worse than no docs — readers can't tell which sections are reliable.
+
+**Empirical proof (this session, 2026-05-04):** the session opened with three core docs months out of step with shipped reality. D-061 (two-layer global patient identity, shipped Builds 02-03), D-064 (hybrid 3 DEFINER + 2 INVOKER RLS, shipped 2026-04-30 + finalized 2026-05-03 by mig 106), D-068 (directional consent + `patient_data_shares`, shipped Build 05), and the entire `apps/patient/` Next.js app (D-060, shipped Build 05) had no representation in any of the three docs. PRODUCT_SPEC.md wasn't even tracked in git — it lived only in the working tree. The drift accumulated because doc updates were "nice to have" while code shipped under deadline pressure across Builds 02 → 03 → 04 → 05.
+
+**Recovery cost:** ~3 cowork sessions to bring the docs current (Phase 5a content authoring + Phase 5b verification sweep + Phase 5c fix pass), with one session purely on factual verification because the prior author drafted from project memory rather than ground truth. See Lesson #16.
+
+**Operational rule:**
+
+1. **Every architecturally-significant change requires a corresponding doc update in the same commit (or a paired commit landing same-session).** No "I'll update the doc next week." Next week becomes next quarter, becomes never.
+2. **Doc audits run at session boundaries, not "when there's time."** If a session is too rushed for a doc audit, the work is too rushed to be done correctly. Schedule the audit; do not skip it.
+3. **ARCHITECTURE / DECISIONS_LOG / PRODUCT_SPEC are tracked in git from day one.** Untracked source-of-truth docs are anti-patterns — they have no version history, no review trail, no diff-driven maintenance. Tracking forces the doc to be a first-class artifact.
+
+**Standing rule:** at every cowork session boundary, the assistant runs a 5-minute "doc currency" check on the three core docs against the work shipped in the session. Anything stale gets queued for the next session as an explicit task — not deferred indefinitely.
+
+The cost of not doing this: the next time someone reads ARCHITECTURE.md to understand "where does the privacy code live?", they get a column list that doesn't match the schema and recommend a fix against names that no longer exist. The fix lands, breaks something subtle, and the post-mortem traces the root cause back to the stale doc nobody updated. Lesson #13 closes that class.
+
+---
+
+### Lesson 14 (Discipline cleanup, 2026-05-04)
+
+**Per-app TypeScript path aliases must be declared at BOTH the root `tsconfig.json` AND the per-app `tsconfig.json`, with a per-app prefix that is unique across apps.**
+
+Two app-level `tsconfig.json` files cannot share the same alias name (e.g. `@/*`) because the alias would then resolve to two different per-app directories simultaneously. Root `tsc --noEmit` (the pre-push gate from D-045) reads the root `paths` block; Next.js dev/build reads the per-app `paths` block; if a shared alias name exists at the per-app level only, root tsc cannot resolve it and the gate fails the moment a second app introduces an import via that alias.
+
+**Empirical proof (commit `bb50305`, 2026-05-04 audit detour Day 2):** both `apps/patient/tsconfig.json` and `apps/clinic/tsconfig.json` declared `"@/*": ["./*"]`. Root `tsconfig.json` had no `@/*` entry. The first time a file in `apps/patient/` imported via `@/components/...` (the new Build 05 sharing page introduced in commit `61f8752`), root tsc could not resolve the alias and the pre-push gate failed. Adding a single root `@/*` entry would have forced the alias to resolve to one app's directory only — silently disagreeing with the other app's tsconfig the moment the second app introduced its first `@/` import.
+
+**Operational rule:**
+
+1. **Per-app aliases use a per-app prefix.** Use `@patient/*` for `apps/patient/` files and `@clinic/*` for `apps/clinic/` files. Never share an alias name across apps.
+2. **Declare each alias at BOTH levels.** Root `tsconfig.json` paths block: `"@patient/*": ["./apps/patient/*"]` and `"@clinic/*": ["./apps/clinic/*"]`. Per-app `tsconfig.json` paths block: `"@patient/*": ["./*"]` (in the patient app), `"@clinic/*": ["./*"]` (in the clinic app). Root tsc reads root, Next.js reads per-app — both must agree on the alias name.
+3. **Cross-package shared aliases stay shared.** `@shared/*` and `@ui-clinic/*` point at packages, not apps, and remain declared once at root + once per-app pointing at the same package directory. The rule applies only to aliases that resolve to per-app directories.
+4. **Reviewers reject any new `@/*` import.** The shared `@/*` convention is retired. Any PR introducing `@/foo` must be rewritten to `@patient/foo` or `@clinic/foo` before merge.
+
+The cost of not doing this: a latent collision waiting for the second app's first `@/` import — exactly the trap that produced the `bb50305` cleanup. The per-app-prefixed pattern eliminates the collision class entirely. Codified by D-065 in DECISIONS_LOG.md and §2 "Path alias mechanics" in ARCHITECTURE.md.
+
+---
+
+### Lesson 15 (reserved)
+
+Reserved slot — kept open so subsequent lesson numbering matches forward references already written into ARCHITECTURE.md and DECISIONS_LOG.md. Reassign or delete when the next lesson is authored.
+
+---
+
+### Lesson 16 (Doc verification sweep, 2026-05-04)
+
+**Documentation claims about the system require verification against the system, not against project memory or prior session drafts.**
+
+Constants, counts, table names, column names, function names, file paths, security parameters, commit hashes, and dates — anything with a single correct value in code or schema — must be verified against ground truth before being committed to ARCHITECTURE / DECISIONS_LOG / PRODUCT_SPEC. Project memory is a starting hypothesis, not a source of truth. Prior session drafts inherit whatever errors the prior session committed; transitively trusting them propagates errors silently across sessions.
+
+**Empirical proof (2026-05-04 doc verification sweep, `audits/doc-verification-sweep-2026-05-04.md`):** 95 factual claims checked across the three core docs. **14 hard errors + 7 partial mismatches** surfaced after a multi-session deep audit had landed the docs. Errors clustered in three buckets:
+- **(a) project-memory-driven values that "sounded right":** `account_status='sentinel'` (the enum has no such value — `'locked'` is the actual value used for sentinels), `visibility_mode='DOCTOR_SCOPED'` (actual is `DOCTOR_SCOPED_OWNER`), "Phase F Task 16" (the task list has 9 entries, not 16).
+- **(b) cowork-session-draft errors:** `regenerated_at` instead of `regenerated_count` (the privacy-code column was renamed during build), `commitPhoneChange` instead of `getPendingPhoneChangeRequests` (function never existed under the claimed name), `sms_code (4-digit)` instead of `sms_code_hash` (storage was bcrypt-hashed, not plaintext).
+- **(c) internal contradictions between the docs themselves:** PRODUCT_SPEC.md still claimed Phase 2 patient app while DECISIONS_LOG.md D-072 had explicitly promoted it to Phase 1 and shipped it. The two docs were incompatible truths in the same repo.
+
+**Recovery cost:** ~90 minutes for the verification sweep + ~45 minutes for the fix pass. Cheap compared to the cost of someone making an architecture decision against `regenerated_at` and recommending a fix against a column that doesn't exist.
+
+**Operational rule:**
+
+1. **Before any chunk surfaces for review, the cowork session lists every factual claim in the chunk that requires verification, and surfaces verification output for each.** Constants, counts, table/column/function names, file paths, security parameters, commit hashes, dates. The verification can be `grep`, `view`, schema query, or other direct read.
+2. **Claims that can't be verified get flagged as `UNVERIFIABLE`.** Reviewer can then decide whether the claim is load-bearing enough to chase, or acceptable to commit with a flag.
+3. **Reviewer doesn't accept unverified claims.** A doc commit without a verification pass against ground truth is rejected the same way an untested code commit is rejected.
+
+**Standing rule:** every doc-touching cowork session ends with a verification sweep over the new claims. The sweep produces a report-shaped artifact (see `doc-verification-sweep-2026-05-04.md`) that lists each claim, the verification command, and the OK / WRONG / PARTIAL / UNVERIFIABLE outcome. The artifact is the audit trail; the fix pass closes it.
+
+**Empirical evidence:** 14 wrong claims in the 2026-05-04 sweep — 74% baseline accuracy when verification is not enforced. Goal is 100% accuracy when verification is enforced. Pairs with **Lesson #7** (schema vs migrations drift — same failure mode at the schema layer) and **Lesson #9** (applies-via-dashboard drift — same failure mode at the apply layer). All three are instances of "the canonical record has diverged from the underlying truth and nobody noticed because nobody compared them."
 
 ```
 0    State-of-Code Audit                      (READ ONLY)
