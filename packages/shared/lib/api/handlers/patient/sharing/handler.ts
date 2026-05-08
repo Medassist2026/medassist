@@ -24,7 +24,7 @@ import { listSharesForPatient } from '@shared/lib/data/patient-shares'
  * Query: ?include_expired=true → also returns expired/revoked shares for
  * the patient app's history view.
  */
-export async function GET(request?: Request) {
+export async function GET(request: Request) {
   try {
     const user = await requireApiRole('patient')
     const { grants } = await getPatientSharingStatus(user.id)
