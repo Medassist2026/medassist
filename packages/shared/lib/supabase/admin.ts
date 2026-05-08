@@ -37,6 +37,8 @@ const ALLOWED_ADMIN_SCOPES = new Set([
   'phone-correction',              // UPDATE patients + INSERT phone_corrections + history (Phase C)
   // ── Global patient identity (mig 072 / Build prompt 02) ──────────────────
   'global-patients-lookup',        // SELECT global_patients by id / normalized_phone
+  // ── Patient sharing lifecycle (mig 090 / Build 05 § B7 — D-068) ──────────
+  'auto-renew-on-visit-gpid-lookup', // SELECT patients.global_patient_id during fire-and-forget auto-renew block in frontdesk check-in handler
 ])
 
 /**
