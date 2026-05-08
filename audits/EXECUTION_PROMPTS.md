@@ -71,6 +71,8 @@ These are the canonical values for any prompt that touches privacy code, SMS sha
 
 Standing rules promoted from cowork sessions. Each was learned the hard way and applies to every prompt that follows.
 
+> **Operational distillation (added 2026-05-08):** The narrative lessons below are the *origin story* of the review framework; the *checklist* the cowork session runs mechanically lives in `audits/REVIEW_CRITERIA.md`. That doc condenses Lessons #1–#17 (where they bear on review discipline) into 6 sections — pre-work verification, mid-work checkpoints, surface format, failure-mode catalog, push-back authorization, maintenance — each criterion grounded in a concrete project example. When a new lesson is codified here, check whether it introduces a new criterion in REVIEW_CRITERIA.md (the two docs update in lockstep per Lesson #13). Read REVIEW_CRITERIA.md in full alongside this file at the start of every cowork session.
+
 Lessons 1–5 are documented in full in `audits/patient-identity-build-06-results.md` § 3.1 with the recursion proof and harness debugging trace that produced them. Summary:
 
 1. **All helpers in RLS predicates are SECURITY DEFINER, no exceptions.** SECURITY INVOKER helpers that join across RLS-protected tables can deadlock on cross-table EXISTS recursion (Postgres 42P17). DEFINER bypasses RLS during the helper's internal joins, breaking the cycle.

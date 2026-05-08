@@ -741,6 +741,8 @@ Created via Migration 043. All passwords: `Test1234!`
 ## 16. Known Technical Debt
 
 > Tracking table for identified issues. TD-001–005 resolved; TD-007 superseded; TD-008 resolved 26 Apr (D-050); TD-006, TD-009, TD-010, TD-011, TD-012, TD-013, TD-014, TD-015, TD-016 open. Operational follow-up tasks (forensic-apply cleanups, mig 068/099 retirements, search_path audit, admin-scope reconciliation, EN sharing-strings parity) are tracked in `audits/PROGRAM_STATE.md` Phase F task list.
+>
+> **Lockstep doc set (updated 2026-05-08):** `ARCHITECTURE.md`, `DECISIONS_LOG.md`, `PRODUCT_SPEC.md`, `audits/STATE_OF_WORK.md`, `audits/EXECUTION_PROMPTS.md`, and `audits/REVIEW_CRITERIA.md` form the lockstep set per Empirical Lesson #13 — all six update together when the methodology evolves. `REVIEW_CRITERIA.md` (added 2026-05-08) externalizes the review framework into a versioned operational checklist; cowork sessions self-check deliverables against it before surfacing. New tech-debt items below the §16 line that bear on review discipline (e.g., a recurring failure mode) trigger a paired update to `REVIEW_CRITERIA.md` §4.
 
 | ID | Issue | Location | Impact | Status |
 |----|-------|----------|--------|--------|
