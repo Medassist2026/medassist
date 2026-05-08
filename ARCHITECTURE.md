@@ -94,7 +94,7 @@ medassist/
 
 **Workspace wiring**: npm workspaces link `@medassist/shared` and `@medassist/ui-clinic` into both `apps/clinic` and `apps/patient`. TypeScript path aliases are `@shared/*`, `@ui-clinic/*`, `@patient/*`, and `@clinic/*`.
 
-**Path alias mechanics**: each alias is declared at BOTH the root `tsconfig.json` AND the relevant per-app `tsconfig.json`. Root tsc (the pre-push hook) reads root entries; Next.js dev/build reads per-app entries. The previous `@/*` per-app convention was retired in commit `bb50305` after the same alias name resolved to different per-app directories — the moment a second app introduced an `@/*` import, the root build broke. Standing rule: declare at both levels, prefix per-app, never share an alias name across apps. Codified as Empirical Lesson #14 in `audits/EXECUTION_PROMPTS.md`.
+**Path alias mechanics**: each per-app alias is declared at three levels with a per-app prefix that is unique across apps. (1) Root `tsconfig.json` `paths` block — read by the pre-push hook's `tsc --noEmit` gate (D-045). (2) Per-app `tsconfig.json` `paths` block — read by Next.js dev/build for TypeScript resolution. (3) Per-app `next.config.js` `config.resolve.alias` block — read by webpack at build time (Next 14.2.x's resolver does not always honor tsconfig path aliases for cross-segment imports inside an app, surfaced by CI run 25475031898). The previous shared `@/*` per-app convention was retired in commit `bb50305` after the same alias name resolved to different per-app directories; the operational webpack-level fix landed in commit `9774252`. Standing rule: declare at all three levels, prefix per-app, never share an alias name across apps. Codified as Empirical Lesson #14 in `audits/EXECUTION_PROMPTS.md`.
 
 ---
 

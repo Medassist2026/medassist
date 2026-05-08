@@ -234,22 +234,24 @@ The cost of not doing this: the next time someone reads ARCHITECTURE.md to under
 
 ---
 
-### Lesson 14 (Discipline cleanup, 2026-05-04)
+### Lesson 14 (Discipline cleanup, 2026-05-04 — amended 2026-05-07)
 
-**Per-app TypeScript path aliases must be declared at BOTH the root `tsconfig.json` AND the per-app `tsconfig.json`, with a per-app prefix that is unique across apps.**
+**Per-app TypeScript path aliases must be declared at THREE levels — the root `tsconfig.json`, the per-app `tsconfig.json`, AND each app's `next.config.js` `config.resolve.alias` block — with a per-app prefix that is unique across apps.**
 
-Two app-level `tsconfig.json` files cannot share the same alias name (e.g. `@/*`) because the alias would then resolve to two different per-app directories simultaneously. Root `tsc --noEmit` (the pre-push gate from D-045) reads the root `paths` block; Next.js dev/build reads the per-app `paths` block; if a shared alias name exists at the per-app level only, root tsc cannot resolve it and the gate fails the moment a second app introduces an import via that alias.
+Two app-level `tsconfig.json` files cannot share the same alias name (e.g. `@/*`) because the alias would then resolve to two different per-app directories simultaneously. Root `tsc --noEmit` (the pre-push gate from D-045) reads the root `paths` block; Next.js dev/build reads the per-app `paths` block; if a shared alias name exists at the per-app level only, root tsc cannot resolve it and the gate fails the moment a second app introduces an import via that alias. Beyond TypeScript resolution, Next 14.2.x's webpack resolver does not always honor tsconfig path aliases for cross-segment imports inside an app, so the same alias must also be registered in `next.config.js` `config.resolve.alias` to survive the production build.
 
 **Empirical proof (commit `bb50305`, 2026-05-04 audit detour Day 2):** both `apps/patient/tsconfig.json` and `apps/clinic/tsconfig.json` declared `"@/*": ["./*"]`. Root `tsconfig.json` had no `@/*` entry. The first time a file in `apps/patient/` imported via `@/components/...` (the new Build 05 sharing page introduced in commit `61f8752`), root tsc could not resolve the alias and the pre-push gate failed. Adding a single root `@/*` entry would have forced the alias to resolve to one app's directory only — silently disagreeing with the other app's tsconfig the moment the second app introduced its first `@/` import.
+
+**Empirical proof addendum (CI run 25475031898, 2026-05-07):** the two-tsconfig-level declaration alone is insufficient. CI failed with an opaque `Process completed with exit code 1` and no diagnostic output until the build logs were captured to artifacts. Root cause: Next 14.2.x's webpack resolver does not always honor tsconfig path aliases for cross-segment imports inside an app, so the build broke at webpack-resolution time even though both tsconfig levels declared the alias correctly. Operationalized in commit `9774252`, which adds the same aliases to each app's `next.config.js` `config.resolve.alias` block — the third level the original lesson missed.
 
 **Operational rule:**
 
 1. **Per-app aliases use a per-app prefix.** Use `@patient/*` for `apps/patient/` files and `@clinic/*` for `apps/clinic/` files. Never share an alias name across apps.
-2. **Declare each alias at BOTH levels.** Root `tsconfig.json` paths block: `"@patient/*": ["./apps/patient/*"]` and `"@clinic/*": ["./apps/clinic/*"]`. Per-app `tsconfig.json` paths block: `"@patient/*": ["./*"]` (in the patient app), `"@clinic/*": ["./*"]` (in the clinic app). Root tsc reads root, Next.js reads per-app — both must agree on the alias name.
+2. **Declare each alias at all three levels.** Root `tsconfig.json` paths block: `"@patient/*": ["./apps/patient/*"]` and `"@clinic/*": ["./apps/clinic/*"]`. Per-app `tsconfig.json` paths block: `"@patient/*": ["./*"]` (in the patient app), `"@clinic/*": ["./*"]` (in the clinic app). Per-app `next.config.js` `config.resolve.alias` block: register the same alias-to-directory mapping inside the `webpack(config, options)` hook (e.g. `config.resolve.alias['@patient'] = path.resolve(__dirname, '.')` in the patient app, and the equivalent for `@clinic`). Root tsc reads root tsconfig, Next.js dev/build reads per-app tsconfig, webpack reads `next.config.js` at build time — all three must agree on the alias name and target.
 3. **Cross-package shared aliases stay shared.** `@shared/*` and `@ui-clinic/*` point at packages, not apps, and remain declared once at root + once per-app pointing at the same package directory. The rule applies only to aliases that resolve to per-app directories.
 4. **Reviewers reject any new `@/*` import.** The shared `@/*` convention is retired. Any PR introducing `@/foo` must be rewritten to `@patient/foo` or `@clinic/foo` before merge.
 
-The cost of not doing this: a latent collision waiting for the second app's first `@/` import — exactly the trap that produced the `bb50305` cleanup. The per-app-prefixed pattern eliminates the collision class entirely. Codified by D-065 in DECISIONS_LOG.md and §2 "Path alias mechanics" in ARCHITECTURE.md.
+The cost of not doing this: a latent collision waiting for the second app's first `@/` import — exactly the trap that produced the `bb50305` cleanup, plus an opaque webpack-resolution failure when the tsconfig-only declaration fails to reach Next.js's bundler. The per-app-prefixed three-level pattern eliminates both collision classes entirely. Codified by D-065 in DECISIONS_LOG.md and §2 "Path alias mechanics" in ARCHITECTURE.md.
 
 ---
 
