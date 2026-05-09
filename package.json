@@ -16,7 +16,7 @@
     "build:patient": "npm run build -w @medassist/patient",
     "start": "next start",
     "lint": "next lint",
-    "lint:scopes": "eslint --no-eslintrc --no-inline-config --parser @typescript-eslint/parser --rulesdir eslint-rules --rule '{\"no-unregistered-admin-scope\": \"error\"}' --ext .ts,.tsx packages/shared/lib apps/clinic/app apps/patient/app",
+    "lint:scopes": "eslint --no-eslintrc --no-inline-config --parser @typescript-eslint/parser --rulesdir eslint-rules --rule '{\"no-unregistered-admin-scope\": \"error\", \"no-unregistered-delegation-capability\": \"error\"}' --ext .ts,.tsx packages/shared/lib apps/clinic/app apps/patient/app",
     "type-check": "tsc --noEmit",
     "prepare": "husky"
   },

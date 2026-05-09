@@ -18,5 +18,6 @@
 module.exports = {
   rules: {
     'no-unregistered-admin-scope': require('./no-unregistered-admin-scope.js'),
+    'no-unregistered-delegation-capability': require('./no-unregistered-delegation-capability.js'),
   },
 }

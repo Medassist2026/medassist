@@ -8,6 +8,7 @@
   ],
   "rules": {
     "react/no-unescaped-entities": "off",
-    "medassist-local/no-unregistered-admin-scope": "error"
+    "medassist-local/no-unregistered-admin-scope": "error",
+    "medassist-local/no-unregistered-delegation-capability": "error"
   }
 }

@@ -184,6 +184,22 @@ const ALLOWED_ADMIN_SCOPES = new Set([
   // ── Audit ────────────────────────────────────────────────────────────────
   'audit-logging',
   'audit-read',
+
+  // ── Dependent accounts (B07 Phase C — Pattern A child linkage) ──────────
+  'dependents-create',                  // createMinorGlobalPatient
+  'dependents-list-by-guardian',        // listDependentsByGuardian
+  'dependents-get',                     // getDependent
+  'dependents-transfer-guardian',       // transferGuardianship
+  'global-patients-guardian-lookup',    // getGuardianGlobalPatient
+
+  // ── Patient delegations (B07 Phase C — Pattern B adult delegation) ──────
+  'delegations-grant',                  // grantDelegation (principal grants)
+  'delegations-accept',                 // acceptDelegation (delegate accepts)
+  'delegations-revoke',                 // revokeDelegation (principal or delegate)
+  'delegations-update-capabilities',    // updateDelegationCapabilities
+  'delegations-list-granted',           // listGrantedDelegations (outgoing)
+  'delegations-list-received',          // listReceivedDelegations (incoming)
+  'delegations-expire-stale',           // expireStaleDelegations (cron-callable)
 ])
 
 export { ALLOWED_ADMIN_SCOPES }

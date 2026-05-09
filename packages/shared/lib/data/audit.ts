@@ -210,6 +210,61 @@ export type AuditAction =
   | 'SHARE_REVOKED'
   | 'SHARE_AUTO_RENEWED'
   | 'SHARE_EXPIRED'
+  // ── Dependent accounts (B07 Phase B/C — Pattern A child linkage) ────────
+  //    GUARDIAN_LINK_CREATED — emitted when a parent registers a child
+  //      (createMinorGlobalPatient). actor=parent (or staff acting on parent's
+  //      behalf via clinic onboarding); subject=child gp. metadata carries
+  //      guardian_global_patient_id (parent gp), child_global_patient_id (child
+  //      gp, also = entity_id), and acting_as='guardian_of_minor'.
+  //
+  //    GUARDIAN_LINK_TRANSFERRED — emitted when guardianship is transferred
+  //      (transferGuardianship). Custody-dispute mechanism is Phase 2 per Mo
+  //      ruling 5; no UX call invokes this in MVP, but the data layer ships
+  //      forward-compatible. metadata carries previous_guardian_id and
+  //      new_guardian_id alongside global_patient_id (the child).
+  //
+  //    BACKFILL_DEPENDENT_GUARDIAN_RECONSTRUCTION — written by mig 111 only
+  //      (one-off backfill). Reserved here for completeness; production code
+  //      paths do NOT emit this action.
+  | 'GUARDIAN_LINK_CREATED'
+  | 'GUARDIAN_LINK_TRANSFERRED'
+  | 'BACKFILL_DEPENDENT_GUARDIAN_RECONSTRUCTION'
+  // ── Patient delegations (B07 Phase B/C — Pattern B adult delegation) ────
+  //    Two-step grant flow per architectural review §5.3: principal grants
+  //    (DELEGATION_GRANTED, accepted_at IS NULL); delegate accepts
+  //    (DELEGATION_ACCEPTED, sets accepted_at). A grant is INACTIVE until
+  //    accepted — `is_authorized_actor_on()` requires accepted_at IS NOT NULL.
+  //
+  //    DELEGATION_GRANTED — actor=principal (granted_by_user_id), subject=
+  //      principal gp. metadata: delegation_id, delegate_user_id, capabilities,
+  //      expires_at, auto_renew. acting_as='self' (principal acts on own gp).
+  //
+  //    DELEGATION_ACCEPTED — actor=delegate, subject=principal gp. metadata:
+  //      delegation_id, principal_global_patient_id, capabilities. acting_as=
+  //      'delegated_by_principal' (the delegate is exercising the very
+  //      delegation grant they're accepting).
+  //
+  //    DELEGATION_REVOKED — actor=principal, subject=principal gp. metadata:
+  //      delegation_id, delegate_user_id, reason?, acting_as='self'.
+  //
+  //    DELEGATION_WITHDRAWN — actor=delegate (delegate_user_id), subject=
+  //      principal gp. metadata: delegation_id, principal_global_patient_id,
+  //      reason?, acting_as='delegated_by_principal'.
+  //
+  //    DELEGATION_CAPABILITIES_UPDATED — actor=principal (only the principal
+  //      may change capabilities). metadata: delegation_id,
+  //      previous_capabilities, new_capabilities, acting_as='self'.
+  //
+  //    DELEGATION_EXPIRED — actor=system (cron-driven), subject=principal gp.
+  //      metadata: delegation_id, expires_at, cron_run_id?. actor_kind=
+  //      'system' so actor_user_id IS NULL (audit_events_actor_consistency
+  //      CHECK from mig 073.5).
+  | 'DELEGATION_GRANTED'
+  | 'DELEGATION_ACCEPTED'
+  | 'DELEGATION_REVOKED'
+  | 'DELEGATION_WITHDRAWN'
+  | 'DELEGATION_CAPABILITIES_UPDATED'
+  | 'DELEGATION_EXPIRED'
 
 /**
  * actor_kind — added by mig 073.5 (Build 03 Phase 0). Distinguishes audit
@@ -218,6 +273,28 @@ export type AuditAction =
  * CHECK constraint enforces actor_user_id IS NOT NULL iff actor_kind='user'.
  */
 export type ActorKind = 'user' | 'system' | 'migration'
+
+/**
+ * Authority basis — captured on every audit row that records an action on
+ * a global_patient subject when the actor is NOT acting purely on their own
+ * records. Mirrors the three branches of `is_authorized_actor_on()`
+ * (mig 113, B07 Phase D):
+ *
+ *   - 'self' — actor's auth.uid() equals subject gp's claimed_user_id. The
+ *     default for adult patients acting on their own records.
+ *   - 'guardian_of_minor' — actor claims a parent gp whose
+ *     guardian_global_patient_id matches the (minor) subject. Pattern A.
+ *   - 'delegated_by_principal' — actor is named delegate on an active
+ *     patient_delegations row whose principal is the subject. Pattern B.
+ *
+ * Stored as `metadata.acting_as` on the audit_events row. Phase E API
+ * handlers populate it via the helper below. Existing callers of
+ * `logAuditEvent` are unchanged — the new keys are additive in jsonb.
+ */
+export type AuthorityBasis =
+  | 'self'
+  | 'guardian_of_minor'
+  | 'delegated_by_principal'
 
 export interface AuditEventParams {
   clinicId?: string
@@ -269,6 +346,100 @@ export async function logAuditEvent(params: AuditEventParams) {
     // Audit logging should never break the app
     console.error('Audit log failed:', error)
   }
+}
+
+/**
+ * Authority-aware audit emission helper (B07 Phase C).
+ *
+ * Wraps `logAuditEvent` and stitches in the `metadata.acting_as` and
+ * `metadata.authority_grant_id` keys per architectural review §3.2. Use this
+ * for any audit row whose subject is a global_patient and whose actor's
+ * authority over that subject was resolved via `is_authorized_actor_on()`
+ * (or any of its three branches: self / guardian-link / active delegation).
+ *
+ * The helper also auto-fills `metadata.global_patient_id` with the supplied
+ * subjectGlobalPatientId — the audit_events GENERATED column
+ * `resolved_global_patient_id` derives from this key (per mig 074-era schema
+ * and confirmed empirically in B07 Phase B Decision 10), so any caller-
+ * supplied `metadata.global_patient_id` is preserved if present and used
+ * here only as a default.
+ *
+ * `authorityGrantId` is the patient_delegations.id of the grant the actor
+ * invoked, when authorityBasis is 'delegated_by_principal'. NULL/undefined
+ * for 'self' and 'guardian_of_minor' — both are passed through to jsonb
+ * unset.
+ *
+ * Existing `logAuditEvent` callers continue to work without modification.
+ * This helper is additive.
+ */
+export interface PatientAuditWithAuthorityParams {
+  /**
+   * The global_patients.id the action is about. Used to populate
+   * metadata.global_patient_id (and therefore the GENERATED
+   * resolved_global_patient_id).
+   */
+  subjectGlobalPatientId: string
+  /**
+   * The clinic context for the audit row. Optional — many patient-app
+   * actions are clinic-agnostic (e.g., DELEGATION_GRANTED).
+   */
+  clinicId?: string
+  /**
+   * Acting user. Required when actorKind='user' (the default).
+   */
+  actorUserId: string | null
+  actorKind?: ActorKind
+  action: AuditAction
+  entityType: string
+  entityId?: string
+  /**
+   * The authority basis under which the actor took this action. Stored on
+   * the audit row as metadata.acting_as. NULL/undefined means the helper
+   * does not stitch the key — callers should provide it for any row
+   * recording an action on a global_patient subject.
+   */
+  authorityBasis?: AuthorityBasis
+  /**
+   * patient_delegations.id of the grant invoked. Stored as
+   * metadata.authority_grant_id. Set ONLY when authorityBasis is
+   * 'delegated_by_principal'.
+   */
+  authorityGrantId?: string | null
+  /**
+   * Additional metadata. Caller-supplied keys win over the helper's
+   * defaults — passing { global_patient_id: <other-uuid> } overrides
+   * subjectGlobalPatientId for the resolved column derivation.
+   */
+  metadata?: Record<string, any>
+}
+
+export async function emitPatientAuditWithAuthority(
+  params: PatientAuditWithAuthorityParams
+): Promise<void> {
+  const stitchedMetadata: Record<string, any> = {
+    global_patient_id: params.subjectGlobalPatientId,
+    ...(params.metadata ?? {}),
+  }
+
+  if (params.authorityBasis !== undefined) {
+    stitchedMetadata.acting_as = params.authorityBasis
+  }
+  if (
+    params.authorityGrantId !== undefined &&
+    params.authorityGrantId !== null
+  ) {
+    stitchedMetadata.authority_grant_id = params.authorityGrantId
+  }
+
+  await logAuditEvent({
+    clinicId: params.clinicId,
+    actorUserId: params.actorUserId,
+    actorKind: params.actorKind,
+    action: params.action,
+    entityType: params.entityType,
+    entityId: params.entityId,
+    metadata: stitchedMetadata,
+  })
 }
 
 export async function getAuditLog(
