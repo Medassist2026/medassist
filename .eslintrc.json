@@ -3,7 +3,11 @@
   "extends": [
     "next/core-web-vitals"
   ],
+  "plugins": [
+    "medassist-local"
+  ],
   "rules": {
-    "react/no-unescaped-entities": "off"
+    "react/no-unescaped-entities": "off",
+    "medassist-local/no-unregistered-admin-scope": "error"
   }
 }

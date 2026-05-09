@@ -161,11 +161,11 @@ privacy-migration-backfill   ← truly unused; aspirational from migration-era c
 **Pros:**
 - Smallest disruption: single-file edit to `packages/shared/lib/supabase/admin.ts`; no callsite changes.
 - Eliminates all `console.warn` runtime spam from this surface in one go.
-- Allow-list size becomes 132 (35 − 4 unused + 105 missing − 4 truly unused = 132).
+- Allow-list size becomes 132 (35 − 4 unused + 105 missing − 4 truly unused = 132). *[Corrected to 136 in §9.1; arithmetic above double-counted the 4 unused entries.]*
 
 **Cons (apply only WITHOUT the eslint rule below):**
 - Without enforcement, the allow-list becomes a rubber stamp — every legitimate scope is on it, so the "unregistered" warning loses signal. Future scope additions still slip in silently because warn-only is non-blocking.
-- Doesn't address the underlying question: what is the allow-list FOR? D-008 says "audit trail," but a 132-entry rubber-stamp Set is no more auditable than an empty Set with a `console.log(scope)` instead of `console.warn(...)`.
+- Doesn't address the underlying question: what is the allow-list FOR? D-008 says "audit trail," but a 132-entry *[corrected to 136 in §9.1]* rubber-stamp Set is no more auditable than an empty Set with a `console.log(scope)` instead of `console.warn(...)`.
 - Same drift mechanism that produced today's gap (developer adds scope at callsite, forgets to register) will reappear next quarter unless we change the discipline.
 
 **MANDATORY companion: pre-commit / eslint scope-discipline rule.** Plain Option A is cosmetic. The phase MUST ship with a custom eslint rule (or git pre-commit hook) that:
@@ -240,7 +240,7 @@ Build-time script greps `createAdminClient(...)` and writes `ALLOWED_ADMIN_SCOPE
 Sequence the options to capture incremental value without the all-at-once risk of B or C:
 
 1. **This batch (Phase 1):** ship the inventory + recommendation only. No code change. (Current state of D3.)
-2. **Next cowork session — Phase 2 (m):** apply Option A — expand allow-list to 132 entries (35 + 105 missing − 4 truly unused − 4 unused-but-kept-as-default-includes). Group by feature with comment dividers. **PLUS the mandatory eslint / pre-commit rule** described in Option A above (without it, Phase 2 is cosmetic). The rule blocks any new-scope drift at commit time. Eliminates `console.warn` spam AND closes the drift mechanism.
+2. **Next cowork session — Phase 2 (m):** apply Option A — expand allow-list to 132 entries (35 + 105 missing − 4 truly unused − 4 unused-but-kept-as-default-includes). *[Corrected to 136 in §9.1; arithmetic above double-counted the 4 unused entries. Phase 2 shipped 2026-05-09 with 136 entries.]* Group by feature with comment dividers. **PLUS the mandatory eslint / pre-commit rule** described in Option A above (without it, Phase 2 is cosmetic). The rule blocks any new-scope drift at commit time. Eliminates `console.warn` spam AND closes the drift mechanism.
 3. **Workstream after that — Phase 3 (m):** apply Option C.1 — replace the runtime Set with a TypeScript literal union; drop the `Set.has()` check. The Phase 2 allow-list becomes the seed for the union type. Compile-time enforcement (tsc + Lesson #17 `next build`) replaces runtime warning. D-008 amendment records the architectural shift. The Phase 2 eslint rule's static-literal-only check carries forward unchanged — Phase 3 builds on top of it.
 4. **Phase G or post-launch:** consider whether Option B (runtime throw) adds value on top of compile-time enforcement + commit-time enforcement; likely NO. Skip B entirely or apply only as a defense-in-depth runtime guard.
 
@@ -292,7 +292,7 @@ Per Mo's earlier ruling, the "root `next` is an orphan" question is queued as Ph
 - **Scope (eslint rule — MANDATORY companion):** add a custom eslint rule (or git pre-commit hook if eslint authoring is too heavy) that fails the commit when:
   1. A `createAdminClient('xyz')` callsite passes a static literal NOT in `ALLOWED_ADMIN_SCOPES`.
   2. A `createAdminClient(...)` callsite passes anything that isn't a static string literal — template literals, variables, expressions all rejected unconditionally. Locks the "0 dynamic scopes" precondition (§6.3) forward.
-- **Result:** allow-list grows from 35 → 132 (35 + 105 missing − 4 truly unused = 136, then − 4 unused = 132). All 207 explicit-arg callsites become "registered." New-scope drift is impossible: any future callsite must add its scope to the allow-list in the same commit, enforced at commit time.
+- **Result:** allow-list grows from 35 → 132 (35 + 105 missing − 4 truly unused = 136, then − 4 unused = 132). *[Corrected to 136 in §9.1; the "then − 4 unused = 132" step in the parenthetical is the double-counting error. Phase 2 shipped 2026-05-09 with 136 entries.]* All 207 explicit-arg callsites become "registered." New-scope drift is impossible: any future callsite must add its scope to the allow-list in the same commit, enforced at commit time.
 - **Verification:**
   1. `comm -23 callsites.txt allowlist.txt` returns empty.
   2. Three tsc gates clean.
@@ -348,3 +348,79 @@ $ comm -12 /tmp/callsite-scopes.txt /tmp/allowlist-scopes.txt | wc -l
 ```
 
 All cited counts and sample scopes in §1–§4 trace back to these queries. Where §3.1 cites a file path, it traces from `grep -rln "createAdminClient(['\"]<scope>['\"]) ..."` against the per-scope mapping in `/tmp/missing-with-files.tsv` (built during this session).
+
+---
+
+## 9. Phase 2 shipped (2026-05-09)
+
+> Phase 2 of the §5 Option D sequenced hybrid plan landed the day after this doc was authored. Section preserved as historical record; this addendum records what shipped, including a math correction.
+
+### 9.1 Math correction — "132 → 136"
+
+§5 / §7 / §8 of this doc said "expand allow-list to 132 entries: 35 + 105 missing − 4 truly unused − 4 unused-but-kept-as-default-includes." That arithmetic is wrong: the correct expansion is **35 + 105 − 4 = 136**. The "−4 unused-but-kept-as-default-includes" was a double-counting error (the `api-route` default is already inside the 35 base, not a separate term). The Phase 2 commit ships **136 entries**, not 132. ARCH §12 and DECISIONS_LOG D-008 Amendment 2026-05-09 cite the corrected count.
+
+### 9.2 What shipped
+
+**Allow-list expansion (`packages/shared/lib/supabase/admin.ts`).** The 105 missing scopes added; 4 truly-unused removed; result is 136 entries grouped into 16 feature blocks with comment dividers matching the existing Build-prefixed style. Largest groups by entry count: Patient sharing lifecycle (19), Frontdesk operations (16), Patient data + PCR layer (15), Doctor surfaces (12), Clinic operations (12), Phone-change v2 (9). Smallest: Audit (2), Appointments (2), Prescriptions (3), Clinical sessions (3).
+
+**Custom eslint rule (`eslint-rules/no-unregistered-admin-scope.js`).** Three error classes:
+
+```text
+unregisteredScope:  static literal scope not in ALLOWED_ADMIN_SCOPES
+templateLiteral:    template-literal arg (backticks) — rejected unconditionally
+nonLiteral:         variable / function call / expression — rejected unconditionally
+```
+
+The rule reads `ALLOWED_ADMIN_SCOPES` directly from `admin.ts` source via regex extraction (cached for the lint run). No separately-maintained allow-list file; the source IS the truth.
+
+**Plugin packaging.** Standard ESLint plugin convention:
+- `eslint-rules/index.js` exports `{ rules: { 'no-unregistered-admin-scope': require('./no-unregistered-admin-scope.js') } }`
+- `eslint-rules/package.json` declares `"name": "eslint-plugin-medassist-local"` (the plugin-name convention ESLint requires)
+- Root `package.json` devDependencies adds `"eslint-plugin-medassist-local": "file:./eslint-rules"` — npm symlinks the local directory into `node_modules/eslint-plugin-medassist-local` on `npm install`
+- `.eslintrc.json` references via `plugins: ["medassist-local"]` + `rules: { "medassist-local/no-unregistered-admin-scope": "error" }`
+
+**`lint:scopes` script.** Added to root `package.json`:
+
+```json
+"lint:scopes": "eslint --no-eslintrc --no-inline-config --parser @typescript-eslint/parser --rulesdir eslint-rules --rule '{\"no-unregistered-admin-scope\": \"error\"}' --ext .ts,.tsx packages/shared/lib apps/clinic/app apps/patient/app"
+```
+
+Why a separate script (not just `next lint`): `next lint` per-app only scans the app's own `app/**` files; the shared package callsites in `packages/shared/lib/**` are out of scope. The minimal-config `lint:scopes` script scans both surfaces with just our rule + the TS parser, bypassing the next/core-web-vitals plugin's "rule not found" errors that fire on inline `eslint-disable` directives in shared files.
+
+### 9.3 Smoke tests against the rule (all passed)
+
+```text
+Smoke #1 — bad scope:           createAdminClient('this-scope-does-not-exist')
+                                → unregisteredScope error ✓
+Smoke #2 — template literal:    createAdminClient(`scope-${x}`)
+                                → templateLiteral error ✓
+Smoke #3 — variable arg:        const SCOPE = 'audit-log'; createAdminClient(SCOPE)
+                                → nonLiteral error ✓
+Smoke #4 — registered scope:    createAdminClient('audit-log')
+                                → no error (clean) ✓
+Smoke #5 — no-arg call:         createAdminClient()
+                                → no error (uses default 'api-route') ✓
+```
+
+### 9.4 Five verification gates (all passed)
+
+```text
+Gate 1: npm run lint:scopes                          → exit 0 (clean)
+Gate 2: npm run lint -w @medassist/clinic            → only pre-existing warnings
+Gate 3: npm run lint -w @medassist/patient           → only pre-existing warnings
+Gate 4: npm run type-check (root tsc --noEmit)       → exit 0
+Gate 5: npm run type-check -w @medassist/clinic       → exit 0
+Gate 6: npm run type-check -w @medassist/patient      → exit 0
+
+(Plus the local `next build` gates run on Mo's Mac per Lesson #17 — those are
+ the canonical build-time signal; tsc alone doesn't enforce Next's route-handler
+ type contracts.)
+```
+
+### 9.5 Roadmap forward
+
+Phase 3 (Option C.1 TypeScript literal-union refactor) remains queued. The Phase 2 eslint rule's static-literal-only check carries forward unchanged into Phase 3 — what changes is the runtime check: `Set.has(scope)` is replaced by the TypeScript compiler's narrowing of `scope: AdminScope` against the literal union. The runtime `console.warn` in `admin.ts` will be removed at that point. Option B (runtime throw) is likely **DROPPED** — once Phase 2's commit-time check + Phase 3's compile-time check land, runtime throw is redundant for the static-literal majority (which is 100% of our callsites today and locked forward by the Phase 2 eslint rule).
+
+### 9.6 Observed empirical insight — Lesson #18 surfaced
+
+The "predicted 7 closures, actual 5" misread that triggered §0.5 of the dependabot triage doc surfaced a generalizable methodology rule: filter by event timestamp, not by net delta, when measuring closures. Codified as Empirical Lesson #18 in `audits/EXECUTION_PROMPTS.md` in the same commit as this Phase 2. The Phase 2 work isn't a direct application of Lesson #18 — but the discipline pattern (lock today's empirical precondition forward via a gate) is the same shape: "0 dynamic scopes today" became the static-literal-only eslint rule, in the same way "filter by timestamp" became the verification-query embedding.

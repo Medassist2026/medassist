@@ -1,0 +1,10 @@
+{
+  "name": "eslint-plugin-medassist-local",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.js",
+  "description": "Local ESLint plugin for MedAssist project-specific rules (Phase F Task 20).",
+  "peerDependencies": {
+    "eslint": "^8"
+  }
+}

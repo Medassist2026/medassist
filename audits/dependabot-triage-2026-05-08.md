@@ -26,6 +26,115 @@ The 55 alerts cluster heavily on `next` (38 alerts → 18 unique GHSAs) and on a
 
 ---
 
+## 0.5. Empirical correction (added 2026-05-09)
+
+> Added a day after this doc shipped. Self-correction recording what actually happened post-D2-push, against this doc's predictions and against my D2 surface's framing. **D1's prediction held 100% — exactly 7 alerts closed, fixed_at = 2026-05-09T03:15:29Z.** The thing that needs correcting is *my D2 surface's* "predicted 7, actual 5" framing from the day after the push, which conflated net delta with closure count. Original prediction text in §6 below is **not** rewritten; this section annotates around it per Lesson #14 amendment pattern.
+
+### What actually happened — empirical
+
+```text
+$ jq '[.[] | select(.fixed_at == "2026-05-09T03:15:29Z")] | sort_by(.security_advisory.severity) | .[] | {ghsa:.security_advisory.ghsa_id, sev:.security_advisory.severity, manifest:.dependency.manifest_path}' \
+    audits/dependabot-alerts-2026-05-09.json
+GHSA-f82v-jwr5-mffw  critical  package-lock.json
+GHSA-fr5h-rqp8-mj6g  high      package-lock.json
+GHSA-gp8f-8m3g-qvj9  high      package-lock.json
+GHSA-7gfc-8cq8-jh5f  high      package-lock.json
+GHSA-7m27-7ghc-44w9  medium    package-lock.json
+GHSA-g77x-44xx-532m  medium    package-lock.json
+GHSA-qpjv-v59x-3qc4  low       package-lock.json
+```
+
+**7 alerts closed.** All at manifest=`package-lock.json` (the workspace lockfile alert), all at exactly `2026-05-09T03:15:29Z` (Dependabot rechecked ~7 hours after the push). The set matches D1's predicted-7 list verbatim — same GHSAs, same severities. Recheck latency was longer than the "5–15 min" rough estimate I gave in the D2 surface; the actual window was ~7 hours.
+
+### Why net delta showed -5 instead of -7
+
+```text
+$ jq '[.[] | select(.state == "open")] | length' audits/dependabot-alerts-2026-05-09.json
+50
+
+$ jq '[.[] | select(.created_at > "2026-05-09T02:01:00Z")] | sort_by(.created_at) | .[] | {ghsa:.security_advisory.ghsa_id, pkg:.security_vulnerability.package.name, sev:.security_advisory.severity, created_at:.created_at}' audits/dependabot-alerts-2026-05-09.json
+GHSA-fv7c-fp4j-7gwp   @babel/plugin-transform-modules-systemjs   high   2026-05-09T03:15:30Z
+GHSA-v39h-62p7-jpjc   fast-uri                                   high   2026-05-09T03:15:30Z
+
+# Plus the +1 fast-uri arrival captured in yesterday's pre-work drift:
+# GHSA-q3j6-qgpj-74h6  fast-uri                                  high   2026-05-09T02:01:00Z
+```
+
+**Net delta arithmetic (using the original push-output baseline of 54):**
+
+```
+54  open at original push output
+- 7 D2-bump closures (all 7 of D1's predicted root-only advisories)
++ 1 fast-uri q3j6 arrival before yesterday's pre-work pull (the +1 drift)
++ 2 arrivals during recheck window (fv7c + v39h)
+= 50  open today
+
+→  -5 net change, NOT -7 closures + 0 arrivals
+```
+
+**Net delta arithmetic (using yesterday's snapshot baseline of 55, which already included q3j6):**
+
+```
+55  open at yesterday's pre-work snapshot
+- 7 D2-bump closures
++ 2 post-snapshot arrivals (fv7c + v39h)
+= 50  open today
+
+→  -5 net change, same arithmetic, different framing of how many "parallel arrivals" to count
+```
+
+Both framings are consistent. The "3 parallel arrivals" framing (Mo's per the 2026-05-09 prompt) counts q3j6 as parallel because it appeared during the broader push-to-recheck window; the "2 post-snapshot arrivals" framing counts only those that appeared after the JSON was pulled. Both arrive at -5 net = 7 closures.
+
+### Manifest-double-counting empirically confirmed (with one nuance)
+
+The original D2 surface noted that "apps stay open until apps are bumped to 14.2.35; that's Tier 2 work." Today's data confirms this for the multi-manifest GHSAs — but with a non-obvious twist: a Dependabot housekeeping event on **2026-05-07** confuses the per-GHSA fix history.
+
+**GHSA-5j59-xgg2-r9c4 — full alert history (representative case):**
+
+```text
+$ jq '[.[] | select(.security_advisory.ghsa_id == "GHSA-5j59-xgg2-r9c4")] | sort_by(.number) | .[]' audits/dependabot-alerts-2026-05-09.json
+{ n:7,  manifest:"apps/clinic/package.json",  state:"open",  created:"2026-05-03",  fixed:null      }
+{ n:19, manifest:"apps/patient/package.json", state:"open",  created:"2026-05-03",  fixed:null      }
+{ n:37, manifest:"package.json",              state:"fixed", created:"2026-05-03",  fixed:"2026-05-07" }
+{ n:57, manifest:"package-lock.json",         state:"open",  created:"2026-05-07",  fixed:null      }
+```
+
+GHSA-mwv6 has the same shape. Three observations:
+
+1. **The 2026-05-07 closures of `package.json`-manifest alerts were a Dependabot housekeeping event, NOT a real fix.** 18 `package.json` alerts (across 18 distinct GHSAs) all marked fixed at `2026-05-07T03:39:33-35Z`; 35 `package-lock.json` alerts created at `2026-05-07T03:39:38Z` (4 seconds later). No commit on 2026-05-07 touched `package.json` or `package-lock.json` (verified via `git log --since="2026-05-06" --until="2026-05-08" -- package.json apps/clinic/package.json apps/patient/package.json` returning empty). Dependabot reorganized its alert tracking from per-direct-dep `package.json` to per-workspace-lockfile `package-lock.json` for monorepo support; the "fixed" flip on the package.json rows was the migration artifact.
+
+2. **Today's bump did NOT close GHSA-5j59 + GHSA-mwv6 at the workspace lockfile** because the lockfile contains apps' `next@14.2.25` (still vulnerable to advisories whose patched version is between 14.2.26 and 14.2.35). The workspace `package-lock.json` alert is only marked fixed when EVERY install in the lockfile is past the patched version. Bumping ONLY root next is insufficient for these multi-manifest GHSAs.
+
+3. **The 7 root-only-advisory GHSAs that D1 predicted closed today** because the workspace lockfile contains no other vulnerable next install for those advisories: their vulnerable range tops out at `<14.2.24` or earlier (qpjv, g77x, gp8f, 7gfc, 7m27, fr5h all have ranges that apps' `14.2.25` is past). For those advisories, the only vulnerable install in the workspace was the root `14.1.0` — bumping root closed the workspace lockfile alert entirely.
+
+**Tier 2 implication.** When apps bump to `14.2.35`, all 3 remaining open rows for GHSA-5j59 (and similarly mwv6, g5qg, xv57, 4342, 3h52, 223j) close together: app-clinic + app-patient + workspace-lockfile = 3 closures per GHSA. Tier 2's expected closure count is therefore higher than the per-app naive count would suggest.
+
+### My D2-surface framing error (honest record)
+
+In the D2 surface, I wrote "**7 alerts expected to close.** Net post-push: 55 → 48." After the push, when I observed 50 open instead of 48, I reported "predicted 7, actual 5; 2 stragglers are GHSA-5j59 + GHSA-mwv6." That framing was wrong on two counts:
+
+- **The "5 closures" wasn't a closure count — it was a net delta.** Closure count was 7 (D1's prediction held). Net delta of -5 was 7 closures combined with 2 (or 3, depending on baseline) parallel arrivals from independent sources (fast-uri + @babel advisories). I should have queried `state == "fixed" AND fixed_at >= push_time` instead of inferring from `len(open_after) - len(open_before)`.
+
+- **GHSA-5j59 + GHSA-mwv6 were never in the predicted-7 list** — they're 4-manifest GHSAs (one of which had already been quietly closed in 2026-05-07's housekeeping migration). My naming them as "stragglers" conflated D1's predicted-7 (root-only single-manifest GHSAs) with the broader §6.1 list of 12 GHSAs that close "at root level" after the pragmatic 14.2.35 bump. The §6.1 12-GHSA list explicitly says "at root level" — for the multi-manifest GHSAs, that means only the root manifest entry closes; lockfile + app entries stay open.
+
+Lesson surfaced: net count delta is corrupted by parallel arrivals from independent sources (advisory publication, manifest reorganizations, etc.). Closure verification should filter by event timestamp, not infer from net counts. Codified as **Lesson #18 candidate** (see §0.6).
+
+---
+
+## 0.6. Lesson #18 candidate — net delta is not closure count
+
+> Surfaced from the §0.5 framing error. Recommend codifying as Empirical Lesson #18 in `audits/EXECUTION_PROMPTS.md`. The misread that led to this section's authoring blocked a clean Phase 2 start in the next session — that's enough drift cost to warrant a standing rule.
+
+**Title:** Filter by event timestamp, not by net delta, when measuring closures.
+
+**Standing rule:** To verify "X items closed from action Y," query `fixed_at >= action_timestamp` (or equivalent state-transition timestamp). Do NOT compute closure count as `len(open_before) - len(open_after)` — that net delta is corrupted by parallel arrivals from independent sources (upstream advisory publication, workspace dependency rescans, manifest tracking reorganizations, auto-dismissals). The rule applies to Dependabot alerts, CI runs, monitoring incidents, support tickets — anything where items can both close AND be created during the observation window.
+
+**Empirical proof:** Phase F Task 16 batch (commit `39c2f43`) closed exactly 7 Dependabot alerts as D1 predicted (all at `fixed_at = 2026-05-09T03:15:29Z`). Net `length()` delta of open-state alerts showed -5 because 3 unrelated advisories (fast-uri × 2, @babel/plugin-transform-modules-systemjs × 1) were created during the same window. My D2 surface initially assessed "5 closures, 2 missing"; correct read was "7 closures + 3 arrivals" (or "7 closures + 2 arrivals" using yesterday's snapshot baseline). The misread blocked clean Phase 2 start: the next session's prompt was authored against the wrong-prediction-failure premise, requiring this correction section + a refrained Task 1 before the actual Phase 2 work could begin.
+
+**Companion technique:** when authoring the original prediction, include the SQL/jq filter that will verify it post-action. For Dependabot specifically: `jq '[.[] | select(.fixed_at >= "<push-time>") | .security_advisory.ghsa_id]'`. Embedding the verification query in the surface pre-empts the net-delta trap.
+
+---
+
 ## 1. Summary by remediation class
 
 | Class | Unique GHSAs | Total alert rows | Notes |

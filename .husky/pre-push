@@ -1,6 +1,7 @@
 #!/usr/bin/env sh
 # ----------------------------------------------------------------------------
-# pre-push: gate `git push` on clean type-checks for the whole monorepo.
+# pre-push: gate `git push` on clean type-checks + admin-scope discipline
+# for the whole monorepo.
 #
 # Why this exists: commit b724eb1 widened a data-layer signature without
 # updating the call site, and the broken code reached Vercel because nothing
@@ -8,12 +9,20 @@
 # push, but Vercel builds in parallel — by the time CI fails, Vercel has
 # already failed too. This hook closes that gap locally.
 #
-# Two passes (D-042 + D-045):
+# Three passes (D-042 + D-045 + D-008 Amendment 2026-05-09):
 #   1. Root tsc --noEmit  — catches phantom imports inside packages/shared/**
 #      that the per-workspace check misses (its tsconfig only sees
 #      apps/clinic/**). This is the gate that would have flagged the
 #      Capacitor TS2307 errors that lived for ~6 weeks unseen.
 #   2. Clinic-workspace type-check — fast feedback on app-specific errors.
+#   3. Admin-scope discipline (lint:scopes) — runs the custom eslint rule
+#      `medassist-local/no-unregistered-admin-scope` across packages/shared/lib
+#      + apps/{clinic,patient}/app. Fails the push if any callsite uses (a) a
+#      static-string scope not in `ALLOWED_ADMIN_SCOPES`, or (b) a non-static
+#      argument (template literal / variable / expression). Per-app `next lint`
+#      catches app code only — this pass is what enforces the discipline on
+#      shared package callsites. Phase 2 of D-008 Amendment 2026-05-08's
+#      Option D plan.
 #
 # Skip with: git push --no-verify   (use sparingly, e.g. WIP branches)
 # ----------------------------------------------------------------------------
@@ -27,3 +36,8 @@ npm run type-check
 # Pass 2: clinic workspace — fast app-scoped feedback (D-042).
 echo "→ pre-push: type-check clinic workspace"
 npm run type-check -w @medassist/clinic
+
+# Pass 3: admin-scope discipline — eslint rule across shared + apps
+# (D-008 Amendment 2026-05-09 / Phase F Task 20).
+echo "→ pre-push: lint:scopes (admin-scope discipline)"
+npm run lint:scopes

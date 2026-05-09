@@ -129,6 +129,7 @@ surfaces. Specifically:
 | Date claims | `git log --format=%ci <hash>` |
 | CI run outcomes | `gh run view <run-id>` |
 | Test counts | Run the test, count from output |
+| Closure counts (Dependabot, CI, tickets, etc.) | Filter by `fixed_at >= action_timestamp` (or equivalent state-transition timestamp) — NOT by net `length()` delta of open-state items. See **Empirical Lesson #18** in `audits/EXECUTION_PROMPTS.md`. |
 
 **Concrete example.** The doc-verification-sweep-2026-05-04.md found 14
 factual errors that all had this in common — claimed without verifying.
