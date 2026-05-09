@@ -86,7 +86,8 @@ medassist/
 │                                  # See §8.6 for migration timeline + retirement notes.
 │
 ├── .husky/
-│   └── pre-push                   # Type-check gate (see D-042 + D-045)
+│   └── pre-push                   # 5-pass gate: tsc + lint:scopes + next build × 2
+│                                  # (D-042 + D-045 + D-008-2026-05-09 + Lesson #17)
 ├── package.json                   # npm workspaces root (prepare: husky)
 ├── tsconfig.json                  # Root TypeScript config with per-app path aliases
 └── turbo.json                     # Turborepo pipeline config
@@ -104,7 +105,7 @@ medassist/
 
 | Layer | Technology | Version | Notes |
 |-------|-----------|---------|-------|
-| Framework | Next.js (App Router) | 14.2.25 | Server components + client islands. Both `apps/clinic` and `apps/patient` pin this. The root `package.json` pins 14.1.0 (older, but unused — Next.js runs from the per-app workspace context). |
+| Framework | Next.js (App Router) | 14.2.35 | Server components + client islands. Both `apps/clinic` and `apps/patient` pin this. Root `package.json` also pins 14.2.35 (vestigial template residue — root has no `app/`/`pages/`/`next.config.js`; the four root scripts `dev/build/start/lint` reference `next` but are never invoked since CI uses workspace-scoped `build:clinic`/`build:patient`. Audited 2026-05-09 in Phase F Task 19 — removal deferred to focused workstream "Task 19a — root vestigial dep cleanup"). Apps' `eslint-config-next` paired at 14.2.35; root `eslint-config-next` lags at 14.1.0 (cosmetic; not invoked at root). |
 | Language | TypeScript | 5.x | Strict mode, 0 errors. Root `tsc --noEmit` + per-workspace `type-check` both gate CI per D-045. |
 | Styling | Tailwind CSS | 3.4 | Custom design tokens, Cairo font, RTL-first. Each app has its own `tailwind.config.ts`. |
 | Database | PostgreSQL (Supabase) | 17.6 | Staging on `medassist-egypt` (eu-central-1). RLS rewrite landed via mig 092-097 (incl. 094a) + forensic mig 106 + Phase D matrix prep mig 107 + Phase F Task 18 teardown fix mig 108; 111 non-rollback migration files on disk (highest base 108). See §8.6. |
@@ -116,7 +117,7 @@ medassist/
 | Error Tracking | Sentry | 10.38 | `@sentry/nextjs` integration |
 | Package Manager | npm | 10.x | Workspaces for monorepo. Specific version varies by developer environment. |
 | Build | Turborepo | — | Pipeline: lint → type-check → build. Config in `turbo.json`. |
-| Git Hooks | Husky | 9.x | `pre-push`: runs root `npm run type-check` (monorepo-wide `tsc --noEmit`) + per-workspace `type-check -w @medassist/clinic`. Root gate catches phantom imports invisible to per-workspace tsconfig (D-045). Originally added after `b724eb1` incident (D-042). |
+| Git Hooks | Husky | 9.x | `pre-push`: 5 passes — (1) root `npm run type-check` (D-045, catches phantom imports invisible to per-workspace tsconfig); (2) clinic workspace `type-check -w @medassist/clinic` (D-042, fast app-scoped feedback after `b724eb1` incident); (3) `lint:scopes` (D-008 Amendment 2026-05-09 / Phase F Task 20, custom eslint rule `medassist-local/no-unregistered-admin-scope`); (4) `next build` clinic and (5) `next build` patient (Empirical Lesson #17, route-handler type contract enforcement that `tsc --noEmit` does not see — added 2026-05-09 closing Lesson #17's operational follow-up). Skip with `--no-verify` for WIP branches. |
 
 ---
 

@@ -1,0 +1,130 @@
+chore(phase-f-closeout): pre-push gate + Tier 2 next bump + Task 19 audit
+
+Phase F closeout autonomous-execution batch (2026-05-09). Cowork session
+made trade-off decisions using audits/REVIEW_CRITERIA.md as authority;
+12 decisions captured in audits/phase-f-closeout-decisions-2026-05-09.md.
+3 of 4 originally-scoped tasks shipped; 1 deferred to a focused session.
+
+Tasks shipped:
+
+1. Pre-push gate enhancement (Lesson #17 follow-up — D-075)
+   .husky/pre-push extended 3 → 5 passes:
+     Pass 1: root tsc (D-045, unchanged)
+     Pass 2: clinic tsc (D-042, unchanged)
+     Pass 3: lint:scopes (D-008-2026-05-09, unchanged)
+     Pass 4: next build clinic (NEW — Lesson #17)
+     Pass 5: next build patient (NEW — Lesson #17)
+   Sequential, full next build (no --no-lint). Apps only (shared covered
+   by Pass 1). Estimated wall clock: ~2.3-4.4 min total.
+
+   Empirical sandbox demo of necessity: gates 1-3 (root tsc + clinic tsc
+   + lint:scopes) all pass clean against the Lesson #17 anti-pattern
+   `GET(request?: Request)`, reproducing the lesson's central
+   observation that tsc does not enforce Next.js's route-handler type
+   contract. Gate-5 sandbox-deferred (45s timeout vs 60-180s wall clock
+   for next build); Mac-side empirical confirmation = single
+   `.husky/pre-push` invocation before push.
+
+2. Tier 2 Dependabot — apps next + eslint-config-next 14.2.25 → 14.2.35
+   (D-077)
+   Lockfile delta 450 lines bounded entirely to next dep tree (@next/env,
+   @next/eslint-plugin-next, @next/swc-* platform binaries, etc.) +
+   dedupe cleanup of pre-existing peer:true / license-trailing-comma
+   drift from npm 11 vs npm 10 metadata refresh. 32 integrity hash
+   changes.
+
+   Expected closures: 21 (Decision 8). 14 manifest closures (7 GHSAs ×
+   2 apps) + 7 lockfile closures: GHSA-5j59 + GHSA-mwv6 + GHSA-4342 +
+   GHSA-xv57 + GHSA-g5qg + GHSA-3h52 + GHSA-223j. Stays-open: 10
+   manifest + 5 lockfile = 15 alerts requiring Next 15+ (Tier 3).
+
+   Post-push verification (Lesson #18, after ~7h Dependabot recheck):
+     gh api "repos/Medassist2026/medassist/dependabot/alerts?\
+       state=fixed&per_page=100" --paginate \
+       | jq '[.[] | select(.fixed_at >= "2026-05-09T06:11:48Z")]'
+   Filter by event timestamp, NOT by net length() delta of open alerts.
+
+4. Phase F Task 19 — root next removal audit (D-076)
+   Audit findings: root next is vestigial template residue (referenced
+   by 4 dead scripts dev/build/start/lint from `4a4f368` "initial
+   upload"; no app/, pages/, next.config.js, or imports at root;
+   turbo.json uses workspace dependency chains; CI workspace-scoped; no
+   vercel.json; 0 root-package.json next alerts open).
+
+   Removal DEFERRED to new workstream Task 19a — root vestigial dep
+   cleanup — which scopes triage of all root template-residue deps
+   (next + Radix + lucide-react + framer-motion + cmdk) into one
+   focused PR with Vercel preview deploy verification. Closures from
+   removal: 0 (no security urgency).
+
+Tasks deferred:
+
+3. Phase F Task 16 Phase 3 (TS literal-union refactor) — Decision 11
+   The largest task in the batch (90-150 min). Defense-in-depth not
+   regressed: yesterday's eslint static-string discipline rule
+   (medassist-local/no-unregistered-admin-scope, commit 1a97dd5)
+   already enforces the static-literal-only precondition the refactor
+   needs, so deferral does not regress security posture. Approach
+   selection (1: as const tuple → typeof[number]; 2: manual literal
+   union; 3: branded type) + 135-callsite verification + deliberate-
+   violation tests + sympathetic doc updates (ARCH §12, D-008
+   amendment, admin-scope-reconciliation §10) deserve dedicated
+   session capacity. Handoff state captured in Decision 11.
+
+Verification gates (all 4 sandbox-runnable gates clean post-batch):
+  G1 root tsc:           exit 0  (3.8s)
+  G2 clinic tsc:         exit 0  (3.1s)
+  G3 patient tsc:        exit 0  (2.3s)
+  G4 lint:scopes:        exit 0  (4.4s)
+  G5 next build × 2:     Mac-deferred (sandbox 45s timeout)
+
+Doc updates (Decision 12 scope — sympathetic to what shipped):
+  ARCH §3:   apps next pin 14.2.25 → 14.2.35 + root vestigial-residue
+             annotation; Technology Stack pre-push row updated to
+             5-pass model with Lesson #17 reference.
+  ARCH §16:  file tree pre-push comment 5-pass annotation.
+  DECISIONS_LOG.md:  D-075 (pre-push gate), D-076 (root next audit),
+                     D-077 (Tier 2 bump).
+  audits/PROGRAM_STATE.md:  Task 19 → AUDITED+DEFERRED with full audit
+                            findings + Task 19a queued; new entry 15
+                            for Phase F closeout batch.
+  audits/STATE_OF_WORK.md:  header + Last session updated; workstream
+                            Active → Completed with explicit Task 3
+                            deferral note.
+  audits/phase-f-closeout-decisions-2026-05-09.md (NEW):  12 decisions
+    cataloging every meaningful trade-off — pre-work CI verification
+    path, pre-push gate flag/sequencing/scope, sandbox empirical
+    constraints, test-fixture cleanup recovery, eslint-config-next
+    pairing, lockfile delta scope, expected closures, root next
+    category + removal decision, Task 3 deferral, doc-update scope.
+
+Doc updates DEFERRED (Decision 12 — Task-3-shaped):
+  ARCH §12 admin scope mechanics narrative.
+  DECISIONS_LOG.md D-008 fourth amendment (Phase 3 ship-doc).
+  audits/EXECUTION_PROMPTS.md new lesson (only emerges from Task 3).
+  audits/admin-scope-reconciliation-2026-05-08.md §10 Phase 3 receipt.
+
+Pre-work verification (REVIEW_CRITERIA §1.1):
+  All 8 empirical premises verified before starting Task 1:
+    HEAD = 1a97dd5 (matches origin/main)
+    CI all 3 checks SUCCESS at 1a97dd5 (verified via GitHub public REST
+      API since `gh` not available in sandbox — Decision 0)
+    Open Dependabot alerts = 50
+    REVIEW_CRITERIA §1.1/§2.1/§5 present
+    Lesson #18 codified at line 309 of EXECUTION_PROMPTS.md
+    ALLOWED_ADMIN_SCOPES = 136
+    eslint-rules/no-unregistered-admin-scope.js wired in .eslintrc.json
+      + lint:scopes script
+    .husky/pre-push has 3 gates (now extended to 5)
+
+Mac-side cleanup REQUIRED before this commit:
+  rm -rf apps/clinic/app/api/_lesson17_test
+  find .git -maxdepth 2 -name '*.lock' -delete
+  (Sandbox `rm` was blocked on the test fixture by the same mount
+  permission flagged in feedback memory — file overwritten with benign
+  `export {}` stub flagged DELETE BEFORE COMMITTING per Decision 5;
+  Phase F Task 20 used the same recovery pattern for
+  apps/clinic/app/__rule-test-bad-scope.tsx.)
+
+Phase F closeout: 3 of 4 tasks shipped; Task 3 + Task 19a deferred to
+focused workstreams.

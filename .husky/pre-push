@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 # ----------------------------------------------------------------------------
-# pre-push: gate `git push` on clean type-checks + admin-scope discipline
-# for the whole monorepo.
+# pre-push: gate `git push` on clean type-checks + admin-scope discipline +
+# Next.js route-handler contracts for the whole monorepo.
 #
 # Why this exists: commit b724eb1 widened a data-layer signature without
 # updating the call site, and the broken code reached Vercel because nothing
@@ -9,7 +9,7 @@
 # push, but Vercel builds in parallel — by the time CI fails, Vercel has
 # already failed too. This hook closes that gap locally.
 #
-# Three passes (D-042 + D-045 + D-008 Amendment 2026-05-09):
+# Five passes (D-042 + D-045 + D-008 Amendment 2026-05-09 + Lesson #17):
 #   1. Root tsc --noEmit  — catches phantom imports inside packages/shared/**
 #      that the per-workspace check misses (its tsconfig only sees
 #      apps/clinic/**). This is the gate that would have flagged the
@@ -23,6 +23,17 @@
 #      catches app code only — this pass is what enforces the discipline on
 #      shared package callsites. Phase 2 of D-008 Amendment 2026-05-08's
 #      Option D plan.
+#   4. Clinic next build — catches Next.js route-handler type contract
+#      failures that `tsc --noEmit` does not enforce (Empirical Lesson #17).
+#      A handler declaring `export async function GET(request?: Request)`
+#      compiles clean under tsc but fails inside `next build`'s typegen
+#      because the route-handler contract requires the first parameter to
+#      be `NextRequest | Request` (no `undefined` in the union). Closes the
+#      operational follow-up flagged in Lesson #17.
+#   5. Patient next build — same rationale; both apps must build clean
+#      because either can have route handlers (the Lesson #17 trigger was a
+#      shared handler in `packages/shared/lib/api/handlers/patient/sharing/`
+#      re-exported from `apps/patient/app/api/patient/sharing/route.ts`).
 #
 # Skip with: git push --no-verify   (use sparingly, e.g. WIP branches)
 # ----------------------------------------------------------------------------
@@ -41,3 +52,12 @@ npm run type-check -w @medassist/clinic
 # (D-008 Amendment 2026-05-09 / Phase F Task 20).
 echo "→ pre-push: lint:scopes (admin-scope discipline)"
 npm run lint:scopes
+
+# Pass 4: clinic next build — Next.js route-handler contract enforcement
+# (Empirical Lesson #17). Sequential with Pass 5 for readable output.
+echo "→ pre-push: next build clinic (route-handler contract gate)"
+npm run build:clinic
+
+# Pass 5: patient next build — same gate for the patient app.
+echo "→ pre-push: next build patient (route-handler contract gate)"
+npm run build:patient

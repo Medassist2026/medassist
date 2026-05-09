@@ -804,5 +804,83 @@
 
 ---
 
-*Last entry: D-074 (amended 2026-05-07) | D-065 amended twice 2026-05-07 | 7 May 2026*
+## D-075: Pre-push gate extended from 3 → 5 passes (`next build` for both apps)
+
+**Decision Date:** 2026-05-09
+**Context:** Empirical Lesson #17 (codified 2026-05-08 in `audits/EXECUTION_PROMPTS.md`) documents that `tsc --noEmit` does not enforce Next.js's route-handler type contract — a handler declaring `export async function GET(request?: Request)` (optional first parameter) compiles clean under tsc but fails inside `next build`'s typegen because the contract requires the first parameter to be `NextRequest | Request` with no `undefined` in the union. The Lesson's "Operational follow-up flagged for Phase F discussion" left open the question of whether to add `next build` to the pre-push gate.
+
+The 6-run failure series 115-120 (2026-05-07, commits `61f8752` through `134e272`) demonstrated the cost of not catching this locally: each red CI run took ~5-8 minutes to surface the same error, and the Lint & Type Check job stayed green throughout (only Build Patient App caught it). At pre-push time, the failing handler would have been caught in ~75-150 seconds with the new gate.
+
+**Decision:** Extend `.husky/pre-push` from 3 passes to 5 passes. Add Pass 4 (`npm run build:clinic`) and Pass 5 (`npm run build:patient`) sequentially after the existing tsc + lint:scopes passes.
+
+**Trade-offs:**
+- Sequential, not parallel — readability on failure outweighs the ~75-150s wall-clock penalty (Decision 2 in `audits/phase-f-closeout-decisions-2026-05-09.md`).
+- Full `next build`, no `--no-lint` flag — pre-push mirrors CI verbatim; latency saving is small relative to total gate time and would skip per-app eslint coverage that catches additional regression classes (Decision 1).
+- Apps only — shared packages already covered by Pass 1 (root tsc) which sees the entire monorepo (Decision 3).
+- Total expected pre-push wall clock: ~2.3-4.4 minutes; skip via `git push --no-verify` for WIP branches per the existing convention.
+
+**Empirical verification status:** The new gate's logic was sandbox-reproduced as the negative claim — gates 1-3 (root tsc + clinic tsc + lint:scopes) all pass clean with the Lesson #17 anti-pattern in place, confirming the gate's necessity. Empirical confirmation that Pass 4 fires on the anti-pattern was sandbox-deferred to Mac (the cowork sandbox's 45-second bash timeout cannot complete a `next build` for either app, which takes 60-180s wall clock; Decision 4).
+
+**Outcome:** Gate shipped 2026-05-09 in the Phase F closeout autonomous batch. ARCH §3 file tree comment + Technology Stack pre-push row updated to reflect the 5-pass model. Mac-side empirical verification = single `.husky/pre-push` invocation before push (full 5-pass clean confirms the new lines work).
+
+---
+
+## D-076: Root `next` audited as vestigial template residue; removal deferred to Task 19a
+
+**Decision Date:** 2026-05-09
+**Context:** Phase F Task 19 (queued from 2026-05-08 D2 Dependabot triage) asked whether root `package.json`'s `next` declaration is an orphan dep removable for cleanup. The 2026-05-09 Phase F closeout batch performed the audit per Decisions 9 + 10 in `audits/phase-f-closeout-decisions-2026-05-09.md`.
+
+**Audit findings:**
+- Root has NO `app/`, `pages/`, `next.config.js`, `next-env.d.ts`, or imports of `next`.
+- Four root scripts `dev/build/start/lint` reference `next` but were added in commit `4a4f368` ("initial upload") and are NEVER invoked since CI uses workspace-scoped `npm run build:clinic` / `:patient`.
+- `turbo.json` task pipeline uses `dependsOn: ["^build"]` (workspace dependency chains); does not invoke root next directly.
+- No `vercel.json` (deployment is workspace-scoped; apps deploy independently).
+- `.next/` exists at root but contains only stale `trace` from Apr 11 — not load-bearing.
+- 0 root-package.json next alerts open in `audits/dependabot-alerts-2026-05-09.json` (root next was already at 14.2.35 from yesterday's Tier 1 bump).
+
+**Categorization:** Vestigial template residue (not orphan-clean — referenced by 4 dead scripts; not tooling-dep — turbo/CI/Vercel don't depend on it; not type-only — no imports). Same template-residue origin as other root deps (`@radix-ui/*`, `lucide-react`, `framer-motion`, `cmdk`) which appear duplicated between root and `packages/shared/package.json` from the pre-monorepo era.
+
+**Decision:** Keep root next + the 4 vestigial scripts in this batch. **Defer removal to a focused workstream "Task 19a — root vestigial dep cleanup"** that triages all root template-residue deps together (next + Radix + lucide-react + framer-motion + cmdk + others) in one focused PR with Vercel preview deploy verification.
+
+**Reasoning:**
+- Closures expected from removal: 0 (no security urgency).
+- Task 19a's blast-radius surface (turbo, possible external Vercel config, hoisted dedup deps) deserves empirical verification via a preview deployment which a focused single-purpose PR can do cleanly; bundling into the Phase F closeout batch would compound today's Tier 2 450-line lockfile delta and obscure attribution if a removal-side regression surfaced.
+- REVIEW_CRITERIA §2.2 (smaller diff surface = less risk) supports the conservative option.
+
+**Outcome:** Phase F Task 19 → AUDITED + DEFERRED 2026-05-09. New workstream Task 19a queued in `audits/PROGRAM_STATE.md` entry 13.
+
+---
+
+## D-077: Tier 2 Dependabot bump — apps' next + eslint-config-next 14.2.25 → 14.2.35 (paired)
+
+**Decision Date:** 2026-05-09
+**Context:** Following the 2026-05-08 Tier 1 bump (root next 14.1.0 → 14.2.35, closing 1 critical CVE-2025-29927 + 6 root-only `next` advisories), the 2026-05-09 Phase F closeout batch performed the Tier 2 bump that propagates the same fix-set to apps' lockfile entries plus apps' manifest entries.
+
+**Decision:** Bump apps' next and apps' eslint-config-next together from 14.2.25 to 14.2.35. Keep root eslint-config-next at 14.1.0 (cosmetic lag; not invoked at root; Task 19a-shaped concern).
+
+**Reasoning:**
+- eslint-config-next must remain paired with next per the existing convention; an apps-next-only bump would create an apps' next ↔ eslint-config-next version mismatch.
+- 14.2.25 → 14.2.35 is a same-minor-line patch sequence with no breaking changes per Next's release notes.
+- Lockfile delta empirically inspected: 450 lines (36+, 422-) bounded entirely to next dep tree (`@next/env`, `@next/eslint-plugin-next`, `@next/swc-*` platform binaries, `nanoid`, `postcss`, `balanced-match`) + dedupe cleanup of pre-existing peer:true / license-trailing-comma drift from npm 11 vs npm 10 metadata refresh. 32 integrity hash changes = 32 distinct packages in the next transitive dep tree updating to new tarballs.
+- Larger than yesterday's Tier 1 delta (113 lines) because two apps have separate `node_modules` trees.
+
+**Expected closures: 21** (per Decision 8 in `audits/phase-f-closeout-decisions-2026-05-09.md`):
+- 14 manifest closures (7 GHSAs × 2 apps): GHSA-5j59 + GHSA-mwv6 + GHSA-4342 + GHSA-xv57 + GHSA-g5qg + GHSA-3h52 + GHSA-223j (each on both apps/clinic and apps/patient).
+- 7 lockfile closures: same 7 GHSAs once 14.2.25 leaves the lockfile entirely (lockfile previously contained both 14.2.25 from apps and 14.2.35 from root; Tier 2 leaves only 14.2.35).
+- 10 manifest stays-open + 5 lockfile stays-open = 15 alerts requiring Next 15+ (Tier 3 territory; deferred per yesterday's triage).
+
+**Verification gates:** All 4 sandbox-runnable gates clean post-bump (G1 root tsc 3.8s, G2 clinic tsc 3.1s, G3 patient tsc 2.3s, G4 lint:scopes 4.4s). Gate 5 (`next build` × 2) Mac-deferred per D-075's Decision 4 (sandbox 45s timeout vs 60-180s build wall clock).
+
+**Post-push verification (Lesson #18 standing rule):**
+```bash
+gh api "repos/Medassist2026/medassist/dependabot/alerts?state=fixed&per_page=100" --paginate \
+  | jq '[.[] | select(.fixed_at >= "2026-05-09T06:11:48Z")]'
+```
+Expected: 21 rows. Filter by event timestamp, NOT by net `length()` delta of open-state alerts (Lesson #18 — net delta gets corrupted by parallel arrivals from independent sources).
+
+**Outcome:** Apps + eslint-config-next bumped 2026-05-09 in the Phase F closeout batch. ARCH §3 next-pin row updated 14.2.25 → 14.2.35.
+
+---
+
+*Last entry: D-077 | D-074 (amended 2026-05-07) | D-065 amended twice 2026-05-07 | 9 May 2026*
 *Add new decisions at the bottom with sequential ID.*
