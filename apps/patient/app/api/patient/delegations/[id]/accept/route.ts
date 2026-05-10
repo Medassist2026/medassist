@@ -1,0 +1,4 @@
+export const dynamic = 'force-dynamic'
+
+// Re-exported from shared handler — single source of truth
+export { PATCH } from '@shared/lib/api/handlers/patient/delegations/accept/handler'

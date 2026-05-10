@@ -15,6 +15,10 @@
     {
       "path": "/api/cron/expire-stale-shares",
       "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/cron/expire-stale-delegations",
+      "schedule": "0 3 * * *"
     }
   ]
 }

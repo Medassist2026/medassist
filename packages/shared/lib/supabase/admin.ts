@@ -200,6 +200,14 @@ const ALLOWED_ADMIN_SCOPES = new Set([
   'delegations-list-granted',           // listGrantedDelegations (outgoing)
   'delegations-list-received',          // listReceivedDelegations (incoming)
   'delegations-expire-stale',           // expireStaleDelegations (cron-callable)
+
+  // ── B07 Phase E API surface (authority helpers + endpoint handlers) ─────
+  'authority-resolve',                  // requireAuthorityOver: 3-query OR-of-three
+  'authority-capability',               // requireCapability: delegated_capability_includes RPC
+  'dependents-register-resolve-gp',     // POST /api/patient/dependents/register: caller's claimed gp
+  'delegations-create-resolve-principal', // POST /api/patient/delegations: caller's principal gp
+  'delegations-revoke-discriminate',    // PATCH /api/patient/delegations/[id]/revoke: read-before-write
+  'cron-expire-stale-delegations',      // cron handler (Phase E expire-stale-delegations)
 ])
 
 export { ALLOWED_ADMIN_SCOPES }

@@ -7,6 +7,12 @@ import { ensureDoctorInFrontdeskClinic, getUserClinicId } from '@shared/lib/data
 import { NextResponse } from 'next/server'
 import { validateEgyptianPhone } from '@shared/lib/utils/phone-validation'
 import { enforceRateLimit } from '@shared/lib/security/rate-limit'
+import { findGlobalPatientByPhone } from '@shared/lib/data/global-patients'
+import {
+  createMinorGlobalPatient,
+  GuardianAuthorityError,
+  InvalidDependentError,
+} from '@shared/lib/data/dependents'
 
 /**
  * POST /api/patients/onboard
@@ -145,11 +151,133 @@ export async function POST(request: Request) {
         { status: 400 }
       )
     }
-    
+
     // ============================================
-    // ONBOARD PATIENT
+    // B07 PHASE E — DEPENDENT V2 DUAL-PATH
     // ============================================
-    
+    // When isDependent=true, take the v2 path: create a minor gp directly
+    // via the Phase C data layer; bypass the legacy `patients` table per
+    // Phase B Decision 3 (mig 081 compat triggers are clinical-tables-only
+    // and disjoint from the dependent-account schema; the v2 minor flow
+    // does NOT need a legacy patients row).
+    //
+    // BRIDGE PATTERN (Phase E Decision 8):
+    //   `createMinorGlobalPatient` requires `createdByUserId === guardian.
+    //   claimed_user_id`. The caller here is doctor/frontdesk staff, not
+    //   the parent. We use the documented Phase C bridge: pass the
+    //   parent's claimed_user_id as createdByUserId so the data-layer
+    //   authority check passes. The audit row attributes to the parent —
+    //   semantically "the parent authored this minor's creation, even
+    //   though staff typed it in." This matches existing MVP convention
+    //   where staff-mediated patient consent attributes to the patient.
+    //
+    // ADULT PATH UNCHANGED — when isDependent=false (or missing) we fall
+    // through to the legacy onboardPatient flow.
+    if (isDependent) {
+      const parentValidation = validateEgyptianPhone(parentPhone)
+      if (!parentValidation.isValid) {
+        return NextResponse.json(
+          { error: parentValidation.error, errorAr: parentValidation.errorAr },
+          { status: 400 }
+        )
+      }
+
+      const parentGp = await findGlobalPatientByPhone(parentPhone)
+      if (!parentGp) {
+        return NextResponse.json(
+          {
+            error:
+              'Parent must register their own patient account before a dependent can be added',
+            errorAr: 'يجب تسجيل ولي الأمر أولاً',
+            code: 'PARENT_NOT_REGISTERED',
+          },
+          { status: 400 }
+        )
+      }
+      if (!parentGp.claimed_user_id) {
+        // gp exists but unclaimed — parent has no auth.users record yet,
+        // so there is no `createdByUserId` to bridge through. Per Phase E
+        // Decision 8, do NOT inline-create the parent gp; require them to
+        // register first.
+        return NextResponse.json(
+          {
+            error:
+              'Parent has not yet completed account registration. Ask them to log in first, then add the dependent.',
+            errorAr: 'يجب على ولي الأمر إكمال التسجيل أولاً',
+            code: 'PARENT_UNCLAIMED',
+          },
+          { status: 400 }
+        )
+      }
+      if (parentGp.is_minor) {
+        return NextResponse.json(
+          {
+            error: 'A minor cannot be a guardian (authority chain depth = 1)',
+            code: 'PARENT_IS_MINOR',
+          },
+          { status: 400 }
+        )
+      }
+
+      // Map the existing onboard body shape (sex 'Male'/'Female') to the
+      // dependents data layer shape ('male'/'female').
+      let mappedSex: 'male' | 'female' | undefined
+      if (sex === 'Male') mappedSex = 'male'
+      else if (sex === 'Female') mappedSex = 'female'
+      // 'Other' is allowed by the existing onboard schema but not by
+      // dependents.normalizeSex; pass undefined to defer to data-layer
+      // default (no sex stored).
+
+      try {
+        const minor = await createMinorGlobalPatient({
+          guardianGlobalPatientId: parentGp.id,
+          displayName: fullName.trim(),
+          // dateOfBirth not collected by this endpoint — onboard uses
+          // age-as-integer only. Pass undefined; the minor row gets
+          // date_of_birth=NULL.
+          dateOfBirth: undefined,
+          sex: mappedSex,
+          preferredLanguage: undefined, // defaults to 'ar' in data layer
+          createdByUserId: parentGp.claimed_user_id,
+        })
+
+        return NextResponse.json(
+          {
+            success: true,
+            isDependent: true,
+            isV2DependentPath: true,
+            minorGlobalPatientId: minor.minorGlobalPatientId,
+            guardianGlobalPatientId: parentGp.id,
+            // For UI compat, mirror the adult-path response shape
+            // partially. The new minor has no legacy `patients` row, so
+            // `patient` and `relationship` are NOT included — clients
+            // using the v2 minor flow should switch to gp-id-driven
+            // queries.
+            message: 'Dependent registered as a minor global_patient',
+          },
+          { status: 201 }
+        )
+      } catch (e: any) {
+        if (e instanceof InvalidDependentError) {
+          return NextResponse.json(
+            { error: e.message, code: e.code },
+            { status: 400 }
+          )
+        }
+        if (e instanceof GuardianAuthorityError) {
+          return NextResponse.json(
+            { error: e.message, code: e.code },
+            { status: 403 }
+          )
+        }
+        throw e
+      }
+    }
+
+    // ============================================
+    // ONBOARD PATIENT (adult path — legacy behavior unchanged)
+    // ============================================
+
     const result = await onboardPatient(assignedDoctorId, {
       phone,
       fullName: fullName.trim(),
