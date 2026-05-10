@@ -688,6 +688,18 @@
 **Alternatives**: Uniform DEFINER for all helpers (the original Empirical Lesson #1 stance; rejected per Mo's 2026-04-30 ruling — over-privileges helpers #2 and #3 unnecessarily). Uniform INVOKER (rejected — would deadlock on helper #1 / #4 / `user_has_clinic_path_to_gp`'s known-recursive queries). Make security mode configurable per-helper via a runtime flag (rejected — complexity without payoff; the per-helper analysis is the architectural commitment). Wrap INVOKER helpers in DEFINER wrappers as a workaround (rejected — same security profile as DEFINER with extra indirection).
 **Outcome**: Forensic mig 106 (2026-05-03) restored helpers #2 and #3 to INVOKER on staging via `ALTER FUNCTION ... SECURITY INVOKER` after the staging drift was discovered. Empirical Lesson #1 amended in EXECUTION_PROMPTS.md (lands in Phase 5d as part of this audit). The hybrid mode is the canonical RLS helper architecture going forward; future helpers default to DEFINER unless the engineer proves recursion-safety. Captured in ARCHITECTURE §12.
 
+### Amendment 2026-05-10 (B07 Phase D — helper family expanded to 5 DEFINER + 4 INVOKER)
+
+Mig 113 adds two new helper pairs (`is_authorized_actor_on` + `_is_authorized_actor_on_internal`; `delegated_capability_includes` + `_delegated_capability_includes_internal`) per the inner-DEFINER + outer-INVOKER pattern that this Decision establishes. The inner DEFINER is justified because the function reads `global_patients` and `patient_delegations` whose RLS policies (post-mig-114-116) invoke the public outer wrapper — without DEFINER the inner queries would re-enter those policies and recurse. The outer INVOKER is the documented public surface invoked by the patient-side leg of every modified RLS policy and by the Phase E `requireAuthorityOver` / `requireCapability` helpers. Both pairs are `STABLE PARALLEL SAFE` with `SET search_path = public, pg_temp` per Mo's Option-B 2026-05-03 ruling.
+
+Helper family count after mig 113: **5 DEFINER + 4 INVOKER** total —
+- DEFINER: `is_clinic_member`, `can_view_patient_data_at_clinic`, `user_has_clinic_path_to_gp` (mig 094a), `_is_authorized_actor_on_internal` (mig 113), `_delegated_capability_includes_internal` (mig 113)
+- INVOKER: `can_clinic_access_global_patient`, `can_patient_access_global_patient`, `is_authorized_actor_on` (mig 113), `delegated_capability_includes` (mig 113)
+
+No explicit REVOKE/GRANT block per Phase D-E Decision 1 (`audits/b07-phase-d-e-execution-2026-05-09.md`). The architectural review §3.4's prescribed `REVOKE ALL FROM PUBLIC` on the inner functions was investigated and rejected: EXECUTE permission is checked at call time regardless of the inner's `SECURITY DEFINER`, so REVOKE'ing the inner from PUBLIC would break the wrapper invocation chain (outer INVOKER runs as `authenticated`, calls the inner, fails permission check). Mig 092 lines 330-338 codify the same precedent for the existing 4 helpers; mig 113 inherits it. The security boundary is enforced through underscore-prefixed naming (`_is_authorized_actor_on_internal`), boolean-only return (no raw rows escape), and DEFINER bypassing RLS inside the function body. Decision 1 in `audits/b07-phase-d-e-execution-2026-05-09.md` walks the four options considered and the trade-offs.
+
+The hybrid mode now reads as: **DEFINER for any helper whose internal queries read RLS-protected tables that themselves invoke the helper through their policies; INVOKER for any wrapper or query that does not transit RLS**. Future helpers continue to default to DEFINER unless the engineer proves recursion-safety. Captured in ARCHITECTURE §8.6 (mig 113-116 row).
+
 ---
 
 ## D-065: Per-app TypeScript path aliases (`@patient/*`, `@clinic/*`); shared `@/*` retired
