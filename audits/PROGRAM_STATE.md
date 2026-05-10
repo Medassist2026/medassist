@@ -251,6 +251,14 @@ Not blocking any other workstream.
 
 ---
 
+**B07 Phase F — patient-app UI SHIPPED 2026-05-10.** Builds on Phase B/C/D/E (`6248056` / `9d91375` / `4842018` / `8cd485f`). Mo's 26 load-bearing rulings preserved (20 backend + 6 UI). Mo's 2026-05-09 session-scope rulings: attempt all 9 sections in one push; defer Section 6 grant flow entirely (phone-lookup gap = finding #3). **Sections 1, 2, 3, 4, 5, 6 (list-only), 7, 8 (Option A), 9 shipped.** New files: `apps/patient/components/{AgeBadge.tsx,AccountSwitcher.tsx,CaregiverBanner.tsx,dependents/DependentRegistrationForm.tsx}`, `apps/patient/lib/contexts/account-context.tsx`, `apps/patient/lib/hooks/use-banner-dismissal.ts`, `apps/patient/app/(patient)/patient/dependents/register/page.tsx`, `apps/patient/app/(patient)/patient/settings/{family/page.tsx,family/[id]/page.tsx,caregivers/page.tsx,caregiving/page.tsx}`. Modified: `apps/patient/app/(patient)/layout.tsx` (AccountProvider + CaregiverBanner mount), dashboard `page.tsx` (CTA + pending-delegations card + AccountSwitcher), more `page.tsx` (menu group). Verification: 4/5 gates clean in sandbox (root tsc + clinic tsc + patient tsc + lint:scopes); next build deferred Mac-side. Section 8 = Option A (URL `?as=` threading; cross-context API extension deferred to F.5). **8 Phase F findings** in `audits/b07-phase-f-findings.md`; **10 decisions** in `audits/b07-phase-f-execution-2026-05-10.md`. **Doc updates:** D-068 amendment, D-078, D-079; this entry.
+
+**Phase F.5 (next workstream).** Closes the 3 blocking-MVP findings: (#1) extend ~14 patient-app endpoints to accept `?gpId=` + `requireAuthorityOver`; (#3) ship `POST /api/patient/lookup-user-by-phone` with rate-limit + audit + the matching grant form; (#7) JOIN `global_patients` on principal/delegate FKs in delegation list responses. Estimated 3-5 sessions. Without F.5 the patient-app can't display dependent records or grant new caregivers — both blocking-MVP for any user trial. Phase G (clinic-app dependent visibility) follows F.5.
+
+**Phase F follow-ups (nice-to-have-pre-launch):** finding #2 PATCH `/api/patient/dependents/[id]` + inline edit; finding #5 i18n age-badge plural Arabic; finding #6 mobile narrow-viewport QA; finding #8 AccountSwitcher persistence on ALL patient pages (cross-package boundary fix — Option A move into `@ui-clinic` or Option B `prependAction` slot). **Phase F future:** finding #4 = B07-FU-4 deep-link for delegation acceptance (paired with B09 messaging).
+
+---
+
 ## Next Action
 **Open fresh cowork session 2026-05-04. Read `audits/database-audit/PHASE_D_RECONSTRUCTION_HANDOFF.md` as the entry point. Reconstruct the Phase D matrix per the templating theory. Run matrix as run_no = 1.5 against staging. Push to remote if 177/177 PASS. Resume Phase F Step 2 after push.**
 

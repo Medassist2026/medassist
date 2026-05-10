@@ -796,6 +796,30 @@ Phase F (patient-app UI) is the next workstream and consumes this surface.
 
 Doc references: `audits/b07-phase-e-execution-2026-05-10.md` (Phase E execution log with 10 decisions). The Phase D commit (`4842018`) is the substrate; this amendment lands on top.
 
+### Amendment 2026-05-10 (B07 Phase F — patient-app UI ships)
+
+The Phase E API surface now has its full UI consumer. Phase F adds the patient-side experience for both Pattern A (parent ↔ child dependent) and Pattern B (adult ↔ adult delegation), without modifying the Phase B/C/D/E backend. Six surfaces ship:
+
+1. **AccountSwitcher header element** (`apps/patient/components/AccountSwitcher.tsx`) — persistent dropdown listing self + minors-as-guardian + accepted-received-delegations. Active context derives from the URL `?as=<gpId>` query param so refresh + share-link both preserve the active subject. Self-only path (no dependents, no accepted delegations) renders a non-interactive avatar per Mo ruling 21.
+
+2. **CaregiverBanner** (`apps/patient/components/CaregiverBanner.tsx`) — amber banner shown whenever active context is non-self. Per Mo ruling 22, dismissal uses sessionStorage (banner reappears on next sign-in) — a deliberate safety affordance, not a permanent preference.
+
+3. **Dependent registration flow** (`/patient/dependents/register`) — form requires displayName + dateOfBirth (UI tightens the Phase E API's optional dateOfBirth to required, so Mo ruling 26 age-badge renders + the age-< 18 gate actually runs). Submission creates the minor gp via the Phase E POST endpoint and auto-switches active context to the new gp via `?as=<minorGpId>`.
+
+4. **Family settings** (`/patient/settings/family` + `/[id]`) — list view of dependents + per-dependent detail. Profile is VIEW-ONLY in MVP (Phase F finding #2: Phase E does not ship `PATCH /api/patient/dependents/[id]`); a "contact support to edit" hint covers the gap until Phase F.5.
+
+5. **Caregivers settings — list view only** (`/patient/settings/caregivers`) — pre-existing granted delegations + revoke + edit-capabilities. Grant flow DEFERRED entirely per Mo's 2026-05-09 ruling, because the patient-side phone→userId lookup endpoint does not exist (Phase F finding #3). Phase F.5 ships the lookup endpoint AND the grant form together.
+
+6. **Caregiving received** (`/patient/settings/caregiving`) — Pattern B delegate side: pending invitations (Accept / Decline) + active grants (Withdraw). Decline maps to PATCH /revoke with `reason='declined_by_delegate'`; the Phase E auto-discriminator emits `DELEGATION_WITHDRAWN` when delegate revokes (Phase E Decision 7), so no new endpoint needed.
+
+Capability checkboxes in the (deferred) grant form + the active edit-capabilities flow surface exactly the 5 MVP capabilities sourced from the `ALLOWED_DELEGATION_CAPABILITIES` literal union (`view_records`, `receive_notifications`, `book_appointments`, `manage_medications`, `consent_to_messaging`) — `consent_to_share` is rejected by both the API handler (per Phase E) and is absent from the UI. The capability label translation lives in `CAPABILITY_LABELS_AR` constants on the consuming pages.
+
+**Cross-context routing — Option A (Phase F finding #1).** The UI threads `?as=<gpId>` through navigation; existing patient-app endpoints (records, appointments, prescriptions, etc.) still resolve subject via `auth.uid()` only. Phase F.5 will extend those endpoints to accept `?gpId=` and call `requireAuthorityOver(gpId, user.id)`. Until F.5 ships, switching to a dependent context displays the dependent's name in the switcher + banner but the page still renders the user's own data. Banner copy + dependent-detail "عرض السجلات بالنيابة قيد التطوير" warn the user. Blocking-MVP per finding #1.
+
+**8 Phase F findings documented** in `audits/b07-phase-f-findings.md`. 3 blocking-MVP (cross-context API extensions, phone lookup endpoint, delegation display-name JOIN); 4 nice-to-have-pre-launch (PATCH dependent endpoint, i18n age-badge plural, narrow viewport QA, switcher persistence on existing pages); 1 future (B07-FU-4 deep-link).
+
+Doc references: `audits/b07-phase-f-findings.md` (8 findings), `audits/b07-phase-f-execution-2026-05-10.md` (Phase F execution log with 10 decisions). Phase F.5 (API extensions) and Phase G (clinic-app UI) are the next two workstreams.
+
 ---
 
 ## D-069: Ghost Mode deleted
@@ -938,5 +962,37 @@ Expected: 21 rows. Filter by event timestamp, NOT by net `length()` delta of ope
 
 ---
 
-*Last entry: D-077 | D-074 (amended 2026-05-07) | D-065 amended twice 2026-05-07 | 9 May 2026*
+---
+
+## D-078: Active patient-app subject context lives in the URL (`?as=<gpId>`)
+
+**Decision Date:** 2026-05-10
+**Context:** B07 Phase F introduces the AccountSwitcher header — a parent or caregiver may now operate the patient app on behalf of a minor (Pattern A) or an adult who has delegated authority (Pattern B). The "currently acting on" subject must be (a) survivable across page refresh, (b) preservable across navigation within the app, and (c) shareable as a link (so a co-parent can be sent a URL pointing at a specific dependent's records). Three storage models were considered: URL query param, localStorage, both.
+
+**Decision:** URL query param `?as=<gpId>` is the single source of truth. AccountProvider reads `useSearchParams`, switching calls `router.push` to update the param. Empty / missing `?as=` defaults to self. Stale `?as=` (revoked delegation, deleted dependent, etc.) is detected post-load and the param is dropped via `router.replace`.
+
+**Reasoning:** localStorage would not preserve context in a shared link; "both" introduces reconciliation logic (which wins on collision?) without solving the share-link case. The URL is the existing source of truth for the active route; making it the source of truth for active subject too keeps the patient-app routing model consistent. Caregiver UX (Mo case A2 — son manages father's appointments) routinely involves family members sending each other links; preserving context in the link directly supports that flow.
+
+**Trade-offs accepted:** Internal navigation that doesn't thread the `?as=` param falls back to self. Pages that deep-link with context preserved (dependent-detail's quick-action links → `/patient/health?as=${dep.id}`) explicitly thread it. Phase F finding #1 (Phase F.5) ships the API-side support for the threading. URL gp ids are UUIDs (no PII leak).
+
+**Outcome:** Live in B07 Phase F (commit pending). `apps/patient/lib/contexts/account-context.tsx` is the implementation. CaregiverBanner + AccountSwitcher both consume the same active state via the provider.
+
+---
+
+## D-079: B07 Phase F caregiver-banner dismissal uses sessionStorage (per Mo ruling 22)
+
+**Decision Date:** 2026-05-10
+**Context:** Mo ruling 22 (UI ruling 2) calls for a persistent "currently viewing as caregiver" banner with a per-context "don't show again" dismiss. The dismiss persistence model affects the safety/UX tradeoff: a user who dismisses across all browser sessions never sees the banner again; a user who dismisses only within the current session sees the banner reappear after sign-in.
+
+**Decision:** sessionStorage. Storage key `medassist:banner-dismissed:<gpId>` per context. Logout clears sessionStorage automatically (browser session boundary).
+
+**Reasoning:** A "you're acting on someone else's account" reminder is a safety affordance, not a settings preference. Cross-session dismissal would erase the safety net for a user who once said "don't show again" — including after their device is shared with another person, OS upgrade, etc. sessionStorage gives them per-session relief without erasing the reminder permanently. Mo's ruling 22 codifies the choice.
+
+**Trade-offs accepted:** A user who actively manages a dependent every day will dismiss the banner once per day. Mild annoyance in trade for ongoing safety reminder.
+
+**Outcome:** Live in B07 Phase F (commit pending). `apps/patient/lib/hooks/use-banner-dismissal.ts` is the implementation.
+
+---
+
+*Last entry: D-079 | D-077 | D-074 (amended 2026-05-07) | D-065 amended twice 2026-05-07 | 10 May 2026*
 *Add new decisions at the bottom with sequential ID.*

@@ -15,6 +15,8 @@ import {
   ShieldCheck,
   User,
   UserCog,
+  Users,
+  Heart,
   X,
 } from 'lucide-react'
 import { PatientHeader } from '@ui-clinic/components/patient/PatientHeader'
@@ -547,6 +549,33 @@ export default function MorePage() {
               icon={<Share2 className="w-4 h-4" strokeWidth={1.8} />}
               label="إعدادات المشاركة"
               subtitle="تحكم بما يراه كل طبيب"
+            />
+          </div>
+        </section>
+
+        {/* B07 Phase F (Section 5+6+7): Family + Caregivers menu group. */}
+        <section>
+          <h2 className="font-cairo text-[15px] font-semibold text-[#030712] mb-3">
+            العائلة والرعاية
+          </h2>
+          <div className="bg-white rounded-[12px] border-[0.8px] border-[#E5E7EB] divide-y divide-[#F3F4F6] overflow-hidden">
+            <LinkRow
+              href="/patient/settings/family"
+              icon={<Users className="w-4 h-4" strokeWidth={1.8} />}
+              label="عائلتي"
+              subtitle="إدارة التابعين"
+            />
+            <LinkRow
+              href="/patient/settings/caregivers"
+              icon={<ShieldCheck className="w-4 h-4" strokeWidth={1.8} />}
+              label="مقدمو الرعاية"
+              subtitle="من فوّضتهم بمساعدتك"
+            />
+            <LinkRow
+              href="/patient/settings/caregiving"
+              icon={<Heart className="w-4 h-4" strokeWidth={1.8} />}
+              label="الرعاية التي أقدّمها"
+              subtitle="من فوّضوك بمساعدتهم"
             />
           </div>
         </section>

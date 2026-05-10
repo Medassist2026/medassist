@@ -12,9 +12,13 @@ import {
   FileText,
   ChevronLeft,
   RefreshCw,
+  UserPlus,
+  Users,
 } from 'lucide-react'
 import { PatientHeader } from '@ui-clinic/components/patient/PatientHeader'
 import { ar } from '@shared/lib/i18n/ar'
+import { AccountSwitcher } from '@patient/components/AccountSwitcher'
+import { useAccountSwitcher } from '@patient/lib/contexts/account-context'
 
 // ============================================================================
 // TYPES — mirror the /api/patient/health-summary response
@@ -125,6 +129,21 @@ export default function PatientDashboardPage() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
 
+  // B07 Phase F (Section 3): account context + dependents/delegations counts
+  // for the Register-a-dependent CTA and pending-delegations notification.
+  // Active context comes from URL `?as=<gpId>`; on non-self contexts we
+  // suppress the CTA (don't ask a delegate to register dependents).
+  const {
+    active: activeAccount,
+    available: availableAccounts,
+    pendingReceivedCount,
+  } = useAccountSwitcher()
+  const dependentsCount = availableAccounts.filter(
+    (a) => a.kind === 'guardian_of_minor'
+  ).length
+  const showRegisterCta =
+    activeAccount.kind === 'self' && dependentsCount === 0
+
   const loadDashboard = useCallback(async () => {
     setLoadError('')
     try {
@@ -184,7 +203,7 @@ export default function PatientDashboardPage() {
 
   return (
     <div className="font-cairo">
-      <PatientHeader title="MedAssist" />
+      <PatientHeader title="MedAssist" action={<AccountSwitcher />} />
 
       <div className="px-4 pt-4 pb-8">
         {/* Greeting */}
@@ -311,6 +330,63 @@ export default function PatientDashboardPage() {
                     </div>
                   </div>
                   <ChevronLeft className="w-5 h-5 text-[#92400E] flex-shrink-0" />
+                </div>
+              </Link>
+            )}
+
+            {/* B07 Phase F (Section 7): pending caregiver invitations
+                surfaces here when the user has at least one pending
+                received delegation. Tap → /patient/settings/caregiving. */}
+            {pendingReceivedCount > 0 && (
+              <Link
+                href="/patient/settings/caregiving"
+                className="block bg-[#FFFBEB] border-[0.8px] border-[#F59E0B] rounded-[12px] p-4 mb-5"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-[#FEF3C7] border-[0.8px] border-[#F59E0B] flex items-center justify-center flex-shrink-0">
+                    <Users className="w-5 h-5 text-[#B45309]" strokeWidth={2} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-cairo text-[14px] font-semibold text-[#78350F]">
+                      {pendingReceivedCount === 1
+                        ? 'شخص واحد طلب أن تكون مقدم رعاية له'
+                        : `${pendingReceivedCount} أشخاص طلبوا أن تكون مقدم رعاية لهم`}
+                    </p>
+                    <p className="font-cairo text-[11px] text-[#92400E] mt-0.5">
+                      راجع الطلبات وقبلها للبدء
+                    </p>
+                  </div>
+                  <ChevronLeft className="w-5 h-5 text-[#92400E] flex-shrink-0" />
+                </div>
+              </Link>
+            )}
+
+            {/* B07 Phase F (Section 3): Register-a-dependent CTA when the
+                user has no dependents and is viewing their own account.
+                Hidden when active context is non-self (don't ask a delegate
+                to register children). */}
+            {showRegisterCta && (
+              <Link
+                href="/patient/dependents/register"
+                className="block bg-white border-[0.8px] border-[#BBF7D0] rounded-[12px] p-4 mb-5 hover:bg-[#F0FDF4] transition-colors"
+              >
+                <div className="flex items-start gap-3">
+                  <div className="w-11 h-11 rounded-full bg-[#F0FDF4] border-[0.8px] border-[#BBF7D0] flex items-center justify-center flex-shrink-0">
+                    <UserPlus className="w-5 h-5 text-[#16A34A]" strokeWidth={2} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-cairo text-[14px] font-semibold text-[#030712] mb-0.5">
+                      الرعاية الصحية للعائلة
+                    </p>
+                    <p className="font-cairo text-[12px] text-[#6B7280] leading-[18px]">
+                      سجّل طفلك لإدارة رعايته الصحية معك — اطلع على سجلاته،
+                      احجز مواعيده، واستلم إشعاراته.
+                    </p>
+                    <span className="inline-flex items-center gap-1 mt-2 font-cairo text-[12px] font-semibold text-[#16A34A]">
+                      تسجيل تابع
+                      <ChevronLeft className="w-3.5 h-3.5" strokeWidth={2.5} />
+                    </span>
+                  </div>
                 </div>
               </Link>
             )}
