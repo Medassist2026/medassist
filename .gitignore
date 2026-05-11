@@ -67,3 +67,4 @@ FIX_VERIFICATION_REPORT.md
 
 # Stale auto-generated migration list (use `ls supabase/migrations/` instead)
 supabase/migrations_list.txt
+.git-commit-message-*.txt
