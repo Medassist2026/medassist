@@ -714,6 +714,60 @@ export async function listGrantedDelegations(
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// 5b. listActiveDelegationsForGlobalPatient — clinic-side READ
+// ──────────────────────────────────────────────────────────────────────────
+//
+// B07 Phase G — care-network surface for clinic-side patient detail pages
+// (doctor + frontdesk). Returns ALL active delegations where the named
+// gp is principal — i.e., the patient's currently-empowered caregivers.
+//
+// "Active" = accepted_at IS NOT NULL AND revoked_at IS NULL AND
+// (expires_at IS NULL OR expires_at > NOW()). Pending invites and
+// revoked grants are excluded because the clinic-side view is purely
+// informational and never empowers a delegate (Mo ruling 24 — principal-
+// side only). Listing pending/revoked rows would clutter the surface
+// without giving the clinic any actionable information.
+//
+// AUTHORIZATION
+//   The data layer does NOT enforce that the caller is clinic-side or
+//   has any relationship with the patient. The clinic-side handler must
+//   gate this — typically by verifying a doctor_patient_relationships
+//   row + an active patient_clinic_record at the caller's clinic, per
+//   D-068 (cross-clinic visibility honored). Phase G Section 6 wires
+//   this gate at the handler boundary.
+//
+// HYDRATION
+//   Reuses the `hydrateDisplayNames` helper (Phase F.5 Decision 7) so
+//   principal_display_name + delegate_display_name flow through unchanged.
+
+export async function listActiveDelegationsForGlobalPatient(
+  globalPatientId: string
+): Promise<DelegationWithNames[]> {
+  if (!globalPatientId) return []
+
+  const supabase = createAdminClient('delegations-list-active-for-gp')
+
+  const nowIso = new Date().toISOString()
+  const { data, error } = await supabase
+    .from('patient_delegations')
+    .select(DELEGATION_COLUMNS)
+    .eq('principal_global_patient_id', globalPatientId)
+    .not('accepted_at', 'is', null)
+    .is('revoked_at', null)
+    .or(`expires_at.is.null,expires_at.gt.${nowIso}`)
+    .order('granted_at', { ascending: false })
+
+  if (error) {
+    throw new Error(
+      `listActiveDelegationsForGlobalPatient query failed: ${(error as { message?: string }).message ?? 'unknown'}`
+    )
+  }
+
+  const delegations = (data as unknown as Delegation[]) ?? []
+  return hydrateDisplayNames(supabase, delegations)
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // 6. listReceivedDelegations — incoming (delegate sees what they can act on)
 // ──────────────────────────────────────────────────────────────────────────
 

@@ -19,6 +19,7 @@ import { DoctorTabStrip } from '@ui-clinic/components/frontdesk/DoctorTabStrip'
 import { QueuePatientCard } from '@ui-clinic/components/frontdesk/QueuePatientCard'
 import { EmptyQueueState } from '@ui-clinic/components/frontdesk/EmptyQueueState'
 import { FrontdeskDashboardStats } from '@ui-clinic/components/frontdesk/FrontdeskDashboardStats'
+import { PediatricBadge } from '@ui-clinic/components/patient/PediatricBadge'
 import { subscribeToQueue } from '@shared/lib/realtime/queue-subscription'
 import type { CheckInQueueItem } from '@shared/lib/data/frontdesk'
 import { translateSpecialty } from '@shared/lib/utils/specialty-labels'
@@ -133,7 +134,17 @@ function computeAvgWaitMinutes(queue: QueueItem[]): number | null {
 // WALK-IN CHECK-IN BOTTOM SHEET
 // ============================================================================
 
-interface WalkInPatient { id: string; full_name: string | null; phone: string; age: number | null }
+interface WalkInPatient {
+  id: string
+  full_name: string | null
+  phone: string
+  age: number | null
+  // B07 Phase G — v2 visibility fields added by /api/patients/search
+  is_minor?: boolean
+  date_of_birth?: string | null
+  guardian_global_patient_id?: string | null
+  guardian_display_name?: string | null
+}
 interface WalkInDoctor { id: string; full_name: string | null; specialty: string }
 
 interface WalkInSheetProps {
@@ -284,15 +295,31 @@ function WalkInSheet({ onClose, onSuccess }: WalkInSheetProps) {
                 )}
               </div>
               {results.length > 0 && (
-                <div className="mt-1.5 bg-white rounded-xl border-[0.8px] border-[#E5E7EB] overflow-hidden max-h-[160px] overflow-y-auto">
+                <div className="mt-1.5 bg-white rounded-xl border-[0.8px] border-[#E5E7EB] overflow-hidden max-h-[200px] overflow-y-auto">
                   {results.map(p => (
                     <button
                       key={p.id}
                       onClick={() => { setSelectedPatient(p); setResults([]); setQuery('') }}
-                      className="w-full px-3 py-2.5 text-right hover:bg-[#F9FAFB] border-b-[0.8px] last:border-b-0 border-[#E5E7EB]"
+                      className={`w-full px-3 py-2.5 text-right hover:bg-[#F9FAFB] border-b-[0.8px] last:border-b-0 border-[#E5E7EB] ${
+                        p.is_minor ? 'border-r-[3px] border-r-[#1D4ED8]/30' : ''
+                      }`}
                     >
-                      <p className="font-cairo text-[13px] font-semibold text-[#030712]">{p.full_name}</p>
-                      <p className="font-cairo text-[11px] text-[#6B7280]">{p.phone}{p.age ? ` · ${p.age} سنة` : ''}</p>
+                      {/* B07 Phase G — name + age badge inline, then guardian sub-line for minors */}
+                      <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                        <p className="font-cairo text-[13px] font-semibold text-[#030712]">{p.full_name}</p>
+                        <PediatricBadge
+                          isMinor={p.is_minor === true}
+                          dateOfBirth={p.date_of_birth ?? null}
+                        />
+                      </div>
+                      <p className="font-cairo text-[11px] text-[#6B7280]">
+                        {p.is_minor && p.guardian_display_name ? (
+                          <>تابع لـ {p.guardian_display_name} · </>
+                        ) : p.is_minor ? (
+                          <>تابع (ولي الأمر غير مكتمل) · </>
+                        ) : null}
+                        {p.phone}{p.age ? ` · ${p.age} سنة` : ''}
+                      </p>
                     </button>
                   ))}
                 </div>

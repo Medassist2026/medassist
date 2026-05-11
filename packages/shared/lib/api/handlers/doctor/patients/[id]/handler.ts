@@ -42,6 +42,45 @@ export async function GET(
       return NextResponse.json({ error: 'Patient not found' }, { status: 404 })
     }
 
+    // ── B07 Phase G — augment with v2 visibility fields ─────────────────
+    // Pulls is_minor, date_of_birth, guardian_global_patient_id from the
+    // network identity layer (global_patients), plus the guardian's
+    // display_name via a second lookup. The doctor session UI and patient
+    // detail card use these for the pediatric indicator + "Dependent of
+    // <parent>" attribution. Fall back to nulls when the row has no gp
+    // (legacy data) so the response shape stays stable.
+    let v2IsMinor = false
+    let v2DateOfBirth: string | null = null
+    let v2GuardianGpId: string | null = null
+    let v2GuardianDisplayName: string | null = null
+    if ((patient as { global_patient_id?: string }).global_patient_id) {
+      const gpId = (patient as { global_patient_id: string }).global_patient_id
+      const { data: gpRow } = await admin
+        .from('global_patients')
+        .select('is_minor, date_of_birth, guardian_global_patient_id')
+        .eq('id', gpId)
+        .maybeSingle()
+      if (gpRow) {
+        const row = gpRow as {
+          is_minor: boolean | null
+          date_of_birth: string | null
+          guardian_global_patient_id: string | null
+        }
+        v2IsMinor = row.is_minor === true
+        v2DateOfBirth = row.date_of_birth
+        v2GuardianGpId = row.guardian_global_patient_id
+        if (v2GuardianGpId) {
+          const { data: guardianRow } = await admin
+            .from('global_patients')
+            .select('display_name')
+            .eq('id', v2GuardianGpId)
+            .maybeSingle()
+          v2GuardianDisplayName =
+            (guardianRow as { display_name?: string | null } | null)?.display_name ?? null
+        }
+      }
+    }
+
     // Fetch clinical notes by this doctor for this patient (this is the visit history + medications)
     const { data: notes } = await admin
       .from('clinical_notes')
@@ -168,7 +207,6 @@ export async function GET(
         full_name: patient.full_name,
         phone: patient.phone || '',
         email: patient.email || '',
-        date_of_birth: patient.date_of_birth || '',
         // age: patients table value, with doctor_entered_age on relationship as fallback
         age: resolvedAge,
         sex: patient.sex ? (patient.sex as string).toLowerCase() : null,
@@ -184,6 +222,22 @@ export async function GET(
         chronic_conditions: latestChronicDiseases,
         // FIX 9: Pending labs from last visit
         pendingLabs,
+        // B07 Phase G — v2 visibility fields for pediatric indicator +
+        // guardian attribution.
+        is_minor: v2IsMinor,
+        // Prefer v2 date_of_birth from global_patients (canonical) over the
+        // patients-side column when available.
+        date_of_birth: v2DateOfBirth ?? patient.date_of_birth ?? null,
+        // gp id surfaced so the care-network endpoint (Phase G §6) can
+        // be called from the patient detail UI without an extra round
+        // trip.
+        global_patient_id: (patient as { global_patient_id?: string }).global_patient_id ?? null,
+        guardian_global_patient_id: v2GuardianGpId,
+        guardian_display_name: v2GuardianDisplayName,
+        // Legacy dependent metadata (already on patients table; surfaced
+        // for backward compat with existing UI consumers).
+        is_dependent: (patient as { is_dependent?: boolean }).is_dependent ?? v2IsMinor,
+        parent_phone: (patient as { parent_phone?: string | null }).parent_phone ?? null,
       },
       conditions: [],
       medications,

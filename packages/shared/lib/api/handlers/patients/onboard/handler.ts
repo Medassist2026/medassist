@@ -10,6 +10,7 @@ import { enforceRateLimit } from '@shared/lib/security/rate-limit'
 import { findGlobalPatientByPhone } from '@shared/lib/data/global-patients'
 import {
   createMinorGlobalPatient,
+  establishMinorClinicPresence,
   GuardianAuthorityError,
   InvalidDependentError,
 } from '@shared/lib/data/dependents'
@@ -153,23 +154,36 @@ export async function POST(request: Request) {
     }
 
     // ============================================
-    // B07 PHASE E — DEPENDENT V2 DUAL-PATH
+    // B07 PHASE E + PHASE G — DEPENDENT V2 PATH
     // ============================================
-    // When isDependent=true, take the v2 path: create a minor gp directly
-    // via the Phase C data layer; bypass the legacy `patients` table per
-    // Phase B Decision 3 (mig 081 compat triggers are clinical-tables-only
-    // and disjoint from the dependent-account schema; the v2 minor flow
-    // does NOT need a legacy patients row).
+    // When isDependent=true, the v2 path creates the FULL clinic-scoped
+    // shape for a minor: (global_patients, patients, PCR, DPR) — four
+    // rows total, matching the empirical pattern of the 3 mig-111
+    // backfilled minors AND the structure of adult onboarding.
     //
-    // BRIDGE PATTERN (Phase E Decision 8):
+    // STAGED HISTORY:
+    //   - Phase E (commit 8cd485f) shipped step 1 only: create the
+    //     minor gp via `createMinorGlobalPatient`.
+    //   - Phase G (THIS commit) completes Phase E by ALSO calling
+    //     `establishMinorClinicPresence` to land (patients, PCR, DPR)
+    //     at the registering clinic. Without those rows, mig 081's
+    //     compat trigger raises EXCEPTION on every downstream clinical
+    //     insert (check-in queue, sessions, prescriptions, etc.) —
+    //     making minors clinically unusable. Mo's case A1 ("mother
+    //     registers 6yo, books appointment") was architecturally
+    //     blocked between Phase E and Phase G. See
+    //     `audits/b07-phase-g-execution-2026-05-10.md` Section 0
+    //     for the empirical FK-chain survey that motivated this.
+    //
+    // BRIDGE PATTERN (Phase E Decision 8, preserved):
     //   `createMinorGlobalPatient` requires `createdByUserId === guardian.
     //   claimed_user_id`. The caller here is doctor/frontdesk staff, not
-    //   the parent. We use the documented Phase C bridge: pass the
-    //   parent's claimed_user_id as createdByUserId so the data-layer
-    //   authority check passes. The audit row attributes to the parent —
-    //   semantically "the parent authored this minor's creation, even
-    //   though staff typed it in." This matches existing MVP convention
-    //   where staff-mediated patient consent attributes to the patient.
+    //   the parent. We pass the parent's claimed_user_id as
+    //   createdByUserId so the data-layer authority check passes.
+    //   The audit row attributes to the parent — semantically "the
+    //   parent authored this minor's creation, even though staff typed
+    //   it in." This matches existing MVP convention where staff-
+    //   mediated patient consent attributes to the patient.
     //
     // ADULT PATH UNCHANGED — when isDependent=false (or missing) we fall
     // through to the legacy onboardPatient flow.
@@ -241,19 +255,82 @@ export async function POST(request: Request) {
           createdByUserId: parentGp.claimed_user_id,
         })
 
+        // Phase G: complete the four-row shape at the registering clinic
+        // so downstream clinical operations (queue add, session, etc.)
+        // work for this minor. Requires clinicId + doctorId — both are
+        // resolved above (clinicId via getUserClinicId(user.id);
+        // assignedDoctorId is the validated doctor for frontdesk or
+        // the user themselves for doctor self-onboard).
+        if (!clinicId) {
+          // Without a clinic, we have only the network-wide gp. This
+          // matches pre-Phase-G behavior but flag it explicitly so the
+          // caller knows the minor has no clinic presence yet.
+          return NextResponse.json(
+            {
+              success: true,
+              isDependent: true,
+              isV2DependentPath: true,
+              isClinicScoped: false,
+              minorGlobalPatientId: minor.minorGlobalPatientId,
+              guardianGlobalPatientId: parentGp.id,
+              message:
+                'Dependent gp created; no clinic context resolved — clinic-scoped patients row deferred to first clinic encounter.',
+            },
+            { status: 201 }
+          )
+        }
+
+        const presence = await establishMinorClinicPresence({
+          minorGlobalPatientId: minor.minorGlobalPatientId,
+          guardianGlobalPatientId: parentGp.id,
+          clinicId,
+          doctorId: assignedDoctorId,
+          parentPhone: parentPhone as string,
+          displayName: fullName.trim(),
+          age: parsedAge,
+          sex: (sex as 'Male' | 'Female' | 'Other') ?? null,
+          createdByUserId: parentGp.claimed_user_id,
+        })
+
+        // Adult-shaped response so legacy UI (queue add, session start)
+        // works for minors without code changes. The new fields
+        // (isDependent, isV2DependentPath, minorGlobalPatientId,
+        // guardianGlobalPatientId) are additive; existing callers ignore
+        // them.
         return NextResponse.json(
           {
             success: true,
             isDependent: true,
             isV2DependentPath: true,
+            isClinicScoped: true,
+            isExisting: false,
+            isGhostMode: false,
             minorGlobalPatientId: minor.minorGlobalPatientId,
             guardianGlobalPatientId: parentGp.id,
-            // For UI compat, mirror the adult-path response shape
-            // partially. The new minor has no legacy `patients` row, so
-            // `patient` and `relationship` are NOT included — clients
-            // using the v2 minor flow should switch to gp-id-driven
-            // queries.
-            message: 'Dependent registered as a minor global_patient',
+            patient: {
+              id: presence.patientId,
+              unique_id: presence.patientUniqueId,
+              phone: presence.patientPhone,
+              full_name: fullName.trim(),
+              age: parsedAge,
+              sex,
+              is_dependent: true,
+              parent_phone: parentPhone,
+              global_patient_id: minor.minorGlobalPatientId,
+              clinic_id: clinicId,
+            },
+            relationship: {
+              id: presence.dprId,
+              doctor_id: assignedDoctorId,
+              patient_id: presence.patientId,
+              clinic_id: clinicId,
+              status: 'pending',
+              access_level: 'walk_in_limited',
+              consent_state: 'pending',
+            },
+            access_level: 'walk_in_limited',
+            consent_state: 'pending',
+            message: 'Dependent registered (minor gp + clinic presence)',
           },
           { status: 201 }
         )

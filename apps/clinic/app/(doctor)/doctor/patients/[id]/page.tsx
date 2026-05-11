@@ -15,6 +15,7 @@ import {
   ChevronRight,
   MessageCircle,
 } from 'lucide-react'
+import { PediatricBadge } from '@ui-clinic/components/patient/PediatricBadge'
 
 // ============================================================================
 // TYPES
@@ -32,6 +33,26 @@ interface PatientData {
   created_at: string
   allergies?: string[]
   chronic_conditions?: string[]
+  // B07 Phase G — v2 visibility fields surfaced by /api/doctor/patients/[id]
+  // for the pediatric indicator + "Dependent of <parent>" attribution.
+  is_minor?: boolean
+  is_dependent?: boolean
+  parent_phone?: string | null
+  global_patient_id?: string | null
+  guardian_global_patient_id?: string | null
+  guardian_display_name?: string | null
+}
+
+interface CareNetworkRow {
+  id: string
+  delegate_user_id: string
+  delegate_global_patient_id: string | null
+  delegate_display_name: string | null
+  capabilities: string[]
+  granted_at: string
+  accepted_at: string | null
+  expires_at: string | null
+  auto_renew: boolean
 }
 
 interface Medication {
@@ -137,6 +158,77 @@ const TABS: { id: TabId; label: string }[] = [
 // OVERVIEW TAB
 // ============================================================================
 
+// ============================================================================
+// B07 Phase G Section 6 — Care Network section (clinic-side read of
+// the patient's active delegations). Pure informational; principal-only
+// for modification per Mo ruling 24.
+// ============================================================================
+function CareNetworkCard({ globalPatientId }: { globalPatientId: string | null | undefined }) {
+  const [delegations, setDelegations] = useState<CareNetworkRow[]>([])
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    if (!globalPatientId) return
+    let cancelled = false
+    fetch(`/api/admin/patient/${globalPatientId}/care-network`)
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
+      .then((data) => {
+        if (cancelled) return
+        setDelegations(Array.isArray(data?.delegations) ? data.delegations : [])
+        setLoaded(true)
+      })
+      .catch(() => {
+        if (cancelled) return
+        // Silent failure — care-network is informational; absence keeps
+        // the rest of the page usable. The 404 path (patient not in this
+        // clinic's scope) lands here too.
+        setDelegations([])
+        setLoaded(true)
+      })
+    return () => { cancelled = true }
+  }, [globalPatientId])
+
+  // Hidden when no delegations exist (per Phase G prompt Section 6 — surface
+  // hidden if empty; principal-side handles "delegate a caregiver" CTAs).
+  if (!loaded || delegations.length === 0) return null
+
+  return (
+    <div className="bg-white rounded-[12px] border border-[#BFDBFE] px-4 py-3">
+      <div className="flex items-center justify-between mb-3">
+        <p className="font-cairo font-bold text-[13px] text-[#1D4ED8]">شبكة الرعاية</p>
+        <span className="font-cairo text-[11px] text-[#1D4ED8]/70">
+          {delegations.length} {delegations.length === 1 ? 'مفوّض' : 'مفوّضين'}
+        </span>
+      </div>
+      <div className="space-y-2.5">
+        {delegations.map((d) => (
+          <div key={d.id} className="flex items-start gap-2.5">
+            <div className="w-6 h-6 rounded-full bg-[#EFF6FF] border-[0.8px] border-[#BFDBFE] flex items-center justify-center flex-shrink-0">
+              <User className="w-3 h-3 text-[#1D4ED8]" strokeWidth={2} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-cairo font-semibold text-[13px] text-[#0F172A]">
+                {d.delegate_display_name || 'مفوّض (الاسم غير متاح)'}
+              </p>
+              <p className="font-cairo text-[11px] text-[#64748B] mt-0.5">
+                {d.capabilities.length > 0
+                  ? d.capabilities.join('، ')
+                  : 'بدون صلاحيات محددة'}
+              </p>
+              <p className="font-cairo text-[10px] text-[#94A3B8] mt-0.5">
+                نشط منذ {new Date(d.accepted_at ?? d.granted_at).toLocaleDateString('ar-EG', { year: 'numeric', month: 'short', day: 'numeric' })}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="font-cairo text-[10px] text-[#94A3B8] mt-3 leading-relaxed">
+        هذه قائمة قراءة فقط. التعديل (إضافة، إلغاء) من حساب المريض نفسه.
+      </p>
+    </div>
+  )
+}
+
 function OverviewTab({
   patient,
   medications,
@@ -197,6 +289,9 @@ function OverviewTab({
           </div>
         </div>
       )}
+
+      {/* ── B07 Phase G Section 6 — care network (active delegations) ── */}
+      <CareNetworkCard globalPatientId={patient.global_patient_id} />
 
       {/* ── Recent medications ── */}
       <div className="bg-white rounded-[12px] border border-[#E2E8F0] px-4 py-3">
@@ -431,9 +526,35 @@ export default function PatientDetailsPage() {
               <ChevronRight className="w-[18px] h-[18px] text-[#475569]" strokeWidth={2} />
             </button>
             <div className="min-w-0">
-              <h1 className="font-cairo font-bold text-[16px] text-[#0F172A] leading-snug truncate">
-                {patient.name}
-              </h1>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="font-cairo font-bold text-[16px] text-[#0F172A] leading-snug truncate">
+                  {patient.name}
+                </h1>
+                {/* B07 Phase G — Pediatric patient tag (Mo ruling 30).
+                    Same `showTag` treatment as the doctor session sticky
+                    bar so the indicator is consistent across surfaces. */}
+                {patient.is_minor && (
+                  <PediatricBadge
+                    isMinor={true}
+                    dateOfBirth={patient.date_of_birth ?? null}
+                    showTag={true}
+                  />
+                )}
+              </div>
+              {/* B07 Phase G — "Dependent of <parent>" attribution line.
+                  Honors D-068: the guardian's display_name only appears
+                  here when the doctor has scope on the minor's record
+                  (the API endpoint scope-checks via doctor_patient_
+                  relationships before returning v2 fields). */}
+              {patient.is_minor && (
+                <div className="font-cairo text-[12px] text-[#1D4ED8] mt-0.5">
+                  {patient.guardian_display_name
+                    ? `تابع لـ ${patient.guardian_display_name}`
+                    : patient.parent_phone
+                    ? `تابع · رقم ولي الأمر: ${patient.parent_phone}`
+                    : 'تابع (ولي الأمر غير مكتمل)'}
+                </div>
+              )}
               <div className="flex items-center gap-1.5 text-[#94A3B8]">
                 {age && <span className="font-cairo text-[12px]">{age} سنة</span>}
                 {age && sex && <span className="text-[11px]">·</span>}

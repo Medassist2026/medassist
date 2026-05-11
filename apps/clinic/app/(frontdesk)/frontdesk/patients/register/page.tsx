@@ -55,6 +55,17 @@ export default function RegisterPatientPage() {
   const [formErrors, setFormErrors] = useState<FormErrors>({})
   const [formTouched, setFormTouched] = useState(false)
 
+  // ── B07 Phase G — Dependent Toggle State ──
+  // When isDependent is true, the `phone` field above is reinterpreted as
+  // the GUARDIAN's phone (identity gateway per D-057 + Mo ruling 28:
+  // phone-first; parent phone gates dependent register). The minor's own
+  // phone is not collected in MVP (minors typically have no phone;
+  // graduation flow Phase 2 will add it). Submitted body sends
+  // `{ phone: typedPhone, parentPhone: typedPhone, isDependent: true }`,
+  // so Phase E + Phase G's onboard handler creates (gp, patients, PCR,
+  // DPR) at the registering clinic.
+  const [isDependent, setIsDependent] = useState(false)
+
   // ── Typeahead State ──
   const [searchResults, setSearchResults] = useState<PatientResult[]>([])
   const [isSearching, setIsSearching] = useState(false)
@@ -248,6 +259,12 @@ export default function RegisterPatientPage() {
       const ageNum = parseInt(age)
       if (isNaN(ageNum) || ageNum < 0 || ageNum > 120) {
         errors.age = 'العمر يجب أن يكون بين ٠ و ١٢٠'
+      } else if (isDependent && ageNum >= 18) {
+        // B07 Phase G — minor age gate. Per architectural review §3 +
+        // mig 109 schema, "minor" = under 18. Adults registering with
+        // dependent toggle ON is a category error; the patient should
+        // be a regular adult registration instead.
+        errors.age = 'العمر يجب أن يكون أقل من ١٨ سنة للمريض التابع'
       }
     }
 
@@ -290,16 +307,34 @@ export default function RegisterPatientPage() {
         return
       }
 
+      // B07 Phase G — dependent path body augmentation.
+      // The single phone field carries the GUARDIAN's phone when isDependent
+      // is true (Mo ruling 28 phone-first); we send it as both `phone` and
+      // `parentPhone` so the Phase E handler's two-step E.164 validation
+      // passes AND its findGlobalPatientByPhone(parentPhone) lookup
+      // resolves the guardian. Minor's own phone is omitted in MVP.
+      const onboardBody = isDependent
+        ? {
+            phone: phone.trim(),
+            parentPhone: phone.trim(),
+            isDependent: true,
+            fullName: fullName.trim(),
+            age: parseInt(age),
+            sex,
+            doctorId,
+          }
+        : {
+            phone: phone.trim(),
+            fullName: fullName.trim(),
+            age: parseInt(age),
+            sex,
+            doctorId,
+          }
+
       const res = await fetch('/api/patients/onboard', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          phone: phone.trim(),
-          fullName: fullName.trim(),
-          age: parseInt(age),
-          sex,
-          doctorId
-        })
+        body: JSON.stringify(onboardBody),
       })
 
       const data = await res.json()
@@ -379,17 +414,30 @@ export default function RegisterPatientPage() {
     setShowDoctorSheet(false)
 
     try {
-      // Step 1: Onboard patient
+      // Step 1: Onboard patient — Phase G dependent path mirror (see
+      // handleSaveOnly for the rationale of the dual phone/parentPhone send).
+      const onboardBody = isDependent
+        ? {
+            phone: phone.trim(),
+            parentPhone: phone.trim(),
+            isDependent: true,
+            fullName: fullName.trim(),
+            age: parseInt(age),
+            sex,
+            doctorId,
+          }
+        : {
+            phone: phone.trim(),
+            fullName: fullName.trim(),
+            age: parseInt(age),
+            sex,
+            doctorId,
+          }
+
       const res = await fetch('/api/patients/onboard', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          phone: phone.trim(),
-          fullName: fullName.trim(),
-          age: parseInt(age),
-          sex,
-          doctorId
-        })
+        body: JSON.stringify(onboardBody),
       })
 
       const data = await res.json()
@@ -466,6 +514,7 @@ export default function RegisterPatientPage() {
     setPhone('')
     setAge('')
     setSex('')
+    setIsDependent(false)
     setFormErrors({})
     setFormTouched(false)
     setSearchResults([])
@@ -514,7 +563,7 @@ export default function RegisterPatientPage() {
               <ChevronRight className="w-5 h-5 text-[#030712]" />
             </button>
             <h1 className="font-cairo text-[18px] font-semibold text-[#030712] truncate">
-              تسجيل مريض جديد
+              {isDependent ? 'تسجيل تابع' : 'تسجيل مريض جديد'}
             </h1>
           </div>
           {hasFormData && (
@@ -536,9 +585,15 @@ export default function RegisterPatientPage() {
       <div className="px-4 pt-5 space-y-5">
 
         {/* ── Phone Number (with typeahead) ── */}
+        {/* B07 Phase G — label adapts to dependent mode. Single field;       */}
+        {/* dual semantic. Toggle OFF: patient phone. Toggle ON: guardian    */}
+        {/* phone (the identity gateway per ruling 28). Submit sends         */}
+        {/* { phone, parentPhone: phone, isDependent: true } so the          */}
+        {/* Phase E handler picks up the dependent path.                    */}
         <div className="relative">
           <label className="font-cairo text-[13px] font-semibold text-[#4B5563] mb-2 block">
-            رقم الهاتف <span className="text-red-500">*</span>
+            {isDependent ? 'رقم ولي الأمر' : 'رقم الهاتف'}{' '}
+            <span className="text-red-500">*</span>
           </label>
           <div className="relative">
             <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
@@ -618,8 +673,61 @@ export default function RegisterPatientPage() {
           <div className="bg-[#F0FDF4] border-[0.8px] border-[#BBF7D0] rounded-[10px] px-3 py-2.5 flex items-start gap-2">
             <Phone className="w-4 h-4 text-[#16A34A] mt-0.5 flex-shrink-0" />
             <p className="font-cairo text-[12px] text-[#15803D] leading-relaxed">
-              أدخل رقم الهاتف أولاً للتحقق من المريض. باقي الحقول هتتفتح بعد كده.
+              {isDependent
+                ? 'أدخل رقم ولي الأمر أولاً. لازم يكون مسجل بحسابه قبل تسجيل التابع.'
+                : 'أدخل رقم الهاتف أولاً للتحقق من المريض. باقي الحقول هتتفتح بعد كده.'}
             </p>
+          </div>
+        )}
+
+        {/* ── B07 Phase G — Dependent toggle ──                              */}
+        {/* The single phone field above is reinterpreted as the GUARDIAN's   */}
+        {/* phone when the toggle is on. Per Mo's Phase G ruling 29           */}
+        {/* (integrate into existing flow; not a separate route) and ruling   */}
+        {/* 28 (phone-first identity also for dependents).                    */}
+        <div className="bg-white rounded-[12px] border-[0.8px] border-[#E5E7EB] px-4 py-3 flex items-center justify-between">
+          <div className="flex-1 min-w-0 pr-3">
+            <p className="font-cairo text-[14px] font-semibold text-[#030712]">
+              مريض تابع؟
+            </p>
+            <p className="font-cairo text-[12px] text-[#6B7280] mt-0.5">
+              {isDependent
+                ? 'الرقم اللي بتدخله هو رقم ولي الأمر. التابع لا يحتاج رقم خاص.'
+                : 'فعّل لو بتسجل طفل أو شخص تحت رعاية ولي أمر.'}
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={isDependent}
+            onClick={() => {
+              setIsDependent((v) => !v)
+              setFormErrors({})
+            }}
+            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-[0.8px] transition-colors focus:outline-none ${
+              isDependent ? 'bg-[#16A34A] border-[#15803D]' : 'bg-[#E5E7EB] border-[#D1D5DB]'
+            }`}
+          >
+            <span
+              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                isDependent ? '-translate-x-5' : 'translate-x-0'
+              }`}
+            />
+          </button>
+        </div>
+
+        {/* ── Dependent banner (when toggle ON) ── */}
+        {isDependent && (
+          <div className="bg-[#EFF6FF] border-[0.8px] border-[#BFDBFE] rounded-[10px] px-3 py-2.5 flex items-start gap-2">
+            <UserPlus className="w-4 h-4 text-[#1D4ED8] mt-0.5 flex-shrink-0" />
+            <div className="font-cairo text-[12px] text-[#1E3A8A] leading-relaxed">
+              <p className="font-semibold mb-0.5">تسجيل تابع</p>
+              <p>
+                هذا المريض سيكون مرتبطاً بحساب ولي الأمر. كل المعاملات
+                (المواعيد، الروشتات، الفواتير) ستتم باسم ولي الأمر، وستظهر
+                في حسابه.
+              </p>
+            </div>
           </div>
         )}
 

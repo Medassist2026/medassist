@@ -18,6 +18,7 @@ import { PatientHistorySheet } from './PatientHistorySheet'
 import DiagnosisInput from './DiagnosisInput'
 import { PatientLivingCard } from './PatientLivingCard'
 import type { VisitType } from '@ui-clinic/components/doctor/PatientQueueCard'
+import { PediatricBadge } from '@ui-clinic/components/patient/PediatricBadge'
 import {
   EGYPT_LOCAL_PHONE_RE,
   normalizeEgyptianDigits,
@@ -43,6 +44,15 @@ interface PatientData {
   isDependent?: boolean
   parentPhone?: string
   guardianId?: string
+  // B07 Phase G — v2 visibility fields surfaced for pediatric indicator
+  // and guardian attribution in the session UI patient identity bar.
+  // is_minor flows from global_patients.is_minor (mig 109). guardian
+  // fields resolve via two-pass JOIN in the search handler + doctor
+  // patient-detail endpoint.
+  isMinor?: boolean
+  dateOfBirth?: string | null
+  guardianGlobalPatientId?: string | null
+  guardianDisplayName?: string | null
 }
 
 export interface SessionFormData {
@@ -585,6 +595,11 @@ export function SessionForm({ preselectedPatientId, queueId, appointmentId }: Se
           isDependent: p.is_dependent ?? false,
           parentPhone: p.parent_phone ?? null,
           guardianId: p.guardian_id ?? null,
+          // B07 Phase G — v2 visibility (added by /api/patients/search Phase G)
+          isMinor: p.is_minor === true,
+          dateOfBirth: p.date_of_birth ?? null,
+          guardianGlobalPatientId: p.guardian_global_patient_id ?? null,
+          guardianDisplayName: p.guardian_display_name ?? null,
         })))
       }
     } catch { /* ignore */ }
@@ -724,11 +739,20 @@ export function SessionForm({ preselectedPatientId, queueId, appointmentId }: Se
           setPendingLabsFromLastVisit(p.pendingLabs)
         }
         // Enrich selectedPatient with age/sex from detail API (may have more data than search result)
-        if (p?.age || p?.sex) {
+        // B07 Phase G — also pulls v2 visibility fields (is_minor,
+        // date_of_birth, guardian fields) so the patient identity bar
+        // can render the pediatric indicator and "Dependent of <parent>"
+        // attribution. Phase G section 3 patient detail handler
+        // populates these.
+        if (p?.age || p?.sex || p?.is_minor !== undefined) {
           setSelectedPatient(prev => prev ? {
             ...prev,
             age: p.age ?? prev.age,
             sex: (p.sex || prev.sex) ?? undefined,
+            isMinor: p.is_minor === true || prev.isMinor === true,
+            dateOfBirth: p.date_of_birth ?? prev.dateOfBirth ?? null,
+            guardianGlobalPatientId: p.guardian_global_patient_id ?? prev.guardianGlobalPatientId ?? null,
+            guardianDisplayName: p.guardian_display_name ?? prev.guardianDisplayName ?? null,
           } : prev)
         }
         // Also set manualAge as editable fallback
@@ -2059,6 +2083,17 @@ export function SessionForm({ preselectedPatientId, queueId, appointmentId }: Se
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-cairo font-bold text-[14px] text-[#030712]">{selectedPatient?.name}</span>
+                {/* B07 Phase G — Pediatric patient tag (Mo ruling 30).
+                    Shown with `showTag` so the doctor has unambiguous
+                    pediatric awareness (drug dosing, consent semantics).
+                    Tag color: muted blue (informational, not warning). */}
+                {selectedPatient?.isMinor && (
+                  <PediatricBadge
+                    isMinor={true}
+                    dateOfBirth={selectedPatient?.dateOfBirth ?? null}
+                    showTag={true}
+                  />
+                )}
                 {allergies.length > 0 && (
                   <span className="px-1.5 py-0.5 bg-[#FEE2E2] text-[#DC2626] text-[10px] font-cairo font-bold rounded-full flex-shrink-0">
                     ⚠ حساسية
@@ -2066,6 +2101,15 @@ export function SessionForm({ preselectedPatientId, queueId, appointmentId }: Se
                 )}
               </div>
               <div className="flex items-center gap-2 text-[11px] font-cairo text-[#6B7280] mt-0.5 flex-wrap">
+                {/* B07 Phase G — guardian attribution sub-line for minors */}
+                {selectedPatient?.isMinor && (
+                  <span className="text-[#1D4ED8]">
+                    {selectedPatient?.guardianDisplayName
+                      ? `تابع لـ ${selectedPatient.guardianDisplayName}`
+                      : 'تابع (ولي الأمر غير مكتمل)'}
+                    {' ·'}
+                  </span>
+                )}
                 <span dir="ltr">{selectedPatient?.phone}</span>
                 {selectedPatient?.age && <span>· {selectedPatient.age} سنة</span>}
                 {selectedPatient?.sex && <span>· {selectedPatient.sex?.toLowerCase() === 'male' ? 'ذكر' : 'أنثى'}</span>}

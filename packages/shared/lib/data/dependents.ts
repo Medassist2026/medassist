@@ -34,12 +34,17 @@
  *   helper at the route boundary.
  */
 
+import { nanoid } from 'nanoid'
 import { createAdminClient } from '@shared/lib/supabase/admin'
-import { emitPatientAuditWithAuthority } from '@shared/lib/data/audit'
+import {
+  emitPatientAuditWithAuthority,
+  logAuditEvent,
+} from '@shared/lib/data/audit'
 import {
   type GlobalPatient,
   findGlobalPatientById,
 } from '@shared/lib/data/global-patients'
+import { getOrCreatePatientClinicRecord } from '@shared/lib/data/patient-clinic-records'
 
 // ──────────────────────────────────────────────────────────────────────────
 // Types
@@ -280,6 +285,317 @@ export async function createMinorGlobalPatient(
   })
 
   return { minorGlobalPatientId }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// 1b. establishMinorClinicPresence — clinic-side rows for a minor gp
+// ──────────────────────────────────────────────────────────────────────────
+//
+// Phase G Section 1 — Mo's ruling 2026-05-10 (B07 Phase G prompt refinement):
+// "The `onboardPatient` v2 path with `isDependent: true` must create
+//  `(global_patients, patients, PCR, DPR)` — all four rows — at the
+//  registering clinic, matching the empirical pattern of mig 111 minors
+//  and the structure of adult onboarding. Original Phase E modification
+//  was incomplete; Phase G completes it."
+//
+// Phase E's `createMinorGlobalPatient` creates only the gp row. The 3
+// backfilled minors (mig 111) demonstrate the complete shape clinics
+// need: (gp, patients, PCR, DPR). Without those clinic-scoped rows,
+// new minors cannot be added to a queue, sessioned, prescribed for, or
+// have any clinical data created — every clinical table FKs to
+// patients(id) and mig 081's compat trigger raises EXCEPTION when no
+// patients row exists for the (gpid, clinicId) pair.
+//
+// This helper takes the post-`createMinorGlobalPatient` state and lands
+// the missing (patients, PCR, DPR) rows at the registering clinic. It
+// mirrors the legacy `createWalkInPatient` shape (synthetic DEP_*
+// phone, dummy auth user, MED-* unique_id) so mig 081 triggers function
+// correctly downstream.
+//
+// AUDIT EMISSION
+//   - CREATE_PATIENT (subject=patients.id, kind='user', actor=doctorId)
+//     emitted for the clinic-scoped patients row.
+//   - PCR creation emits its own audit via the existing
+//     `tg_audit_pcr_insert_trg` trigger.
+//   - DPR creation is recorded by the relationship row itself; no
+//     separate audit (matches the existing adult-onboarding convention).
+//
+// CONCURRENCY
+//   Reuses `getOrCreatePatientClinicRecord`'s race-safe upsert. The
+//   patients row insert relies on PK uniqueness of patients.id (= new
+//   auth user id) so a concurrent retry won't collide.
+//
+// IDEMPOTENCY
+//   NOT idempotent on its own — calling twice with the same minor
+//   gp creates two patients/users rows. The caller (onboard handler)
+//   should check first whether the minor already has a patients row
+//   at this clinic and skip this helper if so.
+
+export interface EstablishMinorClinicPresenceInput {
+  /** The minor's gp.id (just created via `createMinorGlobalPatient`). */
+  minorGlobalPatientId: string
+  /** The guardian's gp.id (used for `patients.guardian_id` resolution). */
+  guardianGlobalPatientId: string
+  /** Clinic where the minor is being registered. */
+  clinicId: string
+  /** Doctor selected at registration (frontdesk picks one; doctor self-onboards as themselves). */
+  doctorId: string
+  /** Guardian's phone in raw entered form (used for `patients.parent_phone`). */
+  parentPhone: string
+  /** Minor's display name (= `patients.full_name`). */
+  displayName: string
+  /** Minor's age in years (= `patients.age`). May be null when unknown. */
+  age: number | null
+  /** Sex in Patient table convention ('Male' | 'Female' | 'Other' | null). */
+  sex: 'Male' | 'Female' | 'Other' | null
+  /**
+   * Guardian's `claimed_user_id` — used as the audit actor for the
+   * CREATE_PATIENT event so audit attribution matches the
+   * `createMinorGlobalPatient` GUARDIAN_LINK_CREATED row.
+   */
+  createdByUserId: string
+}
+
+export interface EstablishMinorClinicPresenceResult {
+  /** The new patients.id (= new auth.users.id). */
+  patientId: string
+  /** The new patients.unique_id (MED-XXXXXX). */
+  patientUniqueId: string
+  /** The synthetic DEP_<timestamp>_<rand> phone stored on patients.phone. */
+  patientPhone: string
+  /** The patient_clinic_records.id. */
+  pcrId: string
+  /** The doctor_patient_relationships.id. */
+  dprId: string
+}
+
+/**
+ * Land (patients, PCR, DPR) rows at `clinicId` for the freshly-created
+ * minor gp. Must be called AFTER `createMinorGlobalPatient` has succeeded.
+ *
+ * The returned `patientId` is the value that the legacy onboard response
+ * shape returns under `patient.id`, so existing UI code (queue-add,
+ * session start) continues to work for minors without further changes.
+ */
+export async function establishMinorClinicPresence(
+  args: EstablishMinorClinicPresenceInput
+): Promise<EstablishMinorClinicPresenceResult> {
+  if (!args.minorGlobalPatientId) {
+    throw new InvalidDependentError('minorGlobalPatientId is required')
+  }
+  if (!args.clinicId) {
+    throw new InvalidDependentError('clinicId is required')
+  }
+  if (!args.doctorId) {
+    throw new InvalidDependentError('doctorId is required')
+  }
+  if (!args.parentPhone) {
+    throw new InvalidDependentError('parentPhone is required')
+  }
+  if (!args.displayName || args.displayName.trim().length === 0) {
+    throw new InvalidDependentError('displayName is required')
+  }
+
+  const supabase = createAdminClient('dependents-establish-clinic-presence')
+
+  // ──────────────────────────────────────────────────────────────────
+  // Step 1: Create silent auth.users (walk-in dummy email pattern,
+  // matches `createWalkInPatient` lines 575-589). patients.id FKs to
+  // public.users(id), which itself FKs to auth.users — so the chain
+  // must exist.
+  // ──────────────────────────────────────────────────────────────────
+  const dummyEmail = `walkin_minor_${nanoid(8)}@medassist.temp`
+  const { data: authData, error: authErr } = await supabase.auth.admin.createUser({
+    email: dummyEmail,
+    email_confirm: true,
+    user_metadata: {
+      role: 'patient',
+      is_walkin: true,
+      is_minor: true,
+      full_name: args.displayName.trim(),
+    },
+  })
+  if (authErr || !authData?.user) {
+    throw new Error(
+      `establishMinorClinicPresence: auth user create failed: ${authErr?.message ?? 'unknown'}`
+    )
+  }
+  const userId = authData.user.id
+
+  // Cleanup helper — rollback auth user if any downstream step fails.
+  const rollbackAuth = async (reason: string): Promise<never> => {
+    try {
+      await supabase.auth.admin.deleteUser(userId)
+    } catch {
+      // Best effort; the auth row may already be orphan-collected.
+    }
+    throw new Error(`establishMinorClinicPresence rolled back: ${reason}`)
+  }
+
+  // ──────────────────────────────────────────────────────────────────
+  // Step 2: Create public.users row (FK target for patients.id).
+  // Synthetic DEP_* phone (matches minors #2/#3 from mig 111 backfill;
+  // avoids collision with the parent's real phone in adult patient
+  // searches keyed off patients.phone).
+  // ──────────────────────────────────────────────────────────────────
+  const syntheticPhone = `DEP_${Date.now()}_${nanoid(5).toUpperCase()}`
+
+  const { error: userErr } = await supabase
+    .from('users')
+    .insert({
+      id: userId,
+      phone: syntheticPhone,
+      role: 'patient',
+    })
+  if (userErr) {
+    await rollbackAuth(`users insert: ${userErr.message}`)
+  }
+
+  // ──────────────────────────────────────────────────────────────────
+  // Step 3: Resolve guardian's patients.id at THIS clinic (if any).
+  // patients.guardian_id is the legacy FK — populate it when the
+  // guardian has a row at this clinic so legacy doctor-side UI that
+  // surfaces "guardian name" via patients.guardian_id keeps working.
+  // ──────────────────────────────────────────────────────────────────
+  let resolvedGuardianId: string | null = null
+  const { data: guardianPatientRow } = await supabase
+    .from('patients')
+    .select('id')
+    .eq('global_patient_id', args.guardianGlobalPatientId)
+    .eq('clinic_id', args.clinicId)
+    .limit(1)
+    .maybeSingle()
+  if (guardianPatientRow?.id) {
+    resolvedGuardianId = (guardianPatientRow as { id: string }).id
+  }
+
+  // ──────────────────────────────────────────────────────────────────
+  // Step 4: Create the public.patients row. is_canonical=TRUE so mig
+  // 081's compat trigger picks this row when deriving patient_id from
+  // (gpid, clinicId) for clinical inserts.
+  // ──────────────────────────────────────────────────────────────────
+  const patientUniqueId = `MED-${nanoid(6).toUpperCase()}`
+  const now = new Date().toISOString()
+
+  const { data: patientRow, error: patientErr } = await supabase
+    .from('patients')
+    .insert({
+      id: userId,
+      unique_id: patientUniqueId,
+      phone: syntheticPhone,
+      full_name: args.displayName.trim(),
+      age: args.age,
+      sex: args.sex,
+      is_dependent: true,
+      parent_phone: args.parentPhone,
+      guardian_id: resolvedGuardianId,
+      registered: false,
+      phone_verified: false,
+      account_status: 'active',
+      last_activity_at: now,
+      created_by_doctor_id: args.doctorId,
+      clinic_id: args.clinicId,
+      global_patient_id: args.minorGlobalPatientId,
+      is_canonical: true,
+    })
+    .select('id, unique_id, phone')
+    .single()
+
+  if (patientErr || !patientRow) {
+    // Cleanup users row before bouncing auth.
+    await supabase.from('users').delete().eq('id', userId)
+    await rollbackAuth(`patients insert: ${patientErr?.message ?? 'unknown'}`)
+  }
+  const patientId = (patientRow as { id: string }).id
+
+  // ──────────────────────────────────────────────────────────────────
+  // Step 5: Audit (CREATE_PATIENT). Mirrors existing
+  // `createWalkInPatient` audit shape so admin tooling that lists
+  // patient-creation events handles minors uniformly.
+  // ──────────────────────────────────────────────────────────────────
+  await logAuditEvent({
+    clinicId: args.clinicId,
+    actorUserId: args.createdByUserId,
+    action: 'CREATE_PATIENT',
+    entityType: 'patient',
+    entityId: patientId,
+    metadata: {
+      is_minor: true,
+      global_patient_id: args.minorGlobalPatientId,
+      guardian_global_patient_id: args.guardianGlobalPatientId,
+      parent_phone: args.parentPhone,
+      full_name: args.displayName.trim(),
+      age: args.age,
+      sex: args.sex,
+      clinic_id: args.clinicId,
+      created_by_doctor_id: args.doctorId,
+      authority_basis: 'guardian_of_minor',
+    },
+  })
+
+  // ──────────────────────────────────────────────────────────────────
+  // Step 6: PCR via existing race-safe helper.
+  // ──────────────────────────────────────────────────────────────────
+  const pcr = await getOrCreatePatientClinicRecord(
+    args.minorGlobalPatientId,
+    args.clinicId,
+    {
+      isAnonymousToGlobal: false,
+      consentToMessaging: false,
+    }
+  )
+
+  // ──────────────────────────────────────────────────────────────────
+  // Step 7: DPR (doctor_patient_relationships). Walk-in / pending
+  // shape, matching what `createWalkInPatient` produces. Mig 081 will
+  // auto-fill global_patient_id + patient_clinic_record_id via trigger.
+  // ──────────────────────────────────────────────────────────────────
+  // NOTE on `relationship_type`: the table's CHECK constraint allows
+  // only ('primary' | 'secondary' | 'consultant'). The legacy
+  // `createWalkInPatient` (patients.ts) historically wrote 'walk_in'
+  // here which violates the CHECK; the 3 mig-111 backfilled minors
+  // empirically carry 'primary'. We use 'primary' for new minor
+  // registrations to match the empirical convention and clear the
+  // CHECK.
+  const { data: dprRow, error: dprErr } = await supabase
+    .from('doctor_patient_relationships')
+    .insert({
+      doctor_id: args.doctorId,
+      patient_id: patientId,
+      clinic_id: args.clinicId,
+      status: 'active',
+      relationship_type: 'primary',
+      access_level: 'walk_in_limited',
+      consent_state: 'pending',
+      access_type: 'walk_in',
+      notes: 'walk-in (dependent registration)',
+      last_visit_at: now,
+      doctor_entered_name: args.displayName.trim(),
+      doctor_entered_age: args.age ?? undefined,
+      doctor_entered_sex: args.sex ?? undefined,
+    })
+    .select('id')
+    .single()
+
+  if (dprErr || !dprRow) {
+    // PCR + patients already exist; DPR failure is non-fatal for the
+    // minor's clinic-scoped presence but blocks doctor-list visibility.
+    // Throw so the caller surfaces it; the patients + PCR rows persist
+    // (re-running registration will pick them up via the dedup branch
+    // in onboardPatient when adult-style retry is wired in).
+    throw new Error(
+      `establishMinorClinicPresence: DPR insert failed: ${dprErr?.message ?? 'unknown'}`
+    )
+  }
+  const dprId = (dprRow as { id: string }).id
+
+  return {
+    patientId,
+    patientUniqueId,
+    patientPhone: syntheticPhone,
+    pcrId: pcr.id,
+    dprId,
+  }
 }
 
 // ──────────────────────────────────────────────────────────────────────────

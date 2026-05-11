@@ -1,10 +1,11 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { ConfirmDialog } from '@shared/components/ui/ConfirmDialog'
 import { HelpIcon, HelpPanel } from '@shared/components/ui/HelpTooltips'
 import { getEgyptianPhoneError } from '@shared/lib/utils/phone-validation'
+import { PediatricBadge } from '@ui-clinic/components/patient/PediatricBadge'
 
 // ============================================================================
 // CONSTANTS
@@ -47,6 +48,12 @@ interface Patient {
   is_walkin: boolean
   active_conditions?: string[]
   unread_messages?: number
+  // B07 Phase G — v2 visibility fields surfaced by GET /api/doctor/patients
+  is_minor?: boolean
+  is_dependent?: boolean
+  parent_phone?: string | null
+  guardian_global_patient_id?: string | null
+  guardian_display_name?: string | null
 }
 
 interface AddPatientForm {
@@ -447,8 +454,15 @@ function PatientCard({ patient, onStartSession, onViewDetails }: PatientCardProp
 
         {/* Info */}
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <h3 className="font-semibold text-gray-900 truncate">{patient.name}</h3>
+            {/* B07 Phase G — age badge inline for minors */}
+            {patient.is_minor && (
+              <PediatricBadge
+                isMinor={true}
+                dateOfBirth={patient.date_of_birth ?? null}
+              />
+            )}
             {patient.is_walkin && (
               <span className="px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full text-xs">
                 زائر
@@ -460,6 +474,15 @@ function PatientCard({ patient, onStartSession, onViewDetails }: PatientCardProp
               </span>
             )}
           </div>
+
+          {/* B07 Phase G — guardian attribution line for minors */}
+          {patient.is_minor && (
+            <div className="text-xs text-[#1D4ED8] mt-0.5">
+              {patient.guardian_display_name
+                ? `تابع لـ ${patient.guardian_display_name}`
+                : 'تابع (ولي الأمر غير مكتمل)'}
+            </div>
+          )}
 
           <div className="text-sm text-gray-500 mt-0.5">
             <span dir="ltr">{patient.phone}</span>
@@ -525,6 +548,7 @@ function PatientCard({ patient, onStartSession, onViewDetails }: PatientCardProp
 
 export default function MyPatientsPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [patients, setPatients] = useState<Patient[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
@@ -533,15 +557,31 @@ export default function MyPatientsPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [page, setPage] = useState(1)
 
+  // B07 Phase G — URL-param-backed pediatric filter (Mo ruling 31).
+  // 'all' (default) / 'true' (minor only) / 'false' (adult only).
+  // Persisting via URL means refresh + share-link preserve the view.
+  const initialPediatric = (() => {
+    const v = (searchParams?.get('pediatric') ?? 'all').toLowerCase()
+    return v === 'true' || v === 'false' ? v : 'all'
+  })()
+  const [pediatricFilter, setPediatricFilter] = useState<'all' | 'true' | 'false'>(
+    initialPediatric as 'all' | 'true' | 'false'
+  )
+
   // Debounce search input so we don't re-filter the list on every keystroke
   const debouncedSearch = useDebounce(searchQuery, 300)
 
-  // Load patients (cap the payload so we never pull an unbounded list)
+  // Load patients (cap the payload so we never pull an unbounded list).
+  // pediatricFilter passes through to the API so the filter ALSO applies
+  // at the server tier — keeps payloads small when scoping to one cohort.
   const loadPatients = async () => {
     setLoading(true)
     setLoadError('')
     try {
-      const res = await fetch(`/api/doctor/patients?limit=${PATIENTS_PER_PAGE * 20}`)
+      const params = new URLSearchParams()
+      params.set('limit', String(PATIENTS_PER_PAGE * 20))
+      if (pediatricFilter !== 'all') params.set('pediatric', pediatricFilter)
+      const res = await fetch(`/api/doctor/patients?${params.toString()}`)
       if (!res.ok) throw new Error('فشل تحميل قائمة المرضى')
       const data = await res.json()
       setPatients(data.patients || [])
@@ -552,7 +592,15 @@ export default function MyPatientsPage() {
     }
   }
 
-  useEffect(() => { loadPatients() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadPatients() }, [pediatricFilter]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reflect filter in URL so refresh / share-link preserves the view.
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    if (pediatricFilter === 'all') url.searchParams.delete('pediatric')
+    else url.searchParams.set('pediatric', pediatricFilter)
+    window.history.replaceState(null, '', url.toString())
+  }, [pediatricFilter])
 
   // Reset to first page whenever the filter or search changes
   useEffect(() => {
@@ -657,7 +705,7 @@ export default function MyPatientsPage() {
             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
           />
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           {[
             { key: 'all', label: 'الكل' },
             { key: 'active', label: 'نشط' },
@@ -670,6 +718,26 @@ export default function MyPatientsPage() {
                 filter === f.key
                   ? 'bg-primary-100 text-primary-700'
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+          {/* B07 Phase G — pediatric filter pill row. URL-backed; persists
+              across refresh + share-link. Mo ruling 31. */}
+          <div className="mx-2 w-px self-stretch bg-gray-200" />
+          {[
+            { key: 'all', label: 'كل الأعمار' },
+            { key: 'true', label: 'تابعون (أقل من ١٨)' },
+            { key: 'false', label: 'بالغون (١٨+)' }
+          ].map(f => (
+            <button
+              key={`ped-${f.key}`}
+              onClick={() => setPediatricFilter(f.key as 'all' | 'true' | 'false')}
+              className={`px-4 py-2 rounded-lg text-sm ${
+                pediatricFilter === f.key
+                  ? 'bg-[#EFF6FF] text-[#1D4ED8] border-[0.8px] border-[#BFDBFE]'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200 border-[0.8px] border-transparent'
               }`}
             >
               {f.label}

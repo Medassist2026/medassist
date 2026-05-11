@@ -238,6 +238,12 @@ const ALLOWED_ADMIN_SCOPES = new Set([
   'patient-messages-send',              // POST /api/patient/messages
   'patient-conversations',              // GET /api/patient/messages/conversations
   'patient-messages-unread-count',      // GET /api/patient/messages/unread-count
+
+  // ── B07 Phase G API surface (clinic-app dependent visibility) ───────────
+  'dependents-establish-clinic-presence', // establishMinorClinicPresence (Section 1 — patients+PCR+DPR for minors)
+  'patient-search-v2-augment',          // /api/patients/search v2 fields JOIN (Section 2)
+  'delegations-list-active-for-gp',     // listActiveDelegationsForGlobalPatient (Section 6)
+  'care-network-scope-check',           // /api/admin/patient/[gpId]/care-network handler scope check
 ])
 
 export { ALLOWED_ADMIN_SCOPES }

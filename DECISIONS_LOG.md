@@ -1022,5 +1022,35 @@ Expected: 21 rows. Filter by event timestamp, NOT by net `length()` delta of ope
 
 ---
 
-*Last entry: D-079 | D-077 | D-074 (amended 2026-05-07) | D-065 amended twice 2026-05-07 | 10 May 2026*
+## D-080: B07 Phase G minor four-row shape (`global_patients` + `patients` + PCR + DPR)
+
+**Decision Date:** 2026-05-11
+**Context:** Phase E (commit `8cd485f`) shipped the v2 dependent path that creates only a minor `global_patients` row. Phase G's Section 0 architectural survey discovered that this leaves new minors clinically unusable: every clinical table FKs to `patients(id)`, and mig 081's compat trigger raises EXCEPTION on v2 inserts that lack a `patients` row. The 3 mig-111 backfilled minors empirically already have a `(patients, PCR, DPR)` shape — that's the de facto convention, but Phase E never wired it for new minors.
+
+**Decision:** The `onboardPatient` v2 `isDependent: true` path MUST create all four rows at the registering clinic: `global_patients` (minor gp) + `patients` (clinic-scoped, `global_patient_id` linked, `is_dependent=TRUE`, synthetic `DEP_*` phone) + `patient_clinic_records` + `doctor_patient_relationships`. New helper `establishMinorClinicPresence` in `packages/shared/lib/data/dependents.ts` lands the (patients, PCR, DPR) trio after `createMinorGlobalPatient`. The Phase E onboard handler chains both for `isDependent: true` when a clinic context is resolved.
+
+**Reasoning:** Lowest-friction option (Option A from Section 0 survey). No schema change; no mig. Reuses existing `getOrCreatePatientClinicRecord` helper. mig 081 compat triggers work unchanged. Reversible at Prompt 6.5 legacy cleanup. Matches the existing empirical pattern of the 3 mig-111 minors. Phase G ruling 33 (Mo, 2026-05-11): "Original Phase E modification was incomplete; Phase G completes it."
+
+**Trade-offs accepted:** Minors get a `patients` row at every clinic where they're registered — small data duplication, same shape as adults. Auth flow creates a silent walk-in dummy `auth.users` per minor per clinic (matches `createWalkInPatient`'s adult pattern); these accumulate over time and are cleaned up by Prompt 6.5.
+
+**Outcome:** Live in B07 Phase G (commit pending). `packages/shared/lib/data/dependents.ts` `establishMinorClinicPresence` is the implementation; `packages/shared/lib/api/handlers/patients/onboard/handler.ts` v2 path chains it. Phase E handler comment line 254 ("The new minor has no legacy patients row") is no longer accurate and is rewritten in this commit.
+
+---
+
+## D-081: Clinic-side care-network endpoint pattern (gp-id-indexed admin route)
+
+**Decision Date:** 2026-05-11
+**Context:** Phase G Section 6 requires a clinic-side READ surface for a patient's active delegations ("care network"). Two endpoint shapes considered: extending `GET /api/doctor/patients/[id]` to include `care_network`, or new endpoint `GET /api/admin/patient/[gpId]/care-network`.
+
+**Decision:** New endpoint `GET /api/admin/patient/[gpId]/care-network`. Gp-id-indexed (v2 canonical identity). Authorization: caller must be `doctor` or `frontdesk` AND have an active `doctor_patient_relationships` row with the patient (doctor) or be an active member of a clinic where the patient has a row (frontdesk). Returns 404 (not 403) on no-scope to avoid disclosing whether the patient exists in other clinics. Data layer: new helper `listActiveDelegationsForGlobalPatient` in `packages/shared/lib/data/delegations.ts` (filters `accepted_at IS NOT NULL AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > NOW())`).
+
+**Reasoning:** Most patients have no delegations; lazy-fetching keeps the patient-detail payload lean. The gp-id input is the canonical Phase B v2 identity; the legacy `patients.id`–indexed handlers gradually cede ground to gp-id-indexed handlers. The new endpoint sits at `/api/admin/patient/[gpId]/...` (Phase F.5 convention for gp-id-indexed clinic-app endpoints). Mo ruling 24 (principal-side only for delegation modification) is honored — clinic surface is strictly read-only.
+
+**Trade-offs accepted:** One extra round-trip per patient detail open when the patient has active delegations. The UI hides the section entirely when empty (the common case), so the extra fetch is silent for adults without delegations. Cross-clinic visibility honored per D-068: clinic can only see a patient's care network if the clinic has an active relationship with the patient.
+
+**Outcome:** Live in B07 Phase G (commit pending). `packages/shared/lib/api/handlers/admin/patient/care-network/handler.ts` + `apps/clinic/app/api/admin/patient/[gpId]/care-network/route.ts` is the implementation. UI consumer: `CareNetworkCard` in `apps/clinic/app/(doctor)/doctor/patients/[id]/page.tsx` (`OverviewTab`).
+
+---
+
+*Last entry: D-081 | D-080 | D-079 | D-077 | D-074 (amended 2026-05-07) | 11 May 2026*
 *Add new decisions at the bottom with sequential ID.*
