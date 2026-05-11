@@ -48,7 +48,12 @@ export async function POST(request: Request) {
         access_level: 'walk_in_limited',
         consent_state: 'pending',
         status: 'pending',
-        relationship_type: 'walk_in',
+        // B07 Phase G.5 — DPR.relationship_type CHECK enforces
+        // {primary, secondary, consultant}. 'walk_in' is the
+        // access_type field, NOT the relationship_type. Pre-G.5 this
+        // INSERT silently failed CHECK and the older-schema fallback
+        // path below recovered.
+        relationship_type: 'primary',
         access_type: 'walk_in'
       })
 

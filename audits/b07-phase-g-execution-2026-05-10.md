@@ -315,6 +315,7 @@ single final surface at end. Section 7 skipped per Section 0 conclusion.
 
 **Severity:** blocking-MVP (if path is hit)
 **Status:** out of Phase G scope; flagged here for triage
+**Resolved:** RESOLVED in Phase G.5 (2026-05-11). Empirically confirmed (Case A) via Supabase MCP INSERT probe against staging CHECK. Fix shipped at 4 sites (`patients.ts:336/516/699`, `doctor/patients/add/handler.ts:51`): `'walk_in'` → `'primary'`. Legacy-fallback INSERT blocks preserved as defense-in-depth. See `audits/b07-phase-g5-execution-2026-05-11.md` Section 1 + Decision 1-3.
 
 **Description:** DPR table's `relationship_type` CHECK accepts only
 `('primary' | 'secondary' | 'consultant')`. `createWalkInPatient`

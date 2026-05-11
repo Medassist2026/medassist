@@ -86,11 +86,19 @@ export function PediatricBadge({
 
   const tagLabel = locale === 'ar' ? 'مريض تابع' : 'Pediatric patient'
 
+  // B07 Phase G.5 — narrow-viewport polish.
+  // `whitespace-nowrap` on each inner span keeps the age label and the
+  // "Pediatric patient" pill as single non-breaking tokens. The outer
+  // wrapper stays `inline-flex` so the consuming parent's `flex-wrap`
+  // can move the whole badge to a new line as one unit. `flex-shrink-0`
+  // on the pill prevents Tailwind's flex defaults from compressing the
+  // pill's padding when a parent is unusually narrow. The age label
+  // already shrinks gracefully because it's a short numeric token.
   return (
     <span className={`inline-flex items-center gap-1.5 ${className}`}>
       {ageLabel && (
         <span
-          className="font-cairo text-[11px] text-[#6B7280]"
+          className="font-cairo text-[11px] text-[#6B7280] whitespace-nowrap"
           aria-label={locale === 'ar' ? `العمر ${age} سنة` : `Age ${age} years`}
         >
           ({ageLabel})
@@ -98,10 +106,10 @@ export function PediatricBadge({
       )}
       {showTag && (
         <span
-          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#EFF6FF] border-[0.8px] border-[#BFDBFE] text-[#1D4ED8] font-cairo text-[11px] font-medium"
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#EFF6FF] border-[0.8px] border-[#BFDBFE] text-[#1D4ED8] font-cairo text-[11px] font-medium whitespace-nowrap flex-shrink-0"
           aria-label={tagLabel}
         >
-          <UserPlus className="w-3 h-3" strokeWidth={2} />
+          <UserPlus className="w-3 h-3 flex-shrink-0" strokeWidth={2} />
           {tagLabel}
         </span>
       )}

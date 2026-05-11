@@ -57,9 +57,14 @@ export function AgeBadge({
     locale === 'ar' ? `عمر ${age}` : `Age ${age}`
   const text = compact ? inner : `(${inner})`
 
+  // B07 Phase G.5 — narrow-viewport polish. `whitespace-nowrap` keeps
+  // "(عمر N)" / "(Age N)" as a single non-breaking token so the badge
+  // never wraps mid-word inside a tight flex container. Truncating
+  // siblings already enforce ellipsis on long names; this guard
+  // protects the badge itself.
   return (
     <span
-      className={`font-cairo text-[11px] text-[#6B7280] ${className}`}
+      className={`font-cairo text-[11px] text-[#6B7280] whitespace-nowrap ${className}`}
       aria-label={locale === 'ar' ? `العمر ${age} سنة` : `Age ${age} years`}
     >
       {text}

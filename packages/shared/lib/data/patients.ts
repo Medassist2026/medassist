@@ -336,7 +336,14 @@ export async function onboardPatient(
         consent_state: consentState,
         consent_granted_at: isVerifiedByCode ? now : null,
         status: isVerifiedByCode ? 'active' : 'pending',
-        relationship_type: isVerifiedByCode ? 'primary' : 'walk_in',
+        // B07 Phase G.5 — DPR.relationship_type CHECK allows only
+        // {primary, secondary, consultant}. Walk-in convention is
+        // (access_type='walk_in', relationship_type='primary') —
+        // verified empirically against 30 staging rows in Phase G.5.
+        // Pre-G.5 this branch wrote 'walk_in' which silently failed
+        // the CHECK; the row only persisted via the legacy fallback
+        // below stripping the field and falling back to DEFAULT='primary'.
+        relationship_type: 'primary',
         access_type: accessType,
         doctor_entered_name: data.fullName,
         doctor_entered_age: data.age,
@@ -508,7 +515,11 @@ export async function createWalkInPatient(
             patient_id: existingDependent.id,
             clinic_id: data.clinicId || null,
             status: 'pending',
-            relationship_type: 'walk_in',
+            // B07 Phase G.5 — DPR.relationship_type CHECK enforces
+            // {primary, secondary, consultant}; 'walk_in' is the
+            // access_type, not the relationship_type. Empirical fix
+            // verified against the staging CHECK constraint.
+            relationship_type: 'primary',
             access_level: 'walk_in_limited',
             consent_state: 'pending',
             access_type: 'walk_in',
@@ -691,7 +702,17 @@ export async function createWalkInPatient(
       patient_id: userId,
       clinic_id: data.clinicId || null,
       status: 'pending',
-      relationship_type: 'walk_in',
+      // B07 Phase G.5 — DPR.relationship_type CHECK enforces
+      // {primary, secondary, consultant}. 'walk_in' is the
+      // access_type, not the relationship_type. This is the main
+      // adult walk-in DPR insert; pre-G.5 it silently failed CHECK
+      // and the legacy fallback below caught the error (the fallback
+      // INSERT omits relationship_type entirely so the DEFAULT='primary'
+      // applied). The fix lets the main INSERT succeed on the first
+      // try with the full payload (notes + last_visit_at + clinic_id
+      // + status + access_level + consent_state all preserved instead
+      // of being lost to the fallback's stripped shape).
+      relationship_type: 'primary',
       access_level: 'walk_in_limited',
       consent_state: 'pending',
       access_type: 'walk_in',
