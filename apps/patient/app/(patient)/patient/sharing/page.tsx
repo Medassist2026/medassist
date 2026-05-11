@@ -23,6 +23,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { ar } from '@shared/lib/i18n/ar'
 import { RevokeShareModal } from '@patient/components/sharing/RevokeShareModal'
 import { ExtendShareModal } from '@patient/components/sharing/ExtendShareModal'
+import { useApiPath } from '@patient/lib/hooks/use-api-path'
 
 interface SharingShare {
   id: string
@@ -50,11 +51,14 @@ export default function PatientSharingPage() {
   const [extendTarget, setExtendTarget] = useState<SharingShare | null>(null)
   const [toast, setToast] = useState<string | null>(null)
 
+  const apiPath = useApiPath()
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch('/api/patient/sharing?include_expired=true')
+      const res = await fetch(
+        apiPath('/api/patient/sharing?include_expired=true')
+      )
       if (!res.ok) {
         setError(ar.sharing_toast_genericError)
         return
@@ -67,7 +71,7 @@ export default function PatientSharingPage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [apiPath])
 
   useEffect(() => {
     void load()

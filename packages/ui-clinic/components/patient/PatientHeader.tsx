@@ -14,6 +14,16 @@ import { Bell, MoreHorizontal, ChevronRight } from 'lucide-react'
  *  - Nested mode (showBack=true): shows a back chevron + page title on the
  *    right, optional action on the left. Used on detail pages.
  *
+ * Action slots (the left-side cluster in RTL):
+ *  - `leadingAction` — B07 Phase F.5 (Mo ruling 27 Option B). Renders
+ *    BEFORE the action override or bell+more default. Typically used for
+ *    `<AccountSwitcher />` so the switcher persists across every patient
+ *    page without forcing this `@ui-clinic` package to depend on the
+ *    `@patient` app's AccountContext.
+ *  - `action` — replaces bell + more entirely. Older Phase F pages used
+ *    this for AccountSwitcher; Phase F.5 migrates them to `leadingAction`
+ *    so the default bell+more is restored alongside the switcher.
+ *
  * Design tokens (matches DoctorShell header pattern):
  *  - Background: white, border-bottom 0.8px #E5E7EB
  *  - Height: 56px
@@ -32,6 +42,13 @@ interface PatientHeaderProps {
   hideActions?: boolean
   /** Custom action slot (replaces bell + more) */
   action?: React.ReactNode
+  /**
+   * Leading action slot — renders BEFORE the action override or bell+more
+   * default. B07 Phase F.5 / Mo ruling 27 Option B: pages pass
+   * `<AccountSwitcher />` here so the switcher is visible on every patient
+   * page without `@ui-clinic` having to know about the `@patient` package.
+   */
+  leadingAction?: React.ReactNode
 }
 
 export function PatientHeader({
@@ -40,6 +57,7 @@ export function PatientHeader({
   showBack = false,
   hideActions = false,
   action,
+  leadingAction,
 }: PatientHeaderProps) {
   const router = useRouter()
 
@@ -73,9 +91,11 @@ export function PatientHeader({
           </div>
         </div>
 
-        {/* Left side (RTL) — actions */}
+        {/* Left side (RTL) — actions cluster. leadingAction first, then
+            either an action override or the bell+more default. */}
         {!hideActions && (
           <div className="flex items-center gap-2">
+            {leadingAction}
             {action ?? (
               <>
                 <Link

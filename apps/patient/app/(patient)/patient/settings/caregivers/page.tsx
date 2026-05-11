@@ -20,7 +20,8 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
-import { ChevronDown, ChevronUp, Clock, ShieldCheck, UserPlus } from 'lucide-react'
+import Link from 'next/link'
+import { ChevronDown, ChevronUp, ShieldCheck, UserPlus } from 'lucide-react'
 import { PatientHeader } from '@ui-clinic/components/patient/PatientHeader'
 import { ConfirmDialog } from '@shared/components/ui/ConfirmDialog'
 import { AccountSwitcher } from '@patient/components/AccountSwitcher'
@@ -46,6 +47,9 @@ interface Delegation {
   principal_global_patient_id: string
   delegate_user_id: string
   delegate_global_patient_id: string | null
+  /** Phase F.5 Section 4 — populated by listGrantedDelegations JOIN. */
+  principal_display_name: string | null
+  delegate_display_name: string | null
   capabilities: string[]
   granted_at: string
   accepted_at: string | null
@@ -235,7 +239,7 @@ export default function CaregiversSettingsPage() {
       <PatientHeader
         title="مقدمو الرعاية"
         showBack
-        action={<AccountSwitcher />}
+        leadingAction={<AccountSwitcher />}
       />
 
       <div className="px-4 pt-4 pb-24">
@@ -250,23 +254,28 @@ export default function CaregiversSettingsPage() {
           </div>
         </div>
 
-        {/* Phase F MVP: grant flow deferred — explanatory placeholder */}
-        <div className="bg-white border-[0.8px] border-[#E5E7EB] rounded-[12px] p-4 mb-4">
-          <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-full bg-[#FEF3C7] flex items-center justify-center flex-shrink-0">
-              <Clock className="w-5 h-5 text-[#B45309]" strokeWidth={1.8} />
+        {/* Phase F.5: grant flow active — link to /grant page. */}
+        <Link
+          href="/patient/settings/caregivers/grant"
+          className="block bg-white border-[0.8px] border-[#16A34A] rounded-[12px] p-4 mb-4 hover:bg-[#F0FDF4] transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-[#F0FDF4] flex items-center justify-center flex-shrink-0">
+              <UserPlus
+                className="w-5 h-5 text-[#16A34A]"
+                strokeWidth={1.8}
+              />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="font-cairo text-[13px] font-semibold text-[#030712]">
-                إضافة مقدم رعاية جديد قريباً
+              <p className="font-cairo text-[14px] font-semibold text-[#030712]">
+                إضافة مقدم رعاية جديد
               </p>
-              <p className="font-cairo text-[11px] text-[#6B7280] leading-[16px] mt-1">
-                تفعيل إضافة مقدمي الرعاية برقم الهاتف قيد التطوير ضمن المرحلة
-                التالية. حالياً يمكنك إدارة مقدمي الرعاية الموجودين فقط.
+              <p className="font-cairo text-[11px] text-[#6B7280] leading-[16px] mt-0.5">
+                ادعُ شخصاً تثق به برقم هاتفه ليتولى مساعدتك في رعايتك
               </p>
             </div>
           </div>
-        </div>
+        </Link>
 
         {loading && (
           <div className="space-y-2">
@@ -319,9 +328,11 @@ export default function CaregiversSettingsPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-0.5">
                         <p className="font-cairo text-[13px] font-semibold text-[#030712] truncate">
-                          {d.delegate_global_patient_id
-                            ? `مقدم رعاية #${d.delegate_global_patient_id.slice(0, 8)}`
-                            : `مقدم رعاية #${d.delegate_user_id.slice(0, 8)}`}
+                          {d.delegate_display_name
+                            ? d.delegate_display_name
+                            : d.delegate_global_patient_id
+                              ? `مقدم رعاية #${d.delegate_global_patient_id.slice(0, 8)}`
+                              : `مقدم رعاية #${d.delegate_user_id.slice(0, 8)}`}
                         </p>
                         <span
                           className="inline-flex items-center px-2 py-0.5 rounded-full font-cairo text-[10px] font-medium border-[0.8px]"

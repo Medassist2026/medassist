@@ -15,7 +15,17 @@ Severity vocabulary:
 
 ────────────────────────────────────────────────────────────────────────
 
-## Finding 1 — Per-context routing API extensions (Phase F.5 candidate)
+## Finding 1 — Per-context routing API extensions (Phase F.5 candidate) — RESOLVED
+
+**Status:** RESOLVED in Phase F.5 Section 1 (this commit; see
+`audits/b07-phase-f5-execution-2026-05-10.md` Decisions 1-5, 13-15).
+Helper `resolvePatientContext` + `useApiPath` hook plumb the `?gpId=`
+parameter end-to-end across 22 endpoint shells / ~28 method-handler
+pairs. Read endpoints use `requireAuthorityOver`; write endpoints with
+capability semantics use `requireCapability` via the `authorize`
+closure pattern; write endpoints without an MVP capability use
+`denyDelegates: true`. Minor case (no claim → empty data) per
+Decision 2.
 
 **Severity:** blocking-MVP
 
@@ -45,7 +55,15 @@ work. Estimated 2-3 sessions.
 
 ────────────────────────────────────────────────────────────────────────
 
-## Finding 2 — `PATCH /api/patient/dependents/[id]` endpoint absent
+## Finding 2 — `PATCH /api/patient/dependents/[id]` endpoint absent — RESOLVED
+
+**Status:** RESOLVED in Phase F.5 Section 3 (this commit; see Decision 12
+in the F.5 execution log). Endpoint added at
+`packages/shared/lib/api/handlers/patient/dependents/update/handler.ts`,
+data-layer function `updateMinorProfile` in `dependents.ts`. Editable:
+`displayName`, `preferredLanguage`. Locked: identity fields
+(date_of_birth, sex, claim, guardian). Emits `MINOR_PROFILE_UPDATED`
+audit row. Inline edit wired into `settings/family/[id]` detail page.
 
 **Severity:** nice-to-have-pre-launch
 
@@ -70,7 +88,15 @@ early user trial; cosmetically noticeable.
 
 ────────────────────────────────────────────────────────────────────────
 
-## Finding 3 — Patient-side phone → userId lookup endpoint absent
+## Finding 3 — Patient-side phone → userId lookup endpoint absent — RESOLVED
+
+**Status:** RESOLVED in Phase F.5 Section 2 (this commit; see Decisions
+8-9 in the F.5 execution log). Endpoint at
+`/api/patient/lookup-by-phone` (POST, body { phone }). Returns userId +
+gpId + displayName, or 404. Rate-limited at 30/min/user via
+`enforceRateLimit`. Emits `PATIENT_LOOKUP_BY_PHONE_ATTEMPT` audit row
+on every call (hit or miss). The Phase F.5 caregiver grant form
+(Section 5) consumes this endpoint.
 
 **Severity:** blocking-MVP
 
@@ -162,7 +188,16 @@ truncates with `truncate`. Acceptable.
 
 ────────────────────────────────────────────────────────────────────────
 
-## Finding 7 — Delegation responses missing principal/delegate display names
+## Finding 7 — Delegation responses missing principal/delegate display names — RESOLVED
+
+**Status:** RESOLVED in Phase F.5 Section 4 (this commit; see Decision 7
+in the F.5 execution log). `listGrantedDelegations` and
+`listReceivedDelegations` hydrate `principal_display_name` +
+`delegate_display_name` via a two-pass lookup helper
+(`hydrateDisplayNames`). New return type `DelegationWithNames` extends
+`Delegation`. UI consumers: AccountSwitcher (already typed correctly
+at Phase F), caregivers page, caregiving page — all updated to render
+real names with placeholder fallback for null cases.
 
 **Severity:** blocking-MVP
 
@@ -192,7 +227,17 @@ Estimated: 1-2 hour data-layer change + null-safe UI updates.
 
 ────────────────────────────────────────────────────────────────────────
 
-## Finding 8 — AccountSwitcher persistence across all patient pages
+## Finding 8 — AccountSwitcher persistence across all patient pages — RESOLVED
+
+**Status:** RESOLVED in Phase F.5 Section 6 (this commit; see Decision 10
+in the F.5 execution log). Mo ruling 27 selected Option B:
+PatientHeader gains a new `leadingAction?: ReactNode` prop that
+renders BEFORE the action override or bell+more default.
+AccountSwitcher remains in `@patient`. All 11 existing patient pages
+that use PatientHeader pass `leadingAction={<AccountSwitcher />}`;
+Phase F pages migrated from `action` to `leadingAction` (preserves
+bell+more alongside switcher). Switcher now visible on every patient
+page.
 
 **Severity:** nice-to-have-pre-launch
 
@@ -230,15 +275,18 @@ Mo to rule. Option A is cleaner; Option B is more conservative.
 
 ────────────────────────────────────────────────────────────────────────
 
-## Phase F summary
+## Phase F summary — POST-F.5
 
 8 findings total. 3 blocking-MVP (#1, #3, #7), 4 nice-to-have-pre-launch
 (#2, #5, #6, #8), 1 future (#4).
 
-Phase F.5 closes findings 1, 2, 3, 7, 8. Estimated 3-5 sessions.
-B07-FU-4 (deep-link) closes finding 4. Findings 5 + 6 are pre-launch
-QA + i18n polish.
+**Phase F.5 (this commit) closed findings #1, #2, #3, #7, #8** —
+5 of 8. Remaining:
+- Finding #4 (SMS deep-link) — future, queued behind B09 messaging.
+- Finding #5 (Arabic singular/dual/plural age badge) — pre-launch i18n
+  polish; not blocking.
+- Finding #6 (narrow-viewport <380px QA) — pre-launch manual QA.
 
-After Phase F.5 ships, B07 backend + UI is feature-complete pending
-clinic-side dependent visibility (Phase G) and integration sign-off
-(Phases H–J).
+B07 backend + patient UI is now feature-complete pending clinic-side
+dependent visibility (Phase G), RLS matrix expansion (Phase H),
+integration smoke (Phase I), sign-off (Phase J).

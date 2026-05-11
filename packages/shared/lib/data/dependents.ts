@@ -387,7 +387,159 @@ export async function getDependent(
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// 4. transferGuardianship — schema accommodation; no UX MVP
+// 4. updateMinorProfile — B07 Phase F.5 (Section 3, Phase F finding #2)
+// ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * Editable fields on a minor profile via PATCH /api/patient/dependents/[id].
+ * Identity-level fields (date_of_birth, sex, is_minor,
+ * guardian_global_patient_id, claimed_user_id, normalized_phone) are NOT
+ * mutable via this path — they're locked post-registration to preserve
+ * audit integrity (Phase F finding #2 recommendation).
+ */
+export interface UpdateMinorProfileInput {
+  /** Display name; required-on-set (cannot blank-out). 1..200 chars. */
+  displayName?: string
+  /** Locale for messaging / UI. */
+  preferredLanguage?: 'ar' | 'en'
+}
+
+/**
+ * Update editable fields on a minor's global_patients row. Emits
+ * `MINOR_PROFILE_UPDATED` audit with metadata.changed_fields recording
+ * the (before, after) tuple per field for downstream auditability.
+ *
+ * Authorization is enforced at the API layer (Phase E pattern). This
+ * function does not re-verify guardian authority — the handler calls
+ * `requireAuthorityOver(minorGpId, callerUserId)` and confirms basis is
+ * `'guardian_of_minor'` before invoking.
+ *
+ * No-op when no fields would change.
+ */
+export async function updateMinorProfile(
+  minorGlobalPatientId: string,
+  updates: UpdateMinorProfileInput,
+  updatedByUserId: string
+): Promise<MinorGlobalPatient> {
+  if (!minorGlobalPatientId) {
+    throw new DependentNotFoundError(minorGlobalPatientId)
+  }
+
+  // Validate inputs
+  if (updates.displayName !== undefined) {
+    const trimmed = updates.displayName.trim()
+    if (trimmed.length === 0) {
+      throw new InvalidDependentError(
+        'displayName cannot be empty when supplied'
+      )
+    }
+    if (trimmed.length > 200) {
+      throw new InvalidDependentError(
+        'displayName must be 200 characters or fewer'
+      )
+    }
+  }
+  if (updates.preferredLanguage !== undefined) {
+    if (
+      updates.preferredLanguage !== 'ar' &&
+      updates.preferredLanguage !== 'en'
+    ) {
+      throw new InvalidDependentError(
+        `preferredLanguage must be 'ar' or 'en'; got ${String(updates.preferredLanguage)}`
+      )
+    }
+  }
+
+  const supabase = createAdminClient('dependents-update-minor-profile')
+
+  // Fetch current row for the before/after audit + minor verification.
+  const { data: existing, error: fetchErr } = await supabase
+    .from('global_patients')
+    .select('id, is_minor, display_name, preferred_language')
+    .eq('id', minorGlobalPatientId)
+    .maybeSingle()
+  if (fetchErr) {
+    throw new Error(
+      `updateMinorProfile fetch failed: ${(fetchErr as { message?: string }).message ?? 'unknown'}`
+    )
+  }
+  if (!existing) throw new DependentNotFoundError(minorGlobalPatientId)
+  const existingRow = existing as {
+    id: string
+    is_minor: boolean
+    display_name: string | null
+    preferred_language: string
+  }
+  if (!existingRow.is_minor) {
+    throw new InvalidDependentError(
+      `global_patient ${minorGlobalPatientId} is not a minor`
+    )
+  }
+
+  // Compute changes
+  const updateRow: Record<string, unknown> = {}
+  const changedFields: Record<
+    string,
+    { before: string | null; after: string | null }
+  > = {}
+
+  if (updates.displayName !== undefined) {
+    const newName = updates.displayName.trim()
+    if (newName !== (existingRow.display_name ?? '')) {
+      updateRow.display_name = newName
+      changedFields.display_name = {
+        before: existingRow.display_name,
+        after: newName,
+      }
+    }
+  }
+  if (updates.preferredLanguage !== undefined) {
+    if (updates.preferredLanguage !== existingRow.preferred_language) {
+      updateRow.preferred_language = updates.preferredLanguage
+      changedFields.preferred_language = {
+        before: existingRow.preferred_language,
+        after: updates.preferredLanguage,
+      }
+    }
+  }
+
+  // No-op short-circuit — no audit row written.
+  if (Object.keys(updateRow).length === 0) {
+    const gp = await findGlobalPatientById(minorGlobalPatientId)
+    if (!gp) throw new DependentNotFoundError(minorGlobalPatientId)
+    return gp
+  }
+
+  const { error: updateErr } = await supabase
+    .from('global_patients')
+    .update(updateRow)
+    .eq('id', minorGlobalPatientId)
+  if (updateErr) {
+    throw new Error(
+      `updateMinorProfile update failed: ${(updateErr as { message?: string }).message ?? 'unknown'}`
+    )
+  }
+
+  await emitPatientAuditWithAuthority({
+    subjectGlobalPatientId: minorGlobalPatientId,
+    actorUserId: updatedByUserId,
+    actorKind: 'user',
+    action: 'MINOR_PROFILE_UPDATED',
+    entityType: 'global_patients',
+    entityId: minorGlobalPatientId,
+    authorityBasis: 'guardian_of_minor',
+    metadata: {
+      changed_fields: changedFields,
+    },
+  })
+
+  const updated = await findGlobalPatientById(minorGlobalPatientId)
+  if (!updated) throw new DependentNotFoundError(minorGlobalPatientId)
+  return updated
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// 5. transferGuardianship — schema accommodation; no UX MVP
 // ──────────────────────────────────────────────────────────────────────────
 
 /**

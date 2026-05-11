@@ -1,0 +1,97 @@
+feat(b07): Phase F.5 — API extensions + delegation enhancements + AccountSwitcher persistence
+
+B07 Phase F.5 closes 5 of 8 Phase F findings (commit 8a1895e) and re-enables
+the deferred caregiver grant form. Builds on Phase B/C/D/E/F.
+
+Mo's 28 load-bearing rulings preserved (20 backend + 6 UI + 2 Phase F.5).
+Decision log at audits/b07-phase-f5-execution-2026-05-10.md.
+
+Phase F.5 shipping:
+
+Section 1 — Cross-context API extensions (Phase F finding #1 RESOLVED):
+- New helper packages/shared/lib/auth/patient-context.ts (resolvePatientContext
+  + emptyForCrossContext + InvalidGpIdError + DelegateNotAuthorizedError)
+- 22 patient endpoint shells extended (~28 method-handler pairs) to accept
+  ?gpId=<id> query param
+- Read endpoints use requireAuthorityOver; write endpoints with capability
+  semantics use requireCapability via authorize closure (Decision 15 — eslint
+  literal-discipline preserved)
+- Write endpoints without an MVP capability (records-POST, sharing
+  extend/revoke) use denyDelegates: true; consent_to_share remains post-MVP
+- Self-only behavior preserved when gpId absent (full back-compat)
+- Per-endpoint capability gating audit logged in Decision 4
+- New apps/patient/lib/hooks/use-api-path.ts threads ?gpId= into fetch calls
+  across 7 patient pages
+
+Section 2 — Phone-lookup endpoint (Phase F finding #3 RESOLVED):
+- New POST /api/patient/lookup-by-phone
+- Body: { phone } (E.164 normalization via existing validateEgyptianPhone)
+- Returns { userId, globalPatientId, displayName } or 404
+- Rate-limited 30/min/user via existing enforceRateLimit (Decision 8)
+- Emits PATIENT_LOOKUP_BY_PHONE_ATTEMPT audit row on every call (Decision 9)
+- POST not GET — phone never in URL/referrer (privacy)
+- Only returns claimed users (filters claimed_user_id IS NOT NULL)
+
+Section 3 — Dependent PATCH endpoint (Phase F finding #2 RESOLVED):
+- New PATCH /api/patient/dependents/[id]
+- Editable: displayName, preferredLanguage
+- Locked: dateOfBirth, sex, identity fields (audit integrity)
+- New data-layer function updateMinorProfile in dependents.ts
+- Emits MINOR_PROFILE_UPDATED audit row with metadata.changed_fields
+- Inline edit UI on /patient/settings/family/[id] detail page
+
+Section 4 — Delegation list display-name JOIN (Phase F finding #7 RESOLVED):
+- listGrantedDelegations + listReceivedDelegations return DelegationWithNames
+- Hydration via two-pass hydrateDisplayNames helper (Decision 7 — TS-safe;
+  brittleness-free vs PostgREST embedded resources on 3-FK table)
+- UI consumers updated: caregivers + caregiving pages render real names;
+  AccountSwitcher inherits via principal_display_name field
+- Placeholder fallback retained for null cases
+
+Section 5 — Caregiver grant form re-enabled (Phase F Decision 6 reversed):
+- New /patient/settings/caregivers/grant page
+- DelegationGrantForm component (Decision 11 — two-step flow: phone lookup
+  confirmation → capability/expiry selection)
+- 5 capability checkboxes (consent_to_share excluded per Mo ruling 4)
+- Default expiry = 1 year from today (Mo ruling 20)
+- Optional auto-renew with window-days
+- "coming soon" placeholder removed; "Add a caregiver" CTA active
+
+Section 6 — AccountSwitcher persistence (Phase F finding #8 RESOLVED):
+- PatientHeader (in @ui-clinic) extended with leadingAction prop per Mo
+  ruling 27 Option B
+- AccountSwitcher remains in @patient package; passed as prop
+- All 11 PatientHeader-using patient pages migrated; 5 pages that previously
+  did not show the switcher (/health, /appointments, /messages,
+  /prescriptions, /more) now do
+
+Audit enum growth (audit.ts):
+- + PATIENT_LOOKUP_BY_PHONE_ATTEMPT (Section 2)
+- + MINOR_PROFILE_UPDATED (Section 3)
+Per the going-forward rule in audit.ts
+
+Admin scope allow-list (D-008 fourth amendment):
+- Grows 154 → 178 with 24 new Phase F.5 scopes grouped under "B07 Phase F.5
+  API surface" comment block
+
+Verification:
+- All 4 sandbox gates clean: 3× tsc (root + clinic + patient) + lint:scopes
+- 2 next build gates DEFERRED to Mac-side per Lesson #17 + sandbox-45s-
+  timeout pattern (run npm run build:patient + build:clinic before push)
+
+No schema changes; no RLS changes; consent_to_share still post-MVP
+(Mo ruling 4 preserved).
+
+Doc updates:
+- DECISIONS_LOG.md D-068 amendment 2026-05-10 (B07 Phase F.5 — cross-context
+  API + grant form + AccountSwitcher persistence)
+- audits/STATE_OF_WORK.md (Phase F.5 SHIPPED header added)
+- audits/PROGRAM_STATE.md (Phase F.5 SHIPPED entry; findings #1/#2/#3/#7/#8
+  RESOLVED)
+- audits/b07-phase-f-findings.md (5 findings marked RESOLVED with F.5
+  reference; 3 remain: #4 future, #5 i18n polish, #6 narrow-viewport QA)
+- audits/b07-phase-f5-execution-2026-05-10.md (NEW — 16 decisions)
+
+Phase G (clinic-app dependent visibility) is now unblocked. B07 backend +
+patient UI is feature-complete pending Phase G + Phases H–J (RLS matrix
+expansion + integration smoke + sign-off).

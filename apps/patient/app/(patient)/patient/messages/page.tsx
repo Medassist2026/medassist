@@ -15,6 +15,8 @@ import {
 } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 import { PatientHeader } from '@ui-clinic/components/patient/PatientHeader'
+import { AccountSwitcher } from '@patient/components/AccountSwitcher'
+import { useApiPath } from '@patient/lib/hooks/use-api-path'
 
 // ============================================================================
 // TYPES
@@ -610,16 +612,19 @@ export default function PatientMessagesPage() {
   const selectedDoctorRef = useRef<Doctor | null>(null)
   selectedDoctorRef.current = selectedDoctor
 
+  const apiPath = useApiPath()
   const loadConversations = useCallback(async () => {
     try {
-      const res = await fetch('/api/patient/messages/conversations')
+      const res = await fetch(
+        apiPath('/api/patient/messages/conversations')
+      )
       if (!res.ok) return
       const data = await res.json()
       if (data.conversations) setConversations(data.conversations)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [apiPath])
 
   useEffect(() => {
     loadConversations()
@@ -627,18 +632,23 @@ export default function PatientMessagesPage() {
     return () => clearInterval(interval)
   }, [loadConversations])
 
-  const loadMessages = useCallback(async (doctorId: string) => {
-    try {
-      const res = await fetch(`/api/patient/messages?doctorId=${doctorId}`)
-      const data = await res.json()
-      if (data.messages) {
-        setMessages(data.messages)
-        setIsPolling(true)
+  const loadMessages = useCallback(
+    async (doctorId: string) => {
+      try {
+        const res = await fetch(
+          apiPath(`/api/patient/messages?doctorId=${doctorId}`)
+        )
+        const data = await res.json()
+        if (data.messages) {
+          setMessages(data.messages)
+          setIsPolling(true)
+        }
+      } catch {
+        /* silent */
       }
-    } catch {
-      /* silent */
-    }
-  }, [])
+    },
+    [apiPath]
+  )
 
   useEffect(() => {
     if (!selectedDoctor) {
@@ -673,7 +683,7 @@ export default function PatientMessagesPage() {
     setMessages((prev) => [...prev, optimisticMsg])
 
     try {
-      const res = await fetch('/api/patient/messages', {
+      const res = await fetch(apiPath('/api/patient/messages'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ doctor_id: selectedDoctor.id, content }),
@@ -732,7 +742,11 @@ export default function PatientMessagesPage() {
 
   return (
     <>
-      <PatientHeader title="رسائلي" subtitle="محادثاتك مع أطبائك" />
+      <PatientHeader
+        title="رسائلي"
+        subtitle="محادثاتك مع أطبائك"
+        leadingAction={<AccountSwitcher />}
+      />
       <div dir="rtl" className="bg-white">
         <ConversationList
           conversations={conversations}

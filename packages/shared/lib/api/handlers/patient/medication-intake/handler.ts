@@ -1,22 +1,50 @@
 export const dynamic = 'force-dynamic'
 
-import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
-import { createClient } from '@shared/lib/supabase/server'
+/**
+ * /api/patient/medication-intake — B07 Phase F.5 cross-context extension.
+ *
+ * GET: read intake list for active gp. Minor → empty.
+ * POST: save intake list. Delegates need `manage_medications` capability.
+ */
+
+import {
+  requireApiRole,
+  toApiErrorResponse,
+} from '@shared/lib/auth/session'
+import { createAdminClient } from '@shared/lib/supabase/admin'
 import { NextResponse } from 'next/server'
+import {
+  emptyForCrossContext,
+  resolvePatientContext,
+} from '@shared/lib/auth/patient-context'
+import { requireCapability } from '@shared/lib/auth/authority'
 
 /**
  * GET /api/patient/medication-intake
- * Get patient's medication intake list (their current/recent medications at first visit)
  */
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const user = await requireApiRole('patient')
-    const supabase = await createClient()
+    const ctx = await resolvePatientContext({
+      request,
+      userId: user.id,
+    })
+
+    if (ctx.resolvedPatientId === null) {
+      return NextResponse.json(
+        emptyForCrossContext({
+          medications: [],
+          intakeCompleted: false,
+        })
+      )
+    }
+
+    const supabase = createAdminClient('patient-medication-intake')
 
     const { data, error } = await supabase
       .from('patient_medication_intake')
       .select('*')
-      .eq('patient_id', user.id)
+      .eq('patient_id', ctx.resolvedPatientId)
       .order('created_at', { ascending: false })
 
     if (error) {
@@ -26,7 +54,7 @@ export async function GET() {
           success: true,
           medications: [],
           intakeCompleted: false,
-          message: 'Intake table not yet created'
+          message: 'Intake table not yet created',
         })
       }
       throw error
@@ -45,14 +73,26 @@ export async function GET() {
 
 /**
  * POST /api/patient/medication-intake
- * Save patient's medication intake list
  * Body: { medications: IntakeMedication[] }
- * If medications is empty array, means patient has no current medications
  */
 export async function POST(request: Request) {
   try {
     const user = await requireApiRole('patient')
-    const supabase = await createClient()
+    const ctx = await resolvePatientContext({
+      request,
+      userId: user.id,
+      authorize: (gpId, uid) =>
+        requireCapability(gpId, 'manage_medications', uid),
+    })
+
+    if (ctx.resolvedPatientId === null) {
+      return NextResponse.json(
+        { error: 'Cannot save intake for this account context' },
+        { status: 400 }
+      )
+    }
+
+    const supabase = createAdminClient('patient-medication-intake-save')
     const body = await request.json()
 
     const { medications } = body
@@ -68,14 +108,14 @@ export async function POST(request: Request) {
     await supabase
       .from('patient_medication_intake')
       .delete()
-      .eq('patient_id', user.id)
+      .eq('patient_id', ctx.resolvedPatientId)
 
     // If empty array, patient confirmed "no medications" - store a marker
     if (medications.length === 0) {
       const { error } = await supabase
         .from('patient_medication_intake')
         .insert({
-          patient_id: user.id,
+          patient_id: ctx.resolvedPatientId,
           drug_name: '__NO_MEDICATIONS__',
           generic_name: null,
           dosage: null,
@@ -88,7 +128,6 @@ export async function POST(request: Request) {
         })
 
       if (error && error.code === '42P01') {
-        // Table doesn't exist — still return success (will be created with migration)
         return NextResponse.json({
           success: true,
           message: 'Intake saved (table pending migration)',
@@ -106,7 +145,7 @@ export async function POST(request: Request) {
 
     // Insert each medication
     const rows = medications.map((med: any) => ({
-      patient_id: user.id,
+      patient_id: ctx.resolvedPatientId,
       drug_name: med.drugName,
       generic_name: med.genericName || null,
       dosage: med.dosage || null,

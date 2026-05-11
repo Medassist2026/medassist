@@ -1,17 +1,38 @@
 export const dynamic = 'force-dynamic'
 
-import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
-import { getLabResults, getPatientLabHistory, LAB_TEST_CATALOG } from '@shared/lib/data/lab-results'
-import { createClient } from '@shared/lib/supabase/server'
-import { NextResponse } from 'next/server'
+/**
+ * GET /api/patient/lab-results — B07 Phase F.5 cross-context extension.
+ *
+ * Accepts optional `?gpId=<id>` for cross-context viewing. Minor → empty.
+ */
 
-export async function GET() {
+import {
+  requireApiRole,
+  toApiErrorResponse,
+} from '@shared/lib/auth/session'
+import { getLabResults } from '@shared/lib/data/lab-results'
+import { createAdminClient } from '@shared/lib/supabase/admin'
+import { NextResponse } from 'next/server'
+import {
+  emptyForCrossContext,
+  resolvePatientContext,
+} from '@shared/lib/auth/patient-context'
+
+export async function GET(request: Request) {
   try {
     const user = await requireApiRole('patient')
+    const ctx = await resolvePatientContext({
+      request,
+      userId: user.id,
+    })
+
+    if (ctx.resolvedPatientId === null) {
+      return NextResponse.json(emptyForCrossContext({ results: [] }))
+    }
 
     // Get lab results from new lab-results tables
     try {
-      const results = await getLabResults(user.id)
+      const results = await getLabResults(ctx.resolvedPatientId)
       return NextResponse.json({
         success: true,
         results: results || [],
@@ -20,13 +41,13 @@ export async function GET() {
       // Fallback to old lab_orders table if new tables don't exist
       console.log('Falling back to old lab orders table:', labError)
 
-      const supabase = await createClient()
+      const supabase = createAdminClient('patient-lab-results-fallback')
 
       // Get patient ID
       const { data: patient, error: patientError } = await supabase
         .from('patients')
         .select('id')
-        .eq('id', user.id)
+        .eq('id', ctx.resolvedPatientId)
         .single()
 
       if (patientError) throw patientError

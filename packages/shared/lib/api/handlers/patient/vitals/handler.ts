@@ -1,13 +1,37 @@
 export const dynamic = 'force-dynamic'
 
-import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
-import { createClient } from '@shared/lib/supabase/server'
-import { NextResponse } from 'next/server'
+/**
+ * GET /api/patient/vitals — B07 Phase F.5 cross-context extension.
+ *
+ * Accepts optional `?gpId=<id>` for cross-context viewing. Minor → empty.
+ */
 
-export async function GET() {
+import {
+  requireApiRole,
+  toApiErrorResponse,
+} from '@shared/lib/auth/session'
+import { createAdminClient } from '@shared/lib/supabase/admin'
+import { NextResponse } from 'next/server'
+import {
+  emptyForCrossContext,
+  resolvePatientContext,
+} from '@shared/lib/auth/patient-context'
+
+export async function GET(request: Request) {
   try {
     const user = await requireApiRole('patient')
-    const supabase = await createClient()
+    const ctx = await resolvePatientContext({
+      request,
+      userId: user.id,
+    })
+
+    if (ctx.resolvedPatientId === null) {
+      return NextResponse.json(
+        emptyForCrossContext({ vitals: [], latest: null })
+      )
+    }
+
+    const supabase = createAdminClient('patient-vitals')
 
     const { data, error } = await supabase
       .from('vital_signs')
@@ -25,7 +49,7 @@ export async function GET() {
         bmi,
         notes
       `)
-      .eq('patient_id', user.id)
+      .eq('patient_id', ctx.resolvedPatientId)
       .order('measured_at', { ascending: false })
       .limit(100)
 
@@ -36,13 +60,13 @@ export async function GET() {
       blood_pressure:
         row.systolic_bp && row.diastolic_bp
           ? `${row.systolic_bp}/${row.diastolic_bp}`
-          : null
+          : null,
     }))
 
     return NextResponse.json({
       success: true,
       vitals,
-      latest: vitals[0] || null
+      latest: vitals[0] || null,
     })
   } catch (error: any) {
     console.error('Patient vitals error:', error)

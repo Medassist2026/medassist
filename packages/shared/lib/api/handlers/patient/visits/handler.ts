@@ -1,12 +1,34 @@
 export const dynamic = 'force-dynamic'
 
-import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
+/**
+ * GET /api/patient/visits — B07 Phase F.5 cross-context extension.
+ *
+ * Accepts optional `?gpId=<id>` for cross-context viewing. Minor → empty.
+ */
+
+import {
+  requireApiRole,
+  toApiErrorResponse,
+} from '@shared/lib/auth/session'
 import { createAdminClient } from '@shared/lib/supabase/admin'
 import { NextResponse } from 'next/server'
+import {
+  emptyForCrossContext,
+  resolvePatientContext,
+} from '@shared/lib/auth/patient-context'
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const user = await requireApiRole('patient')
+    const ctx = await resolvePatientContext({
+      request,
+      userId: user.id,
+    })
+
+    if (ctx.resolvedPatientId === null) {
+      return NextResponse.json(emptyForCrossContext({ visits: [] }))
+    }
+
     const adminClient = createAdminClient('patient-visits')
 
     // Query clinical_notes table for patient visits
@@ -26,7 +48,7 @@ export async function GET() {
           )
         )
       `)
-      .eq('patient_id', user.id)
+      .eq('patient_id', ctx.resolvedPatientId)
       .order('created_at', { ascending: false })
 
     if (visitsError) {
@@ -38,9 +60,10 @@ export async function GET() {
       const chiefComplaintArray = Array.isArray(visit.chief_complaint)
         ? visit.chief_complaint
         : []
-      const chiefComplaint = chiefComplaintArray.length > 0
-        ? chiefComplaintArray[0]
-        : 'Consultation'
+      const chiefComplaint =
+        chiefComplaintArray.length > 0
+          ? chiefComplaintArray[0]
+          : 'Consultation'
 
       // Extract diagnosis - can be array or JSONB with structure
       let diagnosis: string[] = []
@@ -56,20 +79,24 @@ export async function GET() {
       }
 
       // Extract medications
-      let medications: Array<{ drug: string; frequency?: string; duration?: string }> = []
+      let medications: Array<{
+        drug: string
+        frequency?: string
+        duration?: string
+      }> = []
       if (Array.isArray(visit.medications)) {
-        medications = visit.medications
-          .map((m: any) => ({
-            drug: m.drug || 'Medication',
-            frequency: m.frequency,
-            duration: m.duration
-          }))
+        medications = visit.medications.map((m: any) => ({
+          drug: m.drug || 'Medication',
+          frequency: m.frequency,
+          duration: m.duration,
+        }))
       }
 
       // Get doctor name - handle nested structure
-      const doctorName = visit.doctor?.users?.full_name ||
-                        visit.doctor?.full_name ||
-                        'Unknown Doctor'
+      const doctorName =
+        visit.doctor?.users?.full_name ||
+        visit.doctor?.full_name ||
+        'Unknown Doctor'
 
       return {
         id: visit.id,
@@ -78,13 +105,13 @@ export async function GET() {
         chief_complaint: chiefComplaint,
         diagnosis,
         medications,
-        plan: visit.plan || ''
+        plan: visit.plan || '',
       }
     })
 
     return NextResponse.json({
       success: true,
-      visits
+      visits,
     })
   } catch (error: any) {
     console.error('Visits fetch error:', error)

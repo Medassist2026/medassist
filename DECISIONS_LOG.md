@@ -822,6 +822,34 @@ Doc references: `audits/b07-phase-f-findings.md` (8 findings), `audits/b07-phase
 
 ---
 
+### Amendment 2026-05-10 (B07 Phase F.5 — cross-context API + grant form + AccountSwitcher persistence)
+
+Phase F.5 closes 5 of 8 Phase F findings and re-enables the deferred caregiver grant form. The patient-app delegation lifecycle is now feature-complete end-to-end: grant (Section 5) → accept (Phase E) → exercise via cross-context (Sections 1 + 6) → display delegate/principal names (Section 4) → revoke/withdraw (Phase E). Six surfaces ship:
+
+1. **Cross-context API extensions** (Phase F finding #1 RESOLVED). New helper `resolvePatientContext` in `packages/shared/lib/auth/patient-context.ts` parses `?gpId=` query parameter; calls `requireAuthorityOver` (default) or a caller-supplied `authorize` closure invoking `requireCapability(gpId, '<literal>', userId)`. Returns `{ resolvedPatientId, basis, gpId, isMinor, delegationId? }`. Minor case (claim NULL) → `resolvedPatientId: null` → handler returns empty data (Decision 2). Adult cross-context → maps gp → `claimed_user_id` (legacy 1:1 convention with `patients.id`). 22 endpoint shells extended (~28 method-handler pairs); per-endpoint capability decisions logged in Decision 4. Write endpoints with no MVP capability (records-POST, sharing extend/revoke) use `denyDelegates: true`. New `useApiPath` hook in `apps/patient/lib/hooks/use-api-path.ts` plumbs the param into fetch calls across 7 patient pages.
+
+2. **POST /api/patient/lookup-by-phone** (Phase F finding #3 RESOLVED). Resolves an Egyptian phone number to userId/gpId/displayName for the grant form. POST not GET (privacy — phone never in URL). Rate-limited 30 req/min/user via existing `enforceRateLimit` pattern. Emits `PATIENT_LOOKUP_BY_PHONE_ATTEMPT` audit row on every call (hit OR miss) with `metadata.{phone_e164, matched, matched_user_id?, matched_global_patient_id?}` for full enumeration-attack traceability. Only returns claimed users (filters `claimed_user_id IS NOT NULL`).
+
+3. **PATCH /api/patient/dependents/[id]** (Phase F finding #2 RESOLVED). Editable fields: `displayName`, `preferredLanguage`. Identity fields (`date_of_birth`, `sex`, `is_minor`, `guardian_global_patient_id`, `claimed_user_id`) LOCKED — preserved for audit integrity. New data-layer function `updateMinorProfile` emits `MINOR_PROFILE_UPDATED` audit row with `metadata.changed_fields = { field: { before, after } }`. Inline edit UI on `/patient/settings/family/[id]` detail page.
+
+4. **Delegation list display-name JOIN** (Phase F finding #7 RESOLVED). `listGrantedDelegations` + `listReceivedDelegations` now return `DelegationWithNames` (extends `Delegation` with `principal_display_name` + `delegate_display_name`, both nullable). Hydration via two-pass `hydrateDisplayNames` helper (constant-cost one extra SELECT per list call). UI consumers (caregivers + caregiving pages) render real names; placeholder fallback for null cases. AccountSwitcher's `principal_display_name` field — previously typed but unpopulated — now lights up via the Phase E API which inherits the data-layer change.
+
+5. **Caregiver grant form re-enabled** (Phase F Decision 6 reversed). New page `/patient/settings/caregivers/grant` hosts `DelegationGrantForm` (two-step: phone lookup → confirmation + capability selection → submit). 5 capability checkboxes (`consent_to_share` excluded per Mo ruling 4). Default expiry = 1 year from today (Mo ruling 20). Optional auto-renew with configurable window-days. The placeholder "إضافة مقدم رعاية جديد قريباً" on the caregivers list page is replaced by an active "Add a caregiver" CTA linking to the grant page.
+
+6. **PatientHeader `leadingAction` prop + AccountSwitcher persistence** (Phase F finding #8 RESOLVED per Mo ruling 27 Option B). `packages/ui-clinic/components/patient/PatientHeader.tsx` gains a new `leadingAction?: ReactNode` prop that renders BEFORE the action override or bell+more default. The `@ui-clinic` package remains unaware of the `@patient` AccountContext; each page passes `<AccountSwitcher />` as the leadingAction. All 11 PatientHeader-using patient pages updated; 5 pages that previously did not show the switcher (`/health`, `/appointments`, `/messages`, `/prescriptions`, `/more`) now do, alongside their existing bell+more.
+
+**`consent_to_share` remains post-MVP** per Mo ruling 4 (preserved across all 28 B07 rulings). Endpoints handling shares (sharing/extend, sharing/revoke) reject delegate basis with 403 + `DelegateNotAuthorizedError` carrying a structured message ("consent_to_share is post-MVP per Mo ruling 4"). Self + guardian-of-minor pass through normally.
+
+**Admin scope discipline (D-008 fourth amendment):** the allow-list grows 154 → 178 with 24 new Phase F.5 scopes grouped under "B07 Phase F.5 API surface" comment block. The `no-unregistered-delegation-capability` eslint rule's static-literal-only invariant is preserved via the `authorize` closure pattern (Decision 15) — every `requireCapability` call site at every handler passes a literal token.
+
+**Audit enum growth:** 2 new actions (`PATIENT_LOOKUP_BY_PHONE_ATTEMPT`, `MINOR_PROFILE_UPDATED`) per the going-forward rule in `audit.ts` (every BUILD prompt that emits a new audit action updates the enum in the same prompt).
+
+**Cross-context plumbing — end-to-end status:** UI threading via `?as=` URL param (Phase F) + `?gpId=` fetch param (F.5) + `requireAuthorityOver` server-side gate (Phase E) + per-handler client (Decision 5 — `createAdminClient` throughout for cross-context endpoints). Minor gp records remain empty for now; Phase G clinic-side will populate minor PCR data.
+
+Doc references: `audits/b07-phase-f5-execution-2026-05-10.md` (16 decisions), `audits/b07-phase-f-findings.md` (#1/#2/#3/#7/#8 marked RESOLVED). 3 findings remain: #4 (future — SMS deep-link queued behind B09), #5 (Arabic singular/dual/plural age badge — pre-launch i18n polish), #6 (narrow-viewport <380px QA — pre-launch manual QA). Phase G (clinic-app dependent visibility) is now unblocked; B07 backend + patient UI is feature-complete.
+
+---
+
 ## D-069: Ghost Mode deleted
 
 **When**: 26 April 2026 (locked design block)

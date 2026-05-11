@@ -14,6 +14,8 @@ import {
   Stethoscope,
 } from 'lucide-react'
 import { PatientHeader } from '@ui-clinic/components/patient/PatientHeader'
+import { AccountSwitcher } from '@patient/components/AccountSwitcher'
+import { useApiPath } from '@patient/lib/hooks/use-api-path'
 
 // ============================================================================
 // TYPES
@@ -446,11 +448,12 @@ export default function AppointmentsPage() {
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState<FilterTab>('upcoming')
 
+  const apiPath = useApiPath()
   const loadAppointments = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch('/api/patient/appointments')
+      const res = await fetch(apiPath('/api/patient/appointments'))
       if (!res.ok) throw new Error('Failed to load appointments')
       const data = await res.json()
       setAppointments(data.appointments || [])
@@ -460,7 +463,7 @@ export default function AppointmentsPage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [apiPath])
 
   useEffect(() => {
     loadAppointments()
@@ -509,7 +512,10 @@ export default function AppointmentsPage() {
 
   return (
     <>
-      <PatientHeader title="مواعيدي" />
+      <PatientHeader
+        title="مواعيدي"
+        leadingAction={<AccountSwitcher />}
+      />
       <div dir="rtl" className="px-4 py-5 space-y-5">
         {/* Intro */}
         <div>

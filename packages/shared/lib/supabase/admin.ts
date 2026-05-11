@@ -208,6 +208,36 @@ const ALLOWED_ADMIN_SCOPES = new Set([
   'delegations-create-resolve-principal', // POST /api/patient/delegations: caller's principal gp
   'delegations-revoke-discriminate',    // PATCH /api/patient/delegations/[id]/revoke: read-before-write
   'cron-expire-stale-delegations',      // cron handler (Phase E expire-stale-delegations)
+
+  // ── B07 Phase F.5 API surface (cross-context extensions + new endpoints) ─
+  'patient-context-resolve',            // resolvePatientContext: gp→claimed_user_id mapping
+  'patient-lookup-by-phone',            // POST /api/patient/lookup-by-phone (Section 2)
+  'dependents-update-minor-profile',    // updateMinorProfile data-layer (Section 3)
+  // Cross-context endpoint extensions — each handler now uses admin client
+  // throughout per Decision 5 (handler-layer authority gate replaces RLS).
+  'patient-records',                    // GET /api/patient/records
+  'patient-records-create',             // POST /api/patient/records
+  'patient-vitals',                     // GET /api/patient/vitals
+  'patient-immunizations',              // GET /api/patient/immunizations
+  'patient-immunizations-create',       // POST /api/patient/immunizations
+  'patient-conditions',                 // GET /api/patient/conditions
+  'patient-conditions-create',          // POST /api/patient/conditions
+  'patient-allergies',                  // GET /api/patient/allergies
+  'patient-allergies-create',           // POST /api/patient/allergies
+  'patient-diary',                      // GET /api/patient/diary
+  'patient-diary-create',               // POST /api/patient/diary
+  'patient-medications',                // GET /api/patient/medications
+  'patient-medications-create',         // POST /api/patient/medications
+  'patient-medications-delete',         // DELETE /api/patient/medications/[id]
+  'patient-medications-update',         // PATCH /api/patient/medications/[id]
+  'patient-medication-intake',          // GET /api/patient/medication-intake
+  'patient-medication-intake-save',     // POST /api/patient/medication-intake
+  'patient-lab-results-fallback',       // legacy lab_orders fallback in lab-results handler
+  'patient-health-summary',             // GET /api/patient/health-summary (6-table aggregator)
+  'patient-messages',                   // GET /api/patient/messages
+  'patient-messages-send',              // POST /api/patient/messages
+  'patient-conversations',              // GET /api/patient/messages/conversations
+  'patient-messages-unread-count',      // GET /api/patient/messages/unread-count
 ])
 
 export { ALLOWED_ADMIN_SCOPES }

@@ -13,6 +13,8 @@ import {
 } from 'lucide-react'
 import { PatientHeader } from '@ui-clinic/components/patient/PatientHeader'
 import { ConfirmDialog } from '@shared/components/ui/ConfirmDialog'
+import { AccountSwitcher } from '@patient/components/AccountSwitcher'
+import { useApiPath } from '@patient/lib/hooks/use-api-path'
 
 // ============================================================================
 // CONSOLIDATED RX PAGE
@@ -78,12 +80,13 @@ export default function PrescriptionsPage() {
   // FETCH
   // ==========================================================================
 
+  const apiPath = useApiPath()
   const loadMedications = useCallback(async () => {
     setLoadError('')
     try {
       const [manualRes, reminderRes] = await Promise.all([
-        fetch('/api/patient/medications'),
-        fetch('/api/patient/medication-reminders'),
+        fetch(apiPath('/api/patient/medications')),
+        fetch(apiPath('/api/patient/medication-reminders')),
       ])
 
       if (!manualRes.ok && !reminderRes.ok) {
@@ -143,7 +146,7 @@ export default function PrescriptionsPage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [apiPath])
 
   useEffect(() => {
     loadMedications()
@@ -242,7 +245,7 @@ export default function PrescriptionsPage() {
     setIsSubmitting(true)
     setActionError('')
     try {
-      const res = await fetch('/api/patient/medications', {
+      const res = await fetch(apiPath('/api/patient/medications'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -300,7 +303,10 @@ export default function PrescriptionsPage() {
 
   return (
     <div className="font-cairo">
-      <PatientHeader title="الوصفات والأدوية" />
+      <PatientHeader
+        title="الوصفات والأدوية"
+        leadingAction={<AccountSwitcher />}
+      />
 
       <div className="px-4 pt-4 pb-8">
         {/* Filter tabs */}

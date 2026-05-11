@@ -1,15 +1,31 @@
 export const dynamic = 'force-dynamic'
 
-import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
-import { createClient } from '@shared/lib/supabase/server'
+/**
+ * /api/patient/immunizations — B07 Phase F.5 cross-context extension.
+ *
+ * GET: read immunizations for active gp context. Minor → empty.
+ * POST: add immunization. Delegates rejected (no MVP capability covers
+ *       authoring clinical records on principal's behalf — Decision 4).
+ */
+
+import {
+  requireApiRole,
+  toApiErrorResponse,
+} from '@shared/lib/auth/session'
+import { createAdminClient } from '@shared/lib/supabase/admin'
 import { NextResponse } from 'next/server'
+import {
+  emptyForCrossContext,
+  resolvePatientContext,
+} from '@shared/lib/auth/patient-context'
 
 function isMissingTableError(error: any, tableName: string) {
   const message = String(error?.message || '').toLowerCase()
   return (
     error?.code === '42P01' ||
     (message.includes('does not exist') && message.includes(tableName)) ||
-    (message.includes('schema cache') && message.includes(`public.${tableName}`))
+    (message.includes('schema cache') &&
+      message.includes(`public.${tableName}`))
   )
 }
 
@@ -17,11 +33,16 @@ function parseImmunizationFromRecord(record: any) {
   const title = String(record.title || '').trim()
   const description = String(record.description || '')
 
-  if (!title.toLowerCase().startsWith('immunization:') && !title.toLowerCase().startsWith('vaccine:')) {
+  if (
+    !title.toLowerCase().startsWith('immunization:') &&
+    !title.toLowerCase().startsWith('vaccine:')
+  ) {
     return null
   }
 
-  const vaccineName = title.includes(':') ? title.split(':').slice(1).join(':').trim() : title
+  const vaccineName = title.includes(':')
+    ? title.split(':').slice(1).join(':').trim()
+    : title
   const doseMatch = description.match(/dose:\s*(.+)/i)
   const lotMatch = description.match(/lot:\s*(.+)/i)
   const notesMatch = description.match(/notes:\s*(.+)/i)
@@ -35,31 +56,49 @@ function parseImmunizationFromRecord(record: any) {
     dose: doseMatch?.[1]?.trim() || null,
     lot_number: lotMatch?.[1]?.trim() || null,
     notes: notesMatch?.[1]?.trim() || null,
-    source: 'patient_record'
+    source: 'patient_record',
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const user = await requireApiRole('patient')
-    const supabase = await createClient()
+    const ctx = await resolvePatientContext({
+      request,
+      userId: user.id,
+    })
+
+    if (ctx.resolvedPatientId === null) {
+      return NextResponse.json(
+        emptyForCrossContext({ immunizations: [] })
+      )
+    }
+
+    const supabase = createAdminClient('patient-immunizations')
 
     const [recordsResult, tableResult] = await Promise.all([
       supabase
         .from('patient_medical_records')
-        .select('id, title, description, date, provider_name, facility_name')
-        .eq('patient_id', user.id)
+        .select(
+          'id, title, description, date, provider_name, facility_name'
+        )
+        .eq('patient_id', ctx.resolvedPatientId)
         .eq('record_type', 'procedure')
         .order('date', { ascending: false }),
       supabase
         .from('immunizations')
-        .select('id, vaccine_name, administered_date, provider_name, facility_name, dose, lot_number, notes')
-        .eq('patient_id', user.id)
-        .order('administered_date', { ascending: false })
+        .select(
+          'id, vaccine_name, administered_date, provider_name, facility_name, dose, lot_number, notes'
+        )
+        .eq('patient_id', ctx.resolvedPatientId)
+        .order('administered_date', { ascending: false }),
     ])
 
     if (recordsResult.error) throw recordsResult.error
-    if (tableResult.error && !isMissingTableError(tableResult.error, 'immunizations')) {
+    if (
+      tableResult.error &&
+      !isMissingTableError(tableResult.error, 'immunizations')
+    ) {
       throw tableResult.error
     }
 
@@ -78,7 +117,7 @@ export async function GET() {
           dose: row.dose || null,
           lot_number: row.lot_number || null,
           notes: row.notes || null,
-          source: 'immunizations'
+          source: 'immunizations',
         }))
 
     const byVaccineDate = new Map<string, any>()
@@ -89,11 +128,13 @@ export async function GET() {
       }
     })
 
-    const immunizations = Array.from(byVaccineDate.values()).sort((a, b) => {
-      const aTime = new Date(a.administered_date || 0).getTime()
-      const bTime = new Date(b.administered_date || 0).getTime()
-      return bTime - aTime
-    })
+    const immunizations = Array.from(byVaccineDate.values()).sort(
+      (a, b) => {
+        const aTime = new Date(a.administered_date || 0).getTime()
+        const bTime = new Date(b.administered_date || 0).getTime()
+        return bTime - aTime
+      }
+    )
 
     return NextResponse.json({ success: true, immunizations })
   } catch (error: any) {
@@ -105,19 +146,41 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const user = await requireApiRole('patient')
-    const supabase = await createClient()
+    const ctx = await resolvePatientContext({
+      request,
+      userId: user.id,
+      denyDelegates: true,
+    })
+
+    if (ctx.resolvedPatientId === null) {
+      return NextResponse.json(
+        { error: 'Cannot add immunizations for this account context' },
+        { status: 400 }
+      )
+    }
+
+    const supabase = createAdminClient('patient-immunizations-create')
     const body = await request.json()
 
     const vaccineName = String(body.vaccine_name || '').trim()
-    const administeredDate = String(body.administered_date || '').trim() || new Date().toISOString().split('T')[0]
-    const providerName = body.provider_name ? String(body.provider_name).trim() : null
-    const facilityName = body.facility_name ? String(body.facility_name).trim() : null
+    const administeredDate =
+      String(body.administered_date || '').trim() ||
+      new Date().toISOString().split('T')[0]
+    const providerName = body.provider_name
+      ? String(body.provider_name).trim()
+      : null
+    const facilityName = body.facility_name
+      ? String(body.facility_name).trim()
+      : null
     const dose = body.dose ? String(body.dose).trim() : null
     const lotNumber = body.lot_number ? String(body.lot_number).trim() : null
     const notes = body.notes ? String(body.notes).trim() : null
 
     if (!vaccineName || vaccineName.length < 2) {
-      return NextResponse.json({ error: 'vaccine_name must be at least 2 characters' }, { status: 400 })
+      return NextResponse.json(
+        { error: 'vaccine_name must be at least 2 characters' },
+        { status: 400 }
+      )
     }
 
     const descriptionParts: string[] = []
@@ -128,20 +191,23 @@ export async function POST(request: Request) {
     const { data, error } = await supabase
       .from('patient_medical_records')
       .insert({
-        patient_id: user.id,
+        patient_id: ctx.resolvedPatientId,
         record_type: 'procedure',
         title: `Immunization: ${vaccineName}`,
         description: descriptionParts.join('\n') || null,
         date: administeredDate,
         provider_name: providerName,
-        facility_name: facilityName
+        facility_name: facilityName,
       })
       .select('id, title, description, date, provider_name, facility_name')
       .single()
 
     if (error) throw error
 
-    return NextResponse.json({ success: true, immunization: parseImmunizationFromRecord(data) })
+    return NextResponse.json({
+      success: true,
+      immunization: parseImmunizationFromRecord(data),
+    })
   } catch (error: any) {
     console.error('Create immunization error:', error)
     return toApiErrorResponse(error, 'Failed to create immunization')

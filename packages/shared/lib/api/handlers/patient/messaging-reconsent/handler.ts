@@ -1,48 +1,72 @@
 export const dynamic = 'force-dynamic'
 
+/**
+ * /api/patient/messaging-reconsent — B07 Phase F.5 cross-context extension.
+ *
+ * GET: list clinics needing re-consent for the active gp.
+ * POST: record decision. Delegates need `consent_to_messaging` capability.
+ */
+
 import { NextResponse } from 'next/server'
-import { requireApiAuth, toApiErrorResponse } from '@shared/lib/auth/session'
+import {
+  requireApiAuth,
+  toApiErrorResponse,
+} from '@shared/lib/auth/session'
 import { enforceRateLimit } from '@shared/lib/security/rate-limit'
 import {
   listClinicsNeedingReconsent,
   recordReconsentDecision,
 } from '@shared/lib/data/messaging-consent'
 import { createAdminClient } from '@shared/lib/supabase/admin'
+import {
+  resolvePatientContext,
+} from '@shared/lib/auth/patient-context'
+import { requireCapability } from '@shared/lib/auth/authority'
 
-/**
- * GET /api/patient/messaging-reconsent  — Build prompt 04 (B17 backend).
- *   Returns the list of clinics that still need re-consent for this patient.
- *
- * POST /api/patient/messaging-reconsent
- *   Body: { clinic_id: string, decision: 'reconfirmed' | 'revoked' }
- *   Records the per-clinic decision. Writes the audit + (on reconfirmed)
- *   updates patient_clinic_records.consent_to_messaging.
- */
 export async function GET(request: Request) {
-  void request
   try {
     const session = await requireApiAuth()
     const userId = session.id
+    const ctx = await resolvePatientContext({
+      request,
+      userId,
+    })
 
-    const admin = createAdminClient('patient-reconsent-list')
-    const { data: gp } = await admin
-      .from('global_patients')
-      .select('id')
-      .eq('claimed_user_id', userId)
-      .maybeSingle()
-
-    if (!gp?.id) {
+    if (ctx.resolvedPatientId === null) {
       return NextResponse.json({ pending: [] })
     }
 
-    const pending = await listClinicsNeedingReconsent(gp.id)
+    const admin = createAdminClient('patient-reconsent-list')
+
+    // Resolve the gp to query against. Prefer ctx.gpId when cross-context;
+    // else look up via claimed_user_id.
+    let gpid: string | null = ctx.gpId
+    if (!gpid) {
+      const { data: gp } = await admin
+        .from('global_patients')
+        .select('id')
+        .eq('claimed_user_id', ctx.resolvedPatientId)
+        .maybeSingle()
+      gpid = (gp as { id?: string } | null)?.id ?? null
+    }
+
+    if (!gpid) {
+      return NextResponse.json({ pending: [] })
+    }
+
+    const pending = await listClinicsNeedingReconsent(gpid)
 
     // Hydrate clinic name for the modal.
     const clinicIds = Array.from(new Set(pending.map((p) => p.clinicId)))
     const { data: clinics } = await admin
       .from('clinics')
       .select('id, name')
-      .in('id', clinicIds.length > 0 ? clinicIds : ['00000000-0000-0000-0000-000000000000'])
+      .in(
+        'id',
+        clinicIds.length > 0
+          ? clinicIds
+          : ['00000000-0000-0000-0000-000000000000']
+      )
 
     const nameById = new Map<string, string>(
       (clinics || []).map((c: any) => [c.id, c.name as string])
@@ -64,39 +88,75 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const rate = await enforceRateLimit(request, 'patient-messaging-reconsent', 30, 60_000)
+    const rate = await enforceRateLimit(
+      request,
+      'patient-messaging-reconsent',
+      30,
+      60_000
+    )
     if (!rate.allowed) {
       return NextResponse.json(
         { error: 'Too many requests. Please try again later.' },
-        { status: 429, headers: { 'Retry-After': String(rate.retryAfterSeconds) } }
+        {
+          status: 429,
+          headers: { 'Retry-After': String(rate.retryAfterSeconds) },
+        }
       )
     }
 
     const session = await requireApiAuth()
     const userId = session.id
+    const ctx = await resolvePatientContext({
+      request,
+      userId,
+      authorize: (gpId, uid) =>
+        requireCapability(gpId, 'consent_to_messaging', uid),
+    })
+
+    if (ctx.resolvedPatientId === null) {
+      return NextResponse.json(
+        { error: 'Cannot record consent for this account context' },
+        { status: 400 }
+      )
+    }
 
     const body = await request.json().catch(() => ({}))
-    const clinicId = typeof body?.clinic_id === 'string' ? body.clinic_id : null
-    const decision = body?.decision === 'reconfirmed' || body?.decision === 'revoked'
-      ? body.decision
-      : null
+    const clinicId =
+      typeof body?.clinic_id === 'string' ? body.clinic_id : null
+    const decision =
+      body?.decision === 'reconfirmed' || body?.decision === 'revoked'
+        ? body.decision
+        : null
 
     if (!clinicId || !decision) {
-      return NextResponse.json({ error: 'clinic_id and decision required' }, { status: 400 })
+      return NextResponse.json(
+        { error: 'clinic_id and decision required' },
+        { status: 400 }
+      )
     }
 
     const admin = createAdminClient('patient-reconsent-record')
-    const { data: gp } = await admin
-      .from('global_patients')
-      .select('id')
-      .eq('claimed_user_id', userId)
-      .maybeSingle()
-    if (!gp?.id) {
-      return NextResponse.json({ error: 'Patient identity not claimed' }, { status: 404 })
+
+    // Resolve gp: prefer ctx.gpId; else lookup via claimed_user_id.
+    let gpid: string | null = ctx.gpId
+    if (!gpid) {
+      const { data: gp } = await admin
+        .from('global_patients')
+        .select('id')
+        .eq('claimed_user_id', ctx.resolvedPatientId)
+        .maybeSingle()
+      gpid = (gp as { id?: string } | null)?.id ?? null
+    }
+
+    if (!gpid) {
+      return NextResponse.json(
+        { error: 'Patient identity not claimed' },
+        { status: 404 }
+      )
     }
 
     await recordReconsentDecision({
-      globalPatientId: gp.id,
+      globalPatientId: gpid,
       clinicId,
       patientUserId: userId,
       decision,

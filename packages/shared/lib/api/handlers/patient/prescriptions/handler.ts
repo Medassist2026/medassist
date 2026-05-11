@@ -1,22 +1,50 @@
 export const dynamic = 'force-dynamic'
 
+/**
+ * GET /api/patient/prescriptions — B07 Phase F.5 cross-context extension.
+ *
+ * Accepts optional `?gpId=<id>` for cross-context viewing. Minor → empty.
+ */
+
 import { NextResponse } from 'next/server'
-import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
+import {
+  requireApiRole,
+  toApiErrorResponse,
+} from '@shared/lib/auth/session'
 import { getPatientPrescriptionHistory } from '@shared/lib/data/prescription-sync'
 import { createAdminClient } from '@shared/lib/supabase/admin'
 import { logAuditEvent } from '@shared/lib/data/audit'
+import {
+  emptyForCrossContext,
+  resolvePatientContext,
+} from '@shared/lib/auth/patient-context'
 
 // ============================================================================
 // GET /api/patient/prescriptions — Get patient's prescription history
 // ============================================================================
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const user = await requireApiRole('patient')
-    const prescriptions = await getPatientPrescriptionHistory(user.id)
+    const ctx = await resolvePatientContext({
+      request,
+      userId: user.id,
+    })
+
+    if (ctx.resolvedPatientId === null) {
+      return NextResponse.json(
+        emptyForCrossContext({ visits: [], total: 0 })
+      )
+    }
+
+    const prescriptions = await getPatientPrescriptionHistory(
+      ctx.resolvedPatientId
+    )
 
     // Get doctor names for the prescriptions
-    const doctorIds = [...new Set(prescriptions.map(p => p.doctor_id).filter(Boolean))]
+    const doctorIds = [
+      ...new Set(prescriptions.map((p) => p.doctor_id).filter(Boolean)),
+    ]
     let doctorMap: Record<string, string> = {}
 
     if (doctorIds.length > 0) {
@@ -27,17 +55,22 @@ export async function GET() {
         .in('id', doctorIds)
 
       if (doctors) {
-        doctorMap = Object.fromEntries(doctors.map(d => [d.id, d.full_name || 'Doctor']))
+        doctorMap = Object.fromEntries(
+          doctors.map((d) => [d.id, d.full_name || 'Doctor'])
+        )
       }
     }
 
     // Group prescriptions by clinical_note_id (visit)
-    const visitMap = new Map<string, {
-      noteId: string
-      date: string
-      doctorName: string
-      items: typeof prescriptions
-    }>()
+    const visitMap = new Map<
+      string,
+      {
+        noteId: string
+        date: string
+        doctorName: string
+        items: typeof prescriptions
+      }
+    >()
 
     for (const rx of prescriptions) {
       const key = rx.clinical_note_id || rx.id
@@ -53,15 +86,23 @@ export async function GET() {
     }
 
     const visits = Array.from(visitMap.values()).sort(
-      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+      (a, b) =>
+        new Date(b.date).getTime() - new Date(a.date).getTime()
     )
 
-    // Audit: patient viewed prescriptions
+    // Audit: patient viewed prescriptions (basis recorded for cross-context).
     logAuditEvent({
       actorUserId: user.id,
       action: 'VIEW_PRESCRIPTION',
       entityType: 'prescription_list',
-      metadata: { count: prescriptions.length }
+      metadata: {
+        count: prescriptions.length,
+        acting_as: ctx.basis,
+        ...(ctx.gpId ? { global_patient_id: ctx.gpId } : {}),
+        ...(ctx.delegationId
+          ? { authority_grant_id: ctx.delegationId }
+          : {}),
+      },
     })
 
     return NextResponse.json({ visits, total: prescriptions.length })

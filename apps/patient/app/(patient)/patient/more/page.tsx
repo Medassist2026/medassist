@@ -21,6 +21,8 @@ import {
 } from 'lucide-react'
 import { PatientHeader } from '@ui-clinic/components/patient/PatientHeader'
 import { ConfirmDialog } from '@shared/components/ui/ConfirmDialog'
+import { AccountSwitcher } from '@patient/components/AccountSwitcher'
+import { useApiPath } from '@patient/lib/hooks/use-api-path'
 
 // ============================================================================
 // TYPES
@@ -369,11 +371,13 @@ export default function MorePage() {
     }
   }, [])
 
+  const apiPath = useApiPath()
+
   // --- Load sharing grants ---
   const loadGrants = useCallback(async () => {
     setGrantsLoading(true)
     try {
-      const res = await fetch('/api/patient/sharing')
+      const res = await fetch(apiPath('/api/patient/sharing'))
       const data = await res.json()
       if (data.success) setGrants(data.grants || [])
     } catch (err) {
@@ -381,7 +385,7 @@ export default function MorePage() {
     } finally {
       setGrantsLoading(false)
     }
-  }, [])
+  }, [apiPath])
 
   useEffect(() => {
     loadCode()
@@ -427,7 +431,7 @@ export default function MorePage() {
     setPendingRevoke(null)
     setRevokingId(visibilityId)
     try {
-      const res = await fetch('/api/patient/sharing', {
+      const res = await fetch(apiPath('/api/patient/sharing'), {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ visibilityId }),
@@ -458,7 +462,10 @@ export default function MorePage() {
 
   return (
     <>
-      <PatientHeader title="المزيد" />
+      <PatientHeader
+        title="المزيد"
+        leadingAction={<AccountSwitcher />}
+      />
       <div dir="rtl" className="px-4 py-5 space-y-6">
         {/* Error flash */}
         {error && (

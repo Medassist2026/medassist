@@ -265,6 +265,26 @@ export type AuditAction =
   | 'DELEGATION_WITHDRAWN'
   | 'DELEGATION_CAPABILITIES_UPDATED'
   | 'DELEGATION_EXPIRED'
+  // ── B07 Phase F.5 — patient-side phone lookup + minor profile update ────
+  //    PATIENT_LOOKUP_BY_PHONE_ATTEMPT — written by
+  //      POST /api/patient/lookup-by-phone for every lookup attempt
+  //      (regardless of hit/miss). Essential for security audit: lookup
+  //      attempts are an enumeration-attack surface and every call must
+  //      be traceable. metadata: phone_e164 (the normalized phone the
+  //      caller queried), matched (bool), matched_user_id (when matched),
+  //      matched_global_patient_id (when matched).
+  //
+  //    MINOR_PROFILE_UPDATED — written by
+  //      PATCH /api/patient/dependents/[id] (data-layer
+  //      `updateMinorProfile`) when a guardian edits a minor's profile
+  //      fields. Editable fields: display_name, preferred_language.
+  //      Identity fields (date_of_birth, sex, claimed_user_id,
+  //      guardian_global_patient_id) are NOT mutable via this path.
+  //      actor=guardian (caller); subject=minor gp;
+  //      acting_as='guardian_of_minor'. metadata.changed_fields captures
+  //      a {field: {before, after}} map for downstream auditability.
+  | 'PATIENT_LOOKUP_BY_PHONE_ATTEMPT'
+  | 'MINOR_PROFILE_UPDATED'
 
 /**
  * actor_kind — added by mig 073.5 (Build 03 Phase 0). Distinguishes audit

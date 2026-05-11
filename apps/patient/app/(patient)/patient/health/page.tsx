@@ -16,6 +16,8 @@ import {
   X,
 } from 'lucide-react'
 import { PatientHeader } from '@ui-clinic/components/patient/PatientHeader'
+import { AccountSwitcher } from '@patient/components/AccountSwitcher'
+import { useApiPath } from '@patient/lib/hooks/use-api-path'
 
 // ============================================================================
 // TYPES
@@ -1032,15 +1034,16 @@ export default function HealthPage() {
   const [addSubmitting, setAddSubmitting] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
 
+  const apiPath = useApiPath()
   const loadAll = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
       const [vRes, cRes, aRes, lRes] = await Promise.all([
-        fetch('/api/patient/vitals'),
-        fetch('/api/patient/conditions'),
-        fetch('/api/patient/allergies'),
-        fetch('/api/patient/lab-results'),
+        fetch(apiPath('/api/patient/vitals')),
+        fetch(apiPath('/api/patient/conditions')),
+        fetch(apiPath('/api/patient/allergies')),
+        fetch(apiPath('/api/patient/lab-results')),
       ])
 
       const vData = vRes.ok ? await vRes.json() : { vitals: [] }
@@ -1058,7 +1061,7 @@ export default function HealthPage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [apiPath])
 
   useEffect(() => {
     loadAll()
@@ -1089,7 +1092,7 @@ export default function HealthPage() {
         throw new Error('الاسم مطلوب')
       }
       if (next.kind === 'condition') {
-        const res = await fetch('/api/patient/conditions', {
+        const res = await fetch(apiPath('/api/patient/conditions'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1105,7 +1108,7 @@ export default function HealthPage() {
           setConditions((prev) => [data.condition, ...prev])
         }
       } else {
-        const res = await fetch('/api/patient/allergies', {
+        const res = await fetch(apiPath('/api/patient/allergies'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1161,7 +1164,10 @@ export default function HealthPage() {
 
   return (
     <>
-      <PatientHeader title="سجلي الصحي" />
+      <PatientHeader
+        title="سجلي الصحي"
+        leadingAction={<AccountSwitcher />}
+      />
       <div dir="rtl" className="px-4 py-5 space-y-5">
         <div>
           <h2 className="font-cairo text-[20px] font-bold text-[#030712] leading-tight">

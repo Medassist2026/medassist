@@ -153,6 +153,24 @@ export interface Delegation {
   updated_at: string
 }
 
+/**
+ * `Delegation` with display names hydrated from `global_patients` by
+ * Phase F.5 list readers (Section 4 — closes Phase F finding #7). Both
+ * names are nullable:
+ *   - `principal_display_name` — NULL only when the principal's gp row
+ *     has `display_name IS NULL` (rare; placeholder UX). The principal
+ *     gp itself always exists (it's a NOT NULL FK).
+ *   - `delegate_display_name` — NULL when the delegate has no
+ *     `delegate_global_patient_id` (their gp hasn't been linked yet),
+ *     or when the linked gp's `display_name IS NULL`.
+ *
+ * UI consumers fall back to a placeholder string for null values.
+ */
+export interface DelegationWithNames extends Delegation {
+  principal_display_name: string | null
+  delegate_display_name: string | null
+}
+
 const DELEGATION_COLUMNS = `
   id,
   principal_global_patient_id,
@@ -650,10 +668,15 @@ export async function updateDelegationCapabilities(
  *
  * Resolves principal_global_patient_id via the gp's claimed_user_id; a
  * principal who has never claimed any gp returns an empty array.
+ *
+ * Phase F.5 (Section 4): rows are hydrated with `principal_display_name`
+ * and `delegate_display_name` via a two-pass lookup against
+ * `global_patients` (Decision 7 — hydrate at data layer; UI consumers see
+ * a stable shape with placeholders for nulls).
  */
 export async function listGrantedDelegations(
   principalUserId: string
-): Promise<Delegation[]> {
+): Promise<DelegationWithNames[]> {
   if (!principalUserId) return []
 
   const supabase = createAdminClient('delegations-list-granted')
@@ -685,7 +708,9 @@ export async function listGrantedDelegations(
       `listGrantedDelegations query failed: ${(error as { message?: string }).message ?? 'unknown'}`
     )
   }
-  return (data as unknown as Delegation[]) ?? []
+
+  const delegations = (data as unknown as Delegation[]) ?? []
+  return hydrateDisplayNames(supabase, delegations)
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -695,10 +720,14 @@ export async function listGrantedDelegations(
 /**
  * All delegations where this user is the named delegate. Returns active +
  * pending + revoked grants — caller filters as needed.
+ *
+ * Phase F.5 (Section 4): rows are hydrated with `principal_display_name`
+ * and `delegate_display_name` via a two-pass lookup against
+ * `global_patients` (Decision 7).
  */
 export async function listReceivedDelegations(
   delegateUserId: string
-): Promise<Delegation[]> {
+): Promise<DelegationWithNames[]> {
   if (!delegateUserId) return []
 
   const supabase = createAdminClient('delegations-list-received')
@@ -714,7 +743,81 @@ export async function listReceivedDelegations(
       `listReceivedDelegations query failed: ${(error as { message?: string }).message ?? 'unknown'}`
     )
   }
-  return (data as unknown as Delegation[]) ?? []
+
+  const delegations = (data as unknown as Delegation[]) ?? []
+  return hydrateDisplayNames(supabase, delegations)
+}
+
+/**
+ * Two-pass display-name hydration for Phase F.5 Section 4.
+ *
+ * Pass 1: collect unique `global_patients.id` values across all rows
+ *         (principal_gp_id + non-null delegate_gp_id).
+ * Pass 2: single `SELECT id, display_name FROM global_patients WHERE id IN (…)`.
+ * Map results back onto each delegation. Rows whose `delegate_global_patient_id`
+ * is NULL receive `delegate_display_name = null` (UI placeholder).
+ *
+ * Why two passes instead of a supabase-js relational select:
+ *   `patient_delegations` has TWO FK references to `global_patients`
+ *   (principal_global_patient_id + delegate_global_patient_id) plus an
+ *   FK to `users` (delegate_user_id). PostgREST's embedded resource
+ *   grammar requires per-FK disambiguation via constraint name, which
+ *   is brittle and breaks if FK constraint names change. Two passes are
+ *   straightforward, TS-safe, and cost one extra SELECT (constant
+ *   regardless of N delegations).
+ */
+async function hydrateDisplayNames(
+  supabase: ReturnType<typeof createAdminClient>,
+  delegations: Delegation[]
+): Promise<DelegationWithNames[]> {
+  if (delegations.length === 0) return []
+
+  const gpIdSet = new Set<string>()
+  for (const d of delegations) {
+    gpIdSet.add(d.principal_global_patient_id)
+    if (d.delegate_global_patient_id) {
+      gpIdSet.add(d.delegate_global_patient_id)
+    }
+  }
+  const gpIds = Array.from(gpIdSet)
+  if (gpIds.length === 0) {
+    return delegations.map((d) => ({
+      ...d,
+      principal_display_name: null,
+      delegate_display_name: null,
+    }))
+  }
+
+  const { data, error } = await supabase
+    .from('global_patients')
+    .select('id, display_name')
+    .in('id', gpIds)
+
+  if (error) {
+    // Hydration failure is non-fatal — return rows with null names so UI
+    // falls back to placeholders rather than 500ing.
+    console.error('hydrateDisplayNames lookup failed:', error)
+    return delegations.map((d) => ({
+      ...d,
+      principal_display_name: null,
+      delegate_display_name: null,
+    }))
+  }
+
+  const nameById = new Map<string, string | null>()
+  for (const row of (data as { id: string; display_name: string | null }[]) ??
+    []) {
+    nameById.set(row.id, row.display_name ?? null)
+  }
+
+  return delegations.map((d) => ({
+    ...d,
+    principal_display_name:
+      nameById.get(d.principal_global_patient_id) ?? null,
+    delegate_display_name: d.delegate_global_patient_id
+      ? nameById.get(d.delegate_global_patient_id) ?? null
+      : null,
+  }))
 }
 
 // ──────────────────────────────────────────────────────────────────────────

@@ -1,26 +1,43 @@
 export const dynamic = 'force-dynamic'
 
-import { NextResponse } from 'next/server'
-import { requireApiAuth, toApiErrorResponse } from '@shared/lib/auth/session'
-import { extendShare, type ExtendDuration } from '@shared/lib/data/patient-shares'
-import { createAdminClient } from '@shared/lib/supabase/admin'
-
-const VALID_DURATIONS: ExtendDuration[] = ['90_DAYS', '1_YEAR', 'PERMANENT']
-
 /**
- * POST /api/patient/sharing/[shareId]/extend — Build prompt 05 § B9.
+ * POST /api/patient/sharing/[shareId]/extend — B07 Phase F.5 cross-context.
  *
  * Body: { duration: '90_DAYS' | '1_YEAR' | 'PERMANENT' }
  *
- * Auth: patient session; ownership verified the same way as revoke.
+ * Authorization (Phase F.5):
+ *   - Resolves the share's `global_patient_id` and calls
+ *     `requireAuthorityOver` to confirm the caller has self or
+ *     guardian-of-minor authority over that gp.
+ *   - Delegate basis is REJECTED — `consent_to_share` is post-MVP
+ *     (Mo ruling 4); a delegate cannot extend / revoke shares on
+ *     the principal's behalf in MVP.
  *
- * Behavior:
- *   - Extending a permanent share is a no-op (changed: false,
- *     reason: 'already_permanent').
- *   - Extending to a duration that would SHORTEN the current expiry is
- *     a no-op (changed: false, reason: 'would_shorten'). NEVER shortens.
- *   - Extending a revoked share THROWS at the DB level, surfaced as 409.
+ * Behavior unchanged from Phase E:
+ *   - Extending a permanent share is a no-op.
+ *   - Extending to a duration that would SHORTEN current expiry is a
+ *     no-op (NEVER shortens).
+ *   - Extending a revoked share THROWS at DB level, surfaced as 409.
  */
+
+import { NextResponse } from 'next/server'
+import {
+  requireApiAuth,
+  toApiErrorResponse,
+} from '@shared/lib/auth/session'
+import {
+  extendShare,
+  type ExtendDuration,
+} from '@shared/lib/data/patient-shares'
+import { createAdminClient } from '@shared/lib/supabase/admin'
+import {
+  requireAuthorityOver,
+  AuthorityError,
+} from '@shared/lib/auth/authority'
+import { DelegateNotAuthorizedError } from '@shared/lib/auth/patient-context'
+
+const VALID_DURATIONS: ExtendDuration[] = ['90_DAYS', '1_YEAR', 'PERMANENT']
+
 export async function POST(
   request: Request,
   context: { params: { shareId: string } | Promise<{ shareId: string }> }
@@ -30,9 +47,13 @@ export async function POST(
     const userId = session.id
 
     const params = await Promise.resolve(context.params)
-    const shareId = typeof params?.shareId === 'string' ? params.shareId : null
+    const shareId =
+      typeof params?.shareId === 'string' ? params.shareId : null
     if (!shareId) {
-      return NextResponse.json({ error: 'shareId required' }, { status: 400 })
+      return NextResponse.json(
+        { error: 'shareId required' },
+        { status: 400 }
+      )
     }
 
     const body = await request.json().catch(() => ({}))
@@ -44,7 +65,7 @@ export async function POST(
       )
     }
 
-    // Authz: confirm the share belongs to this patient.
+    // Resolve the share to learn its subject gp.
     const admin = createAdminClient('patient-sharing-extend-authz')
     const { data: share } = await admin
       .from('patient_data_shares')
@@ -52,20 +73,24 @@ export async function POST(
       .eq('id', shareId)
       .maybeSingle()
     if (!share) {
-      return NextResponse.json({ error: 'Share not found' }, { status: 404 })
+      return NextResponse.json(
+        { error: 'Share not found' },
+        { status: 404 }
+      )
     }
-    const { data: gp } = await admin
-      .from('global_patients')
-      .select('claimed_user_id')
-      .eq('id', (share as { global_patient_id: string }).global_patient_id)
-      .maybeSingle()
-    const claimedUserId = (gp as { claimed_user_id?: string } | null)?.claimed_user_id ?? null
-    if (claimedUserId !== userId) {
-      return NextResponse.json({ error: 'Not authorized' }, { status: 403 })
+    const subjectGpId = (share as { global_patient_id: string })
+      .global_patient_id
+
+    // Authority gate: self or guardian. Delegates rejected.
+    const auth = await requireAuthorityOver(subjectGpId, userId)
+    if (auth.basis === 'delegated_by_principal') {
+      throw new DelegateNotAuthorizedError(
+        'Extending shares is not available for delegated authority ' +
+          '(consent_to_share is post-MVP per Mo ruling 4)'
+      )
     }
 
-    // Surface the "extend on revoked" case as 409 Conflict before the
-    // DB throws (cleaner client UX than parsing an internal error).
+    // Surface "extend on revoked" as 409 before the DB throws.
     if ((share as { revoked_at?: string | null }).revoked_at) {
       return NextResponse.json(
         { error: 'Share is revoked; cannot extend' },
@@ -92,8 +117,6 @@ export async function POST(
         },
       })
     } catch (err: any) {
-      // DB-level invariants (e.g. share was revoked between our check + the
-      // FOR UPDATE SELECT inside the function). Race-safe surface as 409.
       const msg = (err?.message ?? '').toLowerCase()
       if (msg.includes('revoked')) {
         return NextResponse.json(
@@ -104,7 +127,16 @@ export async function POST(
       throw err
     }
   } catch (error: any) {
-    console.error('POST /patient/sharing/[shareId]/extend error:', error)
+    if (error instanceof AuthorityError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 403 }
+      )
+    }
+    console.error(
+      'POST /patient/sharing/[shareId]/extend error:',
+      error
+    )
     return toApiErrorResponse(error, 'Failed to extend share')
   }
 }

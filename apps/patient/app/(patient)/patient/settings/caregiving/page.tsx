@@ -35,6 +35,10 @@ interface Delegation {
   id: string
   principal_global_patient_id: string
   delegate_user_id: string
+  delegate_global_patient_id: string | null
+  /** Phase F.5 Section 4 — populated by listReceivedDelegations JOIN. */
+  principal_display_name: string | null
+  delegate_display_name: string | null
   capabilities: string[]
   granted_at: string
   accepted_at: string | null
@@ -185,7 +189,7 @@ export default function CaregivingReceivedPage() {
       <PatientHeader
         title="الرعاية المُقدَّمة"
         showBack
-        action={<AccountSwitcher />}
+        leadingAction={<AccountSwitcher />}
       />
 
       <div className="px-4 pt-4 pb-24">
@@ -228,7 +232,9 @@ export default function CaregivingReceivedPage() {
                   className="bg-white border-[0.8px] border-[#FCD34D] rounded-[12px] p-3.5"
                 >
                   <p className="font-cairo text-[13px] font-semibold text-[#030712] mb-1">
-                    دعوة لتكون مقدم رعاية
+                    {d.principal_display_name
+                      ? `دعوة لتكون مقدم رعاية لـ ${d.principal_display_name}`
+                      : 'دعوة لتكون مقدم رعاية'}
                   </p>
                   <p className="font-cairo text-[11px] text-[#6B7280] mb-2.5">
                     منذ {formatArabicDate(d.granted_at)} ·{' '}

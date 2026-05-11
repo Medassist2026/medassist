@@ -19,6 +19,7 @@ import { PatientHeader } from '@ui-clinic/components/patient/PatientHeader'
 import { ar } from '@shared/lib/i18n/ar'
 import { AccountSwitcher } from '@patient/components/AccountSwitcher'
 import { useAccountSwitcher } from '@patient/lib/contexts/account-context'
+import { useApiPath } from '@patient/lib/hooks/use-api-path'
 
 // ============================================================================
 // TYPES — mirror the /api/patient/health-summary response
@@ -144,13 +145,14 @@ export default function PatientDashboardPage() {
   const showRegisterCta =
     activeAccount.kind === 'self' && dependentsCount === 0
 
+  const apiPath = useApiPath()
   const loadDashboard = useCallback(async () => {
     setLoadError('')
     try {
       const [summaryRes, appointmentsRes, unreadRes] = await Promise.all([
-        fetch('/api/patient/health-summary'),
-        fetch('/api/patient/appointments'),
-        fetch('/api/patient/messages/unread-count'),
+        fetch(apiPath('/api/patient/health-summary')),
+        fetch(apiPath('/api/patient/appointments')),
+        fetch(apiPath('/api/patient/messages/unread-count')),
       ])
 
       if (!summaryRes.ok) throw new Error('summary')
@@ -182,7 +184,7 @@ export default function PatientDashboardPage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [apiPath])
 
   useEffect(() => {
     loadDashboard()
@@ -203,7 +205,10 @@ export default function PatientDashboardPage() {
 
   return (
     <div className="font-cairo">
-      <PatientHeader title="MedAssist" action={<AccountSwitcher />} />
+      <PatientHeader
+        title="MedAssist"
+        leadingAction={<AccountSwitcher />}
+      />
 
       <div className="px-4 pt-4 pb-8">
         {/* Greeting */}

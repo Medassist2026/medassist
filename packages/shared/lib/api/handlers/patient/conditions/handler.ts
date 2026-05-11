@@ -1,8 +1,22 @@
 export const dynamic = 'force-dynamic'
 
-import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
-import { createClient } from '@shared/lib/supabase/server'
+/**
+ * /api/patient/conditions — B07 Phase F.5 cross-context extension.
+ *
+ * GET: read conditions across multiple sources for active gp. Minor → empty.
+ * POST: add self-reported condition. Delegates rejected (no MVP capability).
+ */
+
+import {
+  requireApiRole,
+  toApiErrorResponse,
+} from '@shared/lib/auth/session'
+import { createAdminClient } from '@shared/lib/supabase/admin'
 import { NextResponse } from 'next/server'
+import {
+  emptyForCrossContext,
+  resolvePatientContext,
+} from '@shared/lib/auth/patient-context'
 
 type ConditionStatus = 'active' | 'resolved'
 
@@ -25,7 +39,8 @@ function isMissingTableError(error: any, tableName: string) {
   return (
     error?.code === '42P01' ||
     (message.includes('does not exist') && message.includes(tableName)) ||
-    (message.includes('schema cache') && message.includes(`public.${tableName}`))
+    (message.includes('schema cache') &&
+      message.includes(`public.${tableName}`))
   )
 }
 
@@ -37,35 +52,47 @@ function parseConditionStatus(description: string | null): ConditionStatus {
   return 'active'
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const user = await requireApiRole('patient')
-    const supabase = await createClient()
+    const ctx = await resolvePatientContext({
+      request,
+      userId: user.id,
+    })
+
+    if (ctx.resolvedPatientId === null) {
+      return NextResponse.json(emptyForCrossContext({ conditions: [] }))
+    }
+
+    const supabase = createAdminClient('patient-conditions')
 
     const [notesResult, recordsResult, chronicResult] = await Promise.all([
       supabase
         .from('clinical_notes')
         .select('id, created_at, diagnosis')
-        .eq('patient_id', user.id)
+        .eq('patient_id', ctx.resolvedPatientId)
         .order('created_at', { ascending: false })
         .limit(200),
       supabase
         .from('patient_medical_records')
         .select('id, title, description, date')
-        .eq('patient_id', user.id)
+        .eq('patient_id', ctx.resolvedPatientId)
         .eq('record_type', 'diagnosis')
         .order('date', { ascending: false })
         .limit(200),
       supabase
         .from('chronic_conditions')
         .select('id, condition_name, diagnosed_date, status')
-        .eq('patient_id', user.id)
-        .order('diagnosed_date', { ascending: false })
+        .eq('patient_id', ctx.resolvedPatientId)
+        .order('diagnosed_date', { ascending: false }),
     ])
 
     if (notesResult.error) throw notesResult.error
     if (recordsResult.error) throw recordsResult.error
-    if (chronicResult.error && !isMissingTableError(chronicResult.error, 'chronic_conditions')) {
+    if (
+      chronicResult.error &&
+      !isMissingTableError(chronicResult.error, 'chronic_conditions')
+    ) {
       throw chronicResult.error
     }
 
@@ -81,7 +108,7 @@ export async function GET() {
             name,
             diagnosed_date: note.created_at,
             status: 'active',
-            source: 'clinical_notes'
+            source: 'clinical_notes',
           })
         }
       })
@@ -97,7 +124,7 @@ export async function GET() {
           name,
           diagnosed_date: record.date,
           status: parseConditionStatus(record.description),
-          source: 'patient_record'
+          source: 'patient_record',
         })
       }
     })
@@ -113,17 +140,19 @@ export async function GET() {
             name,
             diagnosed_date: row.diagnosed_date,
             status: row.status === 'resolved' ? 'resolved' : 'active',
-            source: 'chronic_conditions'
+            source: 'chronic_conditions',
           })
         }
       })
     }
 
-    const conditions = Array.from(conditionByName.values()).sort((a, b) => {
-      const aTime = new Date(a.diagnosed_date || 0).getTime()
-      const bTime = new Date(b.diagnosed_date || 0).getTime()
-      return bTime - aTime
-    })
+    const conditions = Array.from(conditionByName.values()).sort(
+      (a, b) => {
+        const aTime = new Date(a.diagnosed_date || 0).getTime()
+        const bTime = new Date(b.diagnosed_date || 0).getTime()
+        return bTime - aTime
+      }
+    )
 
     return NextResponse.json({ success: true, conditions })
   } catch (error: any) {
@@ -135,16 +164,35 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const user = await requireApiRole('patient')
-    const supabase = await createClient()
+    const ctx = await resolvePatientContext({
+      request,
+      userId: user.id,
+      denyDelegates: true,
+    })
+
+    if (ctx.resolvedPatientId === null) {
+      return NextResponse.json(
+        { error: 'Cannot add conditions for this account context' },
+        { status: 400 }
+      )
+    }
+
+    const supabase = createAdminClient('patient-conditions-create')
     const body = await request.json()
 
     const name = String(body.name || '').trim()
-    const diagnosedDate = String(body.diagnosed_date || '').trim() || new Date().toISOString().split('T')[0]
-    const status: ConditionStatus = body.status === 'resolved' ? 'resolved' : 'active'
+    const diagnosedDate =
+      String(body.diagnosed_date || '').trim() ||
+      new Date().toISOString().split('T')[0]
+    const status: ConditionStatus =
+      body.status === 'resolved' ? 'resolved' : 'active'
     const notes = body.notes ? String(body.notes).trim() : ''
 
     if (!name || name.length < 2) {
-      return NextResponse.json({ error: 'Condition name must be at least 2 characters' }, { status: 400 })
+      return NextResponse.json(
+        { error: 'Condition name must be at least 2 characters' },
+        { status: 400 }
+      )
     }
 
     const descriptionParts = [`Status: ${status}`]
@@ -153,11 +201,11 @@ export async function POST(request: Request) {
     const { data, error } = await supabase
       .from('patient_medical_records')
       .insert({
-        patient_id: user.id,
+        patient_id: ctx.resolvedPatientId,
         record_type: 'diagnosis',
         title: name,
         description: descriptionParts.join('\n'),
-        date: diagnosedDate
+        date: diagnosedDate,
       })
       .select('id, title, description, date')
       .single()
@@ -171,8 +219,8 @@ export async function POST(request: Request) {
         name: data.title,
         diagnosed_date: data.date,
         status: parseConditionStatus(data.description),
-        source: 'patient_record'
-      }
+        source: 'patient_record',
+      },
     })
   } catch (error: any) {
     console.error('Create condition error:', error)

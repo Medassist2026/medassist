@@ -1,8 +1,22 @@
 export const dynamic = 'force-dynamic'
 
-import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
-import { createClient } from '@shared/lib/supabase/server'
+/**
+ * /api/patient/allergies — B07 Phase F.5 cross-context extension.
+ *
+ * GET: read allergies for active gp. Minor → empty.
+ * POST: add self-reported allergy. Delegates rejected (no MVP capability).
+ */
+
+import {
+  requireApiRole,
+  toApiErrorResponse,
+} from '@shared/lib/auth/session'
+import { createAdminClient } from '@shared/lib/supabase/admin'
 import { NextResponse } from 'next/server'
+import {
+  emptyForCrossContext,
+  resolvePatientContext,
+} from '@shared/lib/auth/patient-context'
 
 type AllergySeverity = 'mild' | 'moderate' | 'severe'
 
@@ -11,13 +25,20 @@ function isMissingTableError(error: any, tableName: string) {
   return (
     error?.code === '42P01' ||
     (message.includes('does not exist') && message.includes(tableName)) ||
-    (message.includes('schema cache') && message.includes(`public.${tableName}`))
+    (message.includes('schema cache') &&
+      message.includes(`public.${tableName}`))
   )
 }
 
-function normalizeSeverity(value: string | null | undefined): AllergySeverity {
+function normalizeSeverity(
+  value: string | null | undefined
+): AllergySeverity {
   const normalized = String(value || '').toLowerCase()
-  if (normalized === 'mild' || normalized === 'moderate' || normalized === 'severe') {
+  if (
+    normalized === 'mild' ||
+    normalized === 'moderate' ||
+    normalized === 'severe'
+  ) {
     return normalized
   }
   return 'moderate'
@@ -35,7 +56,8 @@ function parseAllergyFromRecord(record: any) {
   const severityMatch = description.match(/severity:\s*(.+)/i)
   const notesMatch = description.match(/notes:\s*(.+)/i)
 
-  const allergen = allergenFromTitle || allergenMatch?.[1]?.trim() || title
+  const allergen =
+    allergenFromTitle || allergenMatch?.[1]?.trim() || title
   if (!allergen) return null
 
   return {
@@ -45,31 +67,43 @@ function parseAllergyFromRecord(record: any) {
     severity: normalizeSeverity(severityMatch?.[1]),
     recorded_date: record.date,
     notes: notesMatch?.[1]?.trim() || null,
-    source: 'patient_record'
+    source: 'patient_record',
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const user = await requireApiRole('patient')
-    const supabase = await createClient()
+    const ctx = await resolvePatientContext({
+      request,
+      userId: user.id,
+    })
+
+    if (ctx.resolvedPatientId === null) {
+      return NextResponse.json(emptyForCrossContext({ allergies: [] }))
+    }
+
+    const supabase = createAdminClient('patient-allergies')
 
     const [recordsResult, tableResult] = await Promise.all([
       supabase
         .from('patient_medical_records')
         .select('id, title, description, date')
-        .eq('patient_id', user.id)
+        .eq('patient_id', ctx.resolvedPatientId)
         .eq('record_type', 'other')
         .order('date', { ascending: false }),
       supabase
         .from('patient_allergies')
         .select('id, allergen, reaction, severity, recorded_date, notes')
-        .eq('patient_id', user.id)
-        .order('recorded_date', { ascending: false })
+        .eq('patient_id', ctx.resolvedPatientId)
+        .order('recorded_date', { ascending: false }),
     ])
 
     if (recordsResult.error) throw recordsResult.error
-    if (tableResult.error && !isMissingTableError(tableResult.error, 'patient_allergies')) {
+    if (
+      tableResult.error &&
+      !isMissingTableError(tableResult.error, 'patient_allergies')
+    ) {
       throw tableResult.error
     }
 
@@ -93,7 +127,7 @@ export async function GET() {
           severity: normalizeSeverity(row.severity),
           recorded_date: row.recorded_date,
           notes: row.notes || null,
-          source: 'patient_allergies'
+          source: 'patient_allergies',
         }))
 
     const byAllergen = new Map<string, any>()
@@ -119,33 +153,51 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const user = await requireApiRole('patient')
-    const supabase = await createClient()
+    const ctx = await resolvePatientContext({
+      request,
+      userId: user.id,
+      denyDelegates: true,
+    })
+
+    if (ctx.resolvedPatientId === null) {
+      return NextResponse.json(
+        { error: 'Cannot add allergies for this account context' },
+        { status: 400 }
+      )
+    }
+
+    const supabase = createAdminClient('patient-allergies-create')
     const body = await request.json()
 
     const allergen = String(body.allergen || '').trim()
     const reaction = String(body.reaction || '').trim()
     const severity = normalizeSeverity(body.severity)
     const notes = body.notes ? String(body.notes).trim() : ''
-    const recordedDate = String(body.recorded_date || '').trim() || new Date().toISOString().split('T')[0]
+    const recordedDate =
+      String(body.recorded_date || '').trim() ||
+      new Date().toISOString().split('T')[0]
 
     if (!allergen || allergen.length < 2) {
-      return NextResponse.json({ error: 'Allergen must be at least 2 characters' }, { status: 400 })
+      return NextResponse.json(
+        { error: 'Allergen must be at least 2 characters' },
+        { status: 400 }
+      )
     }
 
     const descriptionParts = [
       `Reaction: ${reaction || 'Not specified'}`,
-      `Severity: ${severity}`
+      `Severity: ${severity}`,
     ]
     if (notes) descriptionParts.push(`Notes: ${notes}`)
 
     const { data, error } = await supabase
       .from('patient_medical_records')
       .insert({
-        patient_id: user.id,
+        patient_id: ctx.resolvedPatientId,
         record_type: 'other',
         title: `Allergy: ${allergen}`,
         description: descriptionParts.join('\n'),
-        date: recordedDate
+        date: recordedDate,
       })
       .select('id, title, description, date')
       .single()

@@ -1,8 +1,22 @@
 export const dynamic = 'force-dynamic'
 
-import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
-import { createClient } from '@shared/lib/supabase/server'
+/**
+ * GET /api/patient/health-summary — B07 Phase F.5 cross-context extension.
+ *
+ * Aggregates 6 sources into a dashboard summary payload for the active
+ * gp context. Accepts optional `?gpId=<id>`. Minor → empty summary.
+ */
+
+import {
+  requireApiRole,
+  toApiErrorResponse,
+} from '@shared/lib/auth/session'
+import { createAdminClient } from '@shared/lib/supabase/admin'
 import { NextResponse } from 'next/server'
+import {
+  emptyForCrossContext,
+  resolvePatientContext,
+} from '@shared/lib/auth/patient-context'
 
 function normalizeDiagnosisList(input: any): string[] {
   if (!Array.isArray(input)) return []
@@ -18,10 +32,47 @@ function normalizeDiagnosisList(input: any): string[] {
     .filter(Boolean)
 }
 
-export async function GET() {
+const EMPTY_SUMMARY = {
+  medications: { active: 0, pending: 0, total: 0, recent: [] as any[] },
+  labs: { total: 0, recent: [] as any[], abnormal: 0 },
+  visits: { total: 0, recent: [] as any[] },
+  vitals: {
+    lastUpdated: undefined as string | undefined,
+    blood_pressure: undefined as string | undefined,
+    heart_rate: undefined as number | undefined,
+    weight: undefined as number | undefined,
+    height: undefined as number | undefined,
+  },
+  conditions: [] as Array<{
+    id: string
+    name: string
+    diagnosed_date: string
+    status: 'active' | 'resolved'
+  }>,
+  allergies: [] as Array<{
+    id: string
+    allergen: string
+    reaction: string
+    severity: 'mild' | 'moderate' | 'severe'
+  }>,
+}
+
+export async function GET(request: Request) {
   try {
     const user = await requireApiRole('patient')
-    const supabase = await createClient()
+    const ctx = await resolvePatientContext({
+      request,
+      userId: user.id,
+    })
+
+    if (ctx.resolvedPatientId === null) {
+      return NextResponse.json(
+        emptyForCrossContext({ summary: EMPTY_SUMMARY })
+      )
+    }
+
+    const supabase = createAdminClient('patient-health-summary')
+    const subjectId = ctx.resolvedPatientId
 
     const [
       patientMedicationsResult,
@@ -29,18 +80,18 @@ export async function GET() {
       labOrdersResult,
       visitsResult,
       vitalsResult,
-      diagnosisRecordsResult
+      diagnosisRecordsResult,
     ] = await Promise.all([
       supabase
         .from('patient_medications')
         .select('id, medication_name, dosage, is_active, created_at')
-        .eq('patient_id', user.id)
+        .eq('patient_id', subjectId)
         .order('created_at', { ascending: false })
         .limit(50),
       supabase
         .from('medication_reminders')
         .select('id, medication, status, created_at')
-        .eq('patient_id', user.id)
+        .eq('patient_id', subjectId)
         .order('created_at', { ascending: false })
         .limit(50),
       supabase
@@ -56,7 +107,7 @@ export async function GET() {
             test:lab_tests (test_name)
           )
         `)
-        .eq('patient_id', user.id)
+        .eq('patient_id', subjectId)
         .eq('status', 'completed')
         .order('completed_at', { ascending: false })
         .limit(50),
@@ -69,22 +120,24 @@ export async function GET() {
           diagnosis,
           doctor:doctors (full_name)
         `)
-        .eq('patient_id', user.id)
+        .eq('patient_id', subjectId)
         .order('created_at', { ascending: false })
         .limit(100),
       supabase
         .from('vital_signs')
-        .select('measured_at, systolic_bp, diastolic_bp, heart_rate, weight, height')
-        .eq('patient_id', user.id)
+        .select(
+          'measured_at, systolic_bp, diastolic_bp, heart_rate, weight, height'
+        )
+        .eq('patient_id', subjectId)
         .order('measured_at', { ascending: false })
         .limit(1),
       supabase
         .from('patient_medical_records')
         .select('id, title, date')
-        .eq('patient_id', user.id)
+        .eq('patient_id', subjectId)
         .eq('record_type', 'diagnosis')
         .order('date', { ascending: false })
-        .limit(50)
+        .limit(50),
     ])
 
     if (patientMedicationsResult.error) throw patientMedicationsResult.error
@@ -108,37 +161,54 @@ export async function GET() {
       return status || 'pending'
     }
 
-    const medicationRecentFromManual = patientMedications.map((medication: any) => ({
-      id: medication.id,
-      name: medication.medication_name,
-      dosage: medication.dosage || '',
-      status: medication.is_active ? 'active' : 'inactive',
-      created_at: medication.created_at
-    }))
+    const medicationRecentFromManual = patientMedications.map(
+      (medication: any) => ({
+        id: medication.id,
+        name: medication.medication_name,
+        dosage: medication.dosage || '',
+        status: medication.is_active ? 'active' : 'inactive',
+        created_at: medication.created_at,
+      })
+    )
 
     const medicationRecentFromReminders = reminders.map((reminder: any) => {
-      const medication = reminder.medication && typeof reminder.medication === 'object'
-        ? reminder.medication
-        : {}
-      const dosageParts = [medication.frequency, medication.duration].filter(Boolean)
+      const medication =
+        reminder.medication && typeof reminder.medication === 'object'
+          ? reminder.medication
+          : {}
+      const dosageParts = [medication.frequency, medication.duration].filter(
+        Boolean
+      )
       return {
         id: reminder.id,
         name: medication.drug || 'Medication',
         dosage: dosageParts.join(' · '),
         status: reminderStatusToUi(reminder.status),
-        created_at: reminder.created_at
+        created_at: reminder.created_at,
       }
     })
 
-    const recentMedications = [...medicationRecentFromManual, ...medicationRecentFromReminders]
-      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    const recentMedications = [
+      ...medicationRecentFromManual,
+      ...medicationRecentFromReminders,
+    ]
+      .sort(
+        (a, b) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      )
       .slice(0, 5)
       .map(({ created_at, ...rest }) => rest)
 
-    const abnormalLabCount = labOrders.reduce((count: number, order: any) => {
-      const results = Array.isArray(order.results) ? order.results : []
-      return count + results.filter((result: any) => !!result.is_abnormal).length
-    }, 0)
+    const abnormalLabCount = labOrders.reduce(
+      (count: number, order: any) => {
+        const results = Array.isArray(order.results) ? order.results : []
+        return (
+          count +
+          results.filter((result: any) => !!result.is_abnormal).length
+        )
+      },
+      0
+    )
 
     const recentLabs = labOrders.slice(0, 5).map((order: any) => {
       const results = Array.isArray(order.results) ? order.results : []
@@ -147,22 +217,35 @@ export async function GET() {
       return {
         id: order.id,
         name: firstResult?.test?.test_name || 'Lab Panel',
-        date: order.completed_at || order.ordered_at || new Date().toISOString(),
-        status: hasAbnormal ? 'abnormal' : 'normal'
+        date:
+          order.completed_at ||
+          order.ordered_at ||
+          new Date().toISOString(),
+        status: hasAbnormal ? 'abnormal' : 'normal',
       }
     })
 
     const recentVisits = visits.slice(0, 5).map((visit: any) => {
-      const complaint = Array.isArray(visit.chief_complaint) ? visit.chief_complaint[0] : null
+      const complaint = Array.isArray(visit.chief_complaint)
+        ? visit.chief_complaint[0]
+        : null
       return {
         id: visit.id,
         doctor_name: visit.doctor?.full_name || 'Doctor',
         date: visit.created_at,
-        reason: complaint || 'Consultation'
+        reason: complaint || 'Consultation',
       }
     })
 
-    const conditionByName = new Map<string, { id: string; name: string; diagnosed_date: string; status: 'active' | 'resolved' }>()
+    const conditionByName = new Map<
+      string,
+      {
+        id: string
+        name: string
+        diagnosed_date: string
+        status: 'active' | 'resolved'
+      }
+    >()
     visits.forEach((visit: any) => {
       const list = normalizeDiagnosisList(visit.diagnosis)
       list.forEach((name) => {
@@ -171,7 +254,7 @@ export async function GET() {
             id: `note-${visit.id}-${name}`,
             name,
             diagnosed_date: visit.created_at,
-            status: 'active'
+            status: 'active',
           })
         }
       })
@@ -184,7 +267,7 @@ export async function GET() {
           id: `record-${record.id}`,
           name,
           diagnosed_date: record.date,
-          status: 'active'
+          status: 'active',
         })
       }
     })
@@ -192,20 +275,25 @@ export async function GET() {
     const summary = {
       medications: {
         active:
-          patientMedications.filter((medication: any) => !!medication.is_active).length +
-          reminders.filter((reminder: any) => reminder.status === 'accepted').length,
-        pending: reminders.filter((reminder: any) => reminder.status === 'pending').length,
+          patientMedications.filter(
+            (medication: any) => !!medication.is_active
+          ).length +
+          reminders.filter((reminder: any) => reminder.status === 'accepted')
+            .length,
+        pending: reminders.filter(
+          (reminder: any) => reminder.status === 'pending'
+        ).length,
         total: patientMedications.length + reminders.length,
-        recent: recentMedications
+        recent: recentMedications,
       },
       labs: {
         total: labOrders.length,
         recent: recentLabs,
-        abnormal: abnormalLabCount
+        abnormal: abnormalLabCount,
       },
       visits: {
         total: visits.length,
-        recent: recentVisits
+        recent: recentVisits,
       },
       vitals: {
         lastUpdated: vitals?.measured_at,
@@ -215,7 +303,7 @@ export async function GET() {
             : undefined,
         heart_rate: vitals?.heart_rate ?? undefined,
         weight: vitals?.weight ?? undefined,
-        height: vitals?.height ?? undefined
+        height: vitals?.height ?? undefined,
       },
       conditions: Array.from(conditionByName.values()),
       allergies: [] as Array<{
@@ -223,7 +311,7 @@ export async function GET() {
         allergen: string
         reaction: string
         severity: 'mild' | 'moderate' | 'severe'
-      }>
+      }>,
     }
 
     return NextResponse.json({ success: true, summary })

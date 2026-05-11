@@ -1,31 +1,33 @@
 export const dynamic = 'force-dynamic'
 
-import { NextResponse } from 'next/server'
-import { requireApiAuth, toApiErrorResponse } from '@shared/lib/auth/session'
-import { revokeShare } from '@shared/lib/data/patient-shares'
-import { createAdminClient } from '@shared/lib/supabase/admin'
-
 /**
- * POST /api/patient/sharing/[shareId]/revoke — Build prompt 05 § B8.
+ * POST /api/patient/sharing/[shareId]/revoke — B07 Phase F.5 cross-context.
  *
  * Body: { revoke_reason?: string }
  *
- * Auth: patient session. The handler verifies the share's
- * global_patient_id maps to a global_patients row claimed by this user
- * (claimed_user_id = auth.uid()). Without that check a patient could
- * revoke another patient's share by guessing a UUID — even though RLS
- * placeholder DENY-ALL prevents the share table READ outside the RPC,
- * the RPC itself is GRANTed to authenticated.
+ * Authorization (Phase F.5):
+ *   - Resolves the share's `global_patient_id` and calls
+ *     `requireAuthorityOver` to confirm self or guardian authority.
+ *   - Delegate basis REJECTED — `consent_to_share` is post-MVP
+ *     (Mo ruling 4).
  *
  * Idempotent: revoking an already-revoked share returns success with
  * `changed: false`.
- *
- * Response:
- *   200 { success: true, share: { id, revoked_at, changed } }
- *   401 — not authenticated
- *   403 — share not owned by this patient
- *   404 — share not found
  */
+
+import { NextResponse } from 'next/server'
+import {
+  requireApiAuth,
+  toApiErrorResponse,
+} from '@shared/lib/auth/session'
+import { revokeShare } from '@shared/lib/data/patient-shares'
+import { createAdminClient } from '@shared/lib/supabase/admin'
+import {
+  requireAuthorityOver,
+  AuthorityError,
+} from '@shared/lib/auth/authority'
+import { DelegateNotAuthorizedError } from '@shared/lib/auth/patient-context'
+
 export async function POST(
   request: Request,
   context: { params: { shareId: string } | Promise<{ shareId: string }> }
@@ -34,19 +36,23 @@ export async function POST(
     const session = await requireApiAuth()
     const userId = session.id
 
-    // Next.js App Router exposes params as a Promise in newer versions —
-    // handle both sync and async via Promise.resolve.
     const params = await Promise.resolve(context.params)
-    const shareId = typeof params?.shareId === 'string' ? params.shareId : null
+    const shareId =
+      typeof params?.shareId === 'string' ? params.shareId : null
     if (!shareId) {
-      return NextResponse.json({ error: 'shareId required' }, { status: 400 })
+      return NextResponse.json(
+        { error: 'shareId required' },
+        { status: 400 }
+      )
     }
 
     const body = await request.json().catch(() => ({}))
     const revokeReason: string | null =
-      typeof body?.revoke_reason === 'string' ? body.revoke_reason.slice(0, 500) : null
+      typeof body?.revoke_reason === 'string'
+        ? body.revoke_reason.slice(0, 500)
+        : null
 
-    // Authz: confirm the share belongs to this patient.
+    // Resolve share → subject gp; gate via requireAuthorityOver.
     const admin = createAdminClient('patient-sharing-revoke-authz')
     const { data: share } = await admin
       .from('patient_data_shares')
@@ -54,16 +60,20 @@ export async function POST(
       .eq('id', shareId)
       .maybeSingle()
     if (!share) {
-      return NextResponse.json({ error: 'Share not found' }, { status: 404 })
+      return NextResponse.json(
+        { error: 'Share not found' },
+        { status: 404 }
+      )
     }
-    const { data: gp } = await admin
-      .from('global_patients')
-      .select('claimed_user_id')
-      .eq('id', (share as { global_patient_id: string }).global_patient_id)
-      .maybeSingle()
-    const claimedUserId = (gp as { claimed_user_id?: string } | null)?.claimed_user_id ?? null
-    if (claimedUserId !== userId) {
-      return NextResponse.json({ error: 'Not authorized' }, { status: 403 })
+    const subjectGpId = (share as { global_patient_id: string })
+      .global_patient_id
+
+    const auth = await requireAuthorityOver(subjectGpId, userId)
+    if (auth.basis === 'delegated_by_principal') {
+      throw new DelegateNotAuthorizedError(
+        'Revoking shares is not available for delegated authority ' +
+          '(consent_to_share is post-MVP per Mo ruling 4)'
+      )
     }
 
     const result = await revokeShare({
@@ -83,7 +93,16 @@ export async function POST(
       },
     })
   } catch (error: any) {
-    console.error('POST /patient/sharing/[shareId]/revoke error:', error)
+    if (error instanceof AuthorityError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 403 }
+      )
+    }
+    console.error(
+      'POST /patient/sharing/[shareId]/revoke error:',
+      error
+    )
     return toApiErrorResponse(error, 'Failed to revoke share')
   }
 }
