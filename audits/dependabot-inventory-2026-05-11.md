@@ -174,6 +174,18 @@ Three independent major-bump workstreams, each requiring Mo's ruling per S1:
 
 ### Deferral C — `eslint-config-next` 14 → 16 (+ ESLint major)
 
+**Status: ✅ SHIPPED 2026-05-11.** See `audits/deferral-c-migration-2026-05-11.md` for the execution decision log.
+
+**Closure summary:**
+- Target version: `eslint-config-next@15.5.18` (NOT 16.x). STOP exception #1 fired during pre-work — Mo's ruling (2026-05-11): the advisory fix-version is 15.0.0 stable (advisory range `14.0.5-canary.0 - 15.0.0-rc.1`), so 16.x is unnecessary for security and is layout-coupled to Next 16-era integration while we're on Next 14.2.35. Going to 15.x closes the same 10 transitive advisories with lower coupling risk.
+- ESLint: `^8` → `^9.39.4`.
+- Migration: full flat-config via `@eslint/eslintrc` FlatCompat shim (15.x is still legacy `.eslintrc`-style; native flat-config in eslint-config-next landed only in 16.x). Mo chose Path C of the pre-flight scope surface.
+- Lint scripts: `next lint → eslint .` in all three workspaces (Next 14.2.35's `next lint` doesn't auto-discover flat config); `lint:scopes` rewritten for ESLint 9 CLI (no more `--no-eslintrc`/`--rulesdir`/`--parser`/`--ext`).
+- Custom rules (`no-unregistered-admin-scope`, `no-unregistered-delegation-capability`) preserved in shape; plugin index gained `meta.name`/`meta.version` for ESLint 9 convention.
+- **Closed: 7 unique advisories** (npm-audit 18 → 11; row 15 + transitive chains 16-22 + 26-27). The "15 advisories" claim in the original inventory line was per-manifest (one alert per workspace package.json); after npm-audit's workspace-tree deduplication the unique count is 7. Same closure work, different counting basis.
+
+**Original projection (kept for posterity):**
+
 **Closes:** advisories 15-29 = 15 advisories
 **Estimated effort:** 1-2 cowork sessions
 **Risk:** Medium. ESLint major bumps tend to surface "rules changed" warnings rather than runtime breakage. The flat-config migration is the main mechanical work. Custom rules in `eslint-rules/no-unregistered-admin-scope.js` need re-validation.

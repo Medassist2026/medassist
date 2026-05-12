@@ -5,6 +5,6 @@
   "main": "index.js",
   "description": "Local ESLint plugin for MedAssist project-specific rules (Phase F Task 20).",
   "peerDependencies": {
-    "eslint": "^8"
+    "eslint": "^8 || ^9"
   }
 }
