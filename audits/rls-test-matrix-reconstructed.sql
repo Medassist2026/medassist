@@ -162,10 +162,29 @@
 -- Section 0 — Pre-flight: refresh seed + clear prior run #1.6
 -- ============================================================================
 
-DELETE FROM public._rls_test_results WHERE run_no = 3.0;
+DELETE FROM public._rls_test_results WHERE run_no = 4.0;
+
+-- Phase H pre-teardown cleanup: B07 fixtures (00000200-prefixed) created by
+-- rls_test_seed_b07_phase_h have FK references (DPR → PCR) that block
+-- rls_test_teardown's PCR delete. Pre-deleting them here lets teardown proceed.
+DELETE FROM public.doctor_patient_relationships WHERE id::text LIKE '00000200%';
+DELETE FROM public.patient_data_shares WHERE id::text LIKE '00000200%';
+DELETE FROM public.patient_delegations WHERE id::text LIKE '00000200%';
+DELETE FROM public.patients WHERE id::text LIKE '00000200%';
+
+-- B07-FU-2 cleanup: clear stale sms_reminders that block teardown of
+-- test appointments. The cron emits these but rls_test_teardown's
+-- current scope does not include the table (see PROGRAM_STATE B07-FU-2).
+DELETE FROM public.sms_reminders
+  WHERE appointment_id IN (SELECT id FROM public.appointments WHERE id::text LIKE '00000099%');
 
 SELECT public.rls_test_teardown();
 SELECT public.rls_test_seed();
+-- Phase H run_no = 4.0 adds the B07 authority-archetype fixtures via the
+-- dedicated seed function landed alongside this matrix update (see
+-- audits/b07-phase-h-execution-2026-05-11.md §1). The function is idempotent
+-- and additive on top of rls_test_seed.
+SELECT public.rls_test_seed_b07_phase_h();
 
 
 -- ============================================================================
@@ -185,7 +204,7 @@ DECLARE
 
   rec RECORD; v_count INT; v_pass BOOLEAN; v_caught BOOLEAN; v_notes TEXT;
   v_table TEXT := 'appointments';
-  v_run NUMERIC := 3.0;
+  v_run NUMERIC := 4.0;
   v_src TEXT := 'audits/rls-test-matrix-reconstructed.sql';
 BEGIN
   FOR rec IN SELECT * FROM (VALUES
@@ -246,7 +265,7 @@ DECLARE
 
   rec RECORD; v_count INT; v_pass BOOLEAN; v_caught BOOLEAN; v_notes TEXT;
   v_table TEXT := 'check_in_queue';
-  v_run NUMERIC := 3.0;
+  v_run NUMERIC := 4.0;
   v_src TEXT := 'audits/rls-test-matrix-reconstructed.sql';
 BEGIN
   FOR rec IN SELECT * FROM (VALUES
@@ -300,7 +319,7 @@ DECLARE
 
   rec RECORD; v_count INT; v_pass BOOLEAN; v_caught BOOLEAN; v_notes TEXT;
   v_table TEXT := 'clinic_memberships';
-  v_run NUMERIC := 3.0;
+  v_run NUMERIC := 4.0;
   v_src TEXT := 'audits/rls-test-matrix-reconstructed.sql';
 BEGIN
   FOR rec IN SELECT * FROM (VALUES
@@ -1641,5 +1660,181 @@ END $vital_signs$;
 --   comparison query: 1 row (audit_events.S6 row-count divergence — see note above)
 
 -- ============================================================================
--- End of reconstructed Phase D matrix
+-- Phase H — B07 authority-archetype scenarios (run_no = 4.0)
+-- ============================================================================
+-- Added 2026-05-11 per audits/b07-phase-h-execution-2026-05-11.md.
+-- Sections 26-28 cover the new authority archetypes shipped in Phase B (guardian-of-minor)
+-- and Phase E (delegate-with-capability), plus cross-clinic minor visibility paths.
+--
+-- Fixtures (00000200-prefixed) provided by rls_test_seed_b07_phase_h(), called from Section 0.
+-- See the seed function for the persona/UUID assignment.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- Section 26 — Guardian-as-authority-on-minor (5 scenarios)
+-- ----------------------------------------------------------------------------
+
+DO $b07_guardian$
+DECLARE
+  k_guardian        UUID := '00000200-0000-0000-0000-000000000010';
+  k_random_other    UUID := '00000099-0000-0000-0000-000000000020'; -- patient_y_user
+  k_gp_minor_m1     UUID := '00000200-0000-0000-0000-000000000201';
+  k_pid_minor_m1    UUID := '00000200-0000-0000-0000-000000000301';
+  k_clinic_a        UUID := '00000099-0000-0000-0000-000000000001';
+
+  rec RECORD; v_count INT; v_pass BOOLEAN; v_caught BOOLEAN; v_notes TEXT;
+  v_table TEXT;
+  v_run NUMERIC := 4.0;
+  v_src TEXT := 'audits/rls-test-matrix-reconstructed.sql';
+BEGIN
+  FOR rec IN SELECT * FROM (VALUES
+    ('S26-1', 'global_patients', k_guardian, 'guardian SELECTs minor''s gp row', 'SUCCESS', 1,
+       format('SELECT count(*)::int FROM public.global_patients WHERE id = %L', k_gp_minor_m1)),
+    ('S26-2', 'patient_clinic_records', k_guardian, 'guardian SELECTs minor''s PCR at registering clinic', 'SUCCESS', 1,
+       format('SELECT count(*)::int FROM public.patient_clinic_records WHERE global_patient_id = %L AND clinic_id = %L', k_gp_minor_m1, k_clinic_a)),
+    ('S26-3', 'global_patients', k_random_other, 'random other authenticated user CANNOT SELECT minor''s gp', 'FAIL', 0,
+       format('SELECT count(*)::int FROM public.global_patients WHERE id = %L', k_gp_minor_m1)),
+    ('S26-4', 'doctor_patient_relationships', k_guardian, 'guardian SELECTs minor''s DPR row', 'SUCCESS', 1,
+       format('SELECT count(*)::int FROM public.doctor_patient_relationships WHERE patient_id = %L', k_pid_minor_m1)),
+    ('S26-5', 'patients', k_guardian, 'guardian SELECTs minor''s legacy patients row', 'SUCCESS', 1,
+       format('SELECT count(*)::int FROM public.patients WHERE id = %L', k_pid_minor_m1))
+  ) AS t(scenario, table_name, persona, description, expected_outcome, expected_rows, sql)
+  LOOP
+    v_table := rec.table_name;
+    EXECUTE format('SET LOCAL "request.jwt.claims" TO %L',
+      json_build_object('sub', rec.persona, 'role', 'authenticated')::text);
+    EXECUTE 'SET LOCAL ROLE authenticated';
+
+    v_caught := FALSE; v_notes := NULL; v_count := NULL;
+    BEGIN
+      EXECUTE rec.sql INTO v_count;
+    EXCEPTION
+      WHEN insufficient_privilege THEN v_caught := TRUE; v_notes := 'caught=RLS_BLOCKED_42501';
+    END;
+
+    EXECUTE 'RESET ROLE';
+
+    v_pass := (rec.expected_outcome = 'SUCCESS' AND v_count = rec.expected_rows)
+           OR (rec.expected_outcome = 'FAIL'    AND v_count = 0);
+
+    PERFORM public.rls_test_record(v_run, rec.scenario, v_table, rec.description,
+                                   rec.expected_outcome, v_count, v_pass, v_notes, v_src);
+  END LOOP;
+END $b07_guardian$;
+
+
+-- ----------------------------------------------------------------------------
+-- Section 27 — Delegate-as-capability-scoped-authority (5 scenarios)
+-- ----------------------------------------------------------------------------
+-- Note: capability-token enforcement is HANDLER-layer (per Phase E Decision 7);
+-- RLS allows the read for any active delegation. These scenarios test the RLS
+-- layer's delegation-state filtering (accepted/pending/expired/revoked) which is
+-- what Phase D's helpers enforce. Per-capability gating lives at the API handler.
+
+DO $b07_delegate$
+DECLARE
+  k_delegate         UUID := '00000200-0000-0000-0000-000000000011';
+  k_gp_p_acc         UUID := '00000200-0000-0000-0000-000000000120';
+  k_gp_p_pend        UUID := '00000200-0000-0000-0000-000000000121';
+  k_gp_p_exp         UUID := '00000200-0000-0000-0000-000000000122';
+  k_gp_p_rev         UUID := '00000200-0000-0000-0000-000000000123';
+  k_clinic_a         UUID := '00000099-0000-0000-0000-000000000001';
+
+  rec RECORD; v_count INT; v_pass BOOLEAN; v_caught BOOLEAN; v_notes TEXT;
+  v_table TEXT;
+  v_run NUMERIC := 4.0;
+  v_src TEXT := 'audits/rls-test-matrix-reconstructed.sql';
+BEGIN
+  FOR rec IN SELECT * FROM (VALUES
+    ('S27-1', 'global_patients', k_delegate, 'delegate (accepted) SELECTs principal''s gp', 'SUCCESS', 1,
+       format('SELECT count(*)::int FROM public.global_patients WHERE id = %L', k_gp_p_acc)),
+    ('S27-2', 'global_patients', k_delegate, 'delegate (PENDING — not accepted) blocked from principal''s gp', 'FAIL', 0,
+       format('SELECT count(*)::int FROM public.global_patients WHERE id = %L', k_gp_p_pend)),
+    ('S27-3', 'global_patients', k_delegate, 'delegate (EXPIRED) blocked from principal''s gp', 'FAIL', 0,
+       format('SELECT count(*)::int FROM public.global_patients WHERE id = %L', k_gp_p_exp)),
+    ('S27-4', 'global_patients', k_delegate, 'delegate (REVOKED) blocked from principal''s gp', 'FAIL', 0,
+       format('SELECT count(*)::int FROM public.global_patients WHERE id = %L', k_gp_p_rev)),
+    ('S27-5', 'patient_clinic_records', k_delegate, 'delegate (accepted) SELECTs principal''s PCR', 'SUCCESS', 1,
+       format('SELECT count(*)::int FROM public.patient_clinic_records WHERE global_patient_id = %L AND clinic_id = %L', k_gp_p_acc, k_clinic_a))
+  ) AS t(scenario, table_name, persona, description, expected_outcome, expected_rows, sql)
+  LOOP
+    v_table := rec.table_name;
+    EXECUTE format('SET LOCAL "request.jwt.claims" TO %L',
+      json_build_object('sub', rec.persona, 'role', 'authenticated')::text);
+    EXECUTE 'SET LOCAL ROLE authenticated';
+
+    v_caught := FALSE; v_notes := NULL; v_count := NULL;
+    BEGIN
+      EXECUTE rec.sql INTO v_count;
+    EXCEPTION
+      WHEN insufficient_privilege THEN v_caught := TRUE; v_notes := 'caught=RLS_BLOCKED_42501';
+    END;
+
+    EXECUTE 'RESET ROLE';
+
+    v_pass := (rec.expected_outcome = 'SUCCESS' AND v_count = rec.expected_rows)
+           OR (rec.expected_outcome = 'FAIL'    AND v_count = 0);
+
+    PERFORM public.rls_test_record(v_run, rec.scenario, v_table, rec.description,
+                                   rec.expected_outcome, v_count, v_pass, v_notes, v_src);
+  END LOOP;
+END $b07_delegate$;
+
+
+-- ----------------------------------------------------------------------------
+-- Section 28 — Cross-clinic minor + adult-with-share visibility (5 scenarios)
+-- ----------------------------------------------------------------------------
+
+DO $b07_xclinic$
+DECLARE
+  k_doctor_a         UUID := '00000099-0000-0000-0000-000000000010';
+  k_doctor_b         UUID := '00000099-0000-0000-0000-000000000011';
+  k_gp_minor_m1      UUID := '00000200-0000-0000-0000-000000000201'; -- registered clinic_a, no share
+  k_gp_minor_m2      UUID := '00000200-0000-0000-0000-000000000202'; -- registered clinic_a, active share to clinic_b
+  k_gp_minor_m3      UUID := '00000200-0000-0000-0000-000000000203'; -- registered clinic_a, expired share to clinic_b
+  k_gp_share_grantor UUID := '00000200-0000-0000-0000-000000000130'; -- adult with active share to clinic_b
+
+  rec RECORD; v_count INT; v_pass BOOLEAN; v_caught BOOLEAN; v_notes TEXT;
+  v_table TEXT;
+  v_run NUMERIC := 4.0;
+  v_src TEXT := 'audits/rls-test-matrix-reconstructed.sql';
+BEGIN
+  FOR rec IN SELECT * FROM (VALUES
+    ('S28-1', 'global_patients', k_doctor_a, 'doctor_a SELECTs minor_m1 gp (DPR scope at registering clinic)', 'SUCCESS', 1,
+       format('SELECT count(*)::int FROM public.global_patients WHERE id = %L', k_gp_minor_m1)),
+    ('S28-2', 'global_patients', k_doctor_b, 'doctor_b BLOCKED from minor_m1 gp (no share, no scope at clinic_b)', 'FAIL', 0,
+       format('SELECT count(*)::int FROM public.global_patients WHERE id = %L', k_gp_minor_m1)),
+    ('S28-3', 'global_patients', k_doctor_b, 'doctor_b SELECTs minor_m2 gp (active share to clinic_b)', 'SUCCESS', 1,
+       format('SELECT count(*)::int FROM public.global_patients WHERE id = %L', k_gp_minor_m2)),
+    ('S28-4', 'global_patients', k_doctor_b, 'doctor_b BLOCKED from minor_m3 gp (share to clinic_b is EXPIRED)', 'FAIL', 0,
+       format('SELECT count(*)::int FROM public.global_patients WHERE id = %L', k_gp_minor_m3)),
+    ('S28-5', 'global_patients', k_doctor_b, 'doctor_b SELECTs share_grantor adult gp (active share to clinic_b)', 'SUCCESS', 1,
+       format('SELECT count(*)::int FROM public.global_patients WHERE id = %L', k_gp_share_grantor))
+  ) AS t(scenario, table_name, persona, description, expected_outcome, expected_rows, sql)
+  LOOP
+    v_table := rec.table_name;
+    EXECUTE format('SET LOCAL "request.jwt.claims" TO %L',
+      json_build_object('sub', rec.persona, 'role', 'authenticated')::text);
+    EXECUTE 'SET LOCAL ROLE authenticated';
+
+    v_caught := FALSE; v_notes := NULL; v_count := NULL;
+    BEGIN
+      EXECUTE rec.sql INTO v_count;
+    EXCEPTION
+      WHEN insufficient_privilege THEN v_caught := TRUE; v_notes := 'caught=RLS_BLOCKED_42501';
+    END;
+
+    EXECUTE 'RESET ROLE';
+
+    v_pass := (rec.expected_outcome = 'SUCCESS' AND v_count = rec.expected_rows)
+           OR (rec.expected_outcome = 'FAIL'    AND v_count = 0);
+
+    PERFORM public.rls_test_record(v_run, rec.scenario, v_table, rec.description,
+                                   rec.expected_outcome, v_count, v_pass, v_notes, v_src);
+  END LOOP;
+END $b07_xclinic$;
+
+
+-- ============================================================================
+-- End of reconstructed Phase D matrix (extended Phase H — Section 26-28)
 -- ============================================================================
