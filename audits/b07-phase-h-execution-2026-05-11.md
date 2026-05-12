@@ -143,6 +143,17 @@ than the architectural inference.
 
 ## 4. Findings — 4 scenarios failed in Sections 26-28
 
+**STATUS UPDATE 2026-05-12 (Phase H.1):** All 4 findings RESOLVED. See
+`audits/b07-phase-h1-execution-2026-05-12.md` for per-amendment detail.
+- F#1 (S26-4): RESOLVED via expected_outcome flip (DPR intentionally
+  excluded from Phase D scope).
+- F#2 (S26-5): RESOLVED via expected_outcome flip + obsolescence note
+  (legacy patients on prompt-6.5 deprecation track).
+- F#3 (S28-3 + S28-5): RESOLVED via fixture amendment — seed function now
+  creates PCR-at-grantee representing post-share-consumed state.
+Matrix re-run at run_no = 4.1: 192/192 PASS, 0 divergence vs 4.0 baseline.
+
+
 These are **architectural data points**, not regressions. Surfaced per the
 prompt's STOP exception #2: "New scenario fails — STOP; investigate whether
 the scenario is wrong OR Phase D/G has a bug."

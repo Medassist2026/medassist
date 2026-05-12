@@ -342,6 +342,28 @@ Constants, counts, table names, column names, function names, file paths, securi
 
 **Empirical proof:** B07 Phase B mig 110 first apply attempt (2026-05-10), failed at the PG line `RAISE EXCEPTION 'mig 110 smoke probe POS-2: updated_at trigger did not advance the timestamp.'`. Apply was transactional — failure rolled back cleanly (verified: `patient_delegations` table did not exist post-rollback, function did not exist, migration not recorded). Second apply with the seeded-`'2000-01-01'` fix: PASS. Recorded as Decision 8 in `audits/b07-phase-b-execution-2026-05-10.md`.
 
+### Lesson 20 (reserved — promoted by Phase H.1 to Lesson 21; see below)
+
+### Lesson 21 (B07 Phase H.1 — test infrastructure UUID range cleanup, 2026-05-12)
+
+**Test teardown must clean ALL fixture UUID ranges introduced by new test infrastructure.**
+
+When adding test fixtures with new UUID prefix ranges (e.g., `00000113-` for Phase D helper smoke probes, `00000200-` for Phase H B07 personas), the existing `rls_test_teardown()` function does NOT automatically clean them. This creates fixture leakage on subsequent matrix runs.
+
+**Requirement**: when introducing a new prefix range, EITHER:
+- Extend `rls_test_teardown()` to clean the new prefix
+- OR add a dedicated cleanup block in matrix Section 0 (post-teardown, pre-seed)
+
+The Section 0 cleanup approach is preferred for transient test infrastructure that may not survive in production teardown logic.
+
+**Phase H established a Section 0 cleanup block for `00000200-` prefixed fixtures + `sms_reminders` (B07-FU-2 recurring). Future phases adding new prefixes should follow the same pattern.**
+
+**Reference**: Phase H execution log finding #5 (`audits/b07-phase-h-execution-2026-05-11.md`); Phase H.1 amendments confirmed pattern works (192/192 PASS at run_no = 4.1 — see `audits/b07-phase-h1-execution-2026-05-12.md`).
+
+**Pairs with:**
+- **Lesson #16** (verify against ground truth — Lesson #21's symptom is a fixture-FK error on the second matrix run, surfaced empirically rather than predicted from teardown function scope).
+- **Lesson #19** (smoke probe authoring discipline) — both lessons codify failure modes in test infrastructure that don't surface until a specific re-run scenario.
+
 ---
 
 ```
