@@ -1052,5 +1052,82 @@ Expected: 21 rows. Filter by event timestamp, NOT by net `length()` delta of ope
 
 ---
 
-*Last entry: D-081 | D-080 | D-079 | D-077 | D-074 (amended 2026-05-07) | 11 May 2026*
+## D-082: Existing-user sign-in is password-only by product spec
+
+**Decision Date:** 2026-05-15
+**Context:** Phase I.B Finding I-13 surfaced a contradiction between code (password-based existing-user sign-in via `/api/auth/login` accepting `phone` + `password`) and prior "OTP-driven" product framing in early design discussions. Phase J Mo-ratification 2026-05-15 (handoff session) resolved the contradiction: the code is right; the framing was loose.
+
+**Decision:** Existing-user sign-in is password-only by spec. OTP scope is limited to: (1) new-account phone-verification at registration (current behavior; the `/otp` page + `verify-otp` handler exist precisely for this); (2) future password-reset recovery channel (Prompt 10 territory — Patient App v1 read-only records + consent UI — or earlier if it surfaces as blocking).
+
+**Reasoning:** Egyptian clinic context — doctors sign in multiple times daily from clinic workstations; password is the natural primary factor and SMS-OTP per-login would be high-friction and SMS-cost-prohibitive at clinic scale. SMS-OTP is reserved for high-friction events (initial verification, password recovery) where the security trade-off is worth it. No email field exists in Egyptian patient data (D-003 Arabic-first / phone-first identity model + D-057 phone-first identity), so SMS-OTP will be the only viable recovery channel when password-reset ships.
+
+**Trade-offs accepted:** Without a recovery channel shipped today, a forgotten-password user is currently blocked from self-service recovery (must contact clinic frontdesk). Acceptable for B07 MVP since the patient-app deployment isn't live yet (Phase L gates production). Password-reset UI + handler ship in Prompt 10 or as a B07-followup if user reports surface earlier.
+
+**Outcome:** I-13 dropped from Phase K (login-flow refactor out of B07 scope). Phase K K-2 bundle confirmed at I-14 + I-15 + I-16 + I-17 + I-4 (no I-13). Implementation surfaces unaffected this commit — code already matches the decision; only the decision itself is now documented.
+
+---
+
+## D-083: B07 closure gated on Phase M against production deployment
+
+**Decision Date:** 2026-05-15
+**Context:** Phase I.B's production-for-release reframe (cowork extension session mid-arc 2026-05-15) reset B07's closure framework: staging-only verification is insufficient under the new framing because the patient app has never been deployed to a production Vercel project (Finding I-5), so no real user has ever signed up via the patient app (Finding I-16 architecturally non-functional since 2026-04-25 TD-005 ship), and no production-only bugs can have surfaced. Phase J 2026-05-15 (handoff session) ratified the K+L+M sequence as the smallest workflow that produces a closeable B07.
+
+**Decision:** B07 closes after **Phase M** lands clean against the production deployment that Phase L provisions. Phase K (code fixes for the 9 K-grade findings) + Phase L (production deployment + per-env config + monitoring + legal) + Phase M (re-run A1 + A2 walkthroughs end-to-end against production) is locked as the closure sequence.
+
+**Reasoning:** Phase K alone resolves code bugs but doesn't prove they're fixed in production. Phase L alone deploys patient app but on top of known-broken pre-K code (registration architecturally non-functional). Only the K+L+M sequence produces a closeable B07. The Phase I.B reframe ("production-for-release coverage required") is non-negotiable for the closeable bar — staging cannot stand in for production at this stage because production has unknown delta (volume, access patterns, SMS gateway, monitoring, legal/compliance hooks).
+
+**Trade-offs accepted:** Calendar to closure stretches from "few days post Phase K" to "1.5 weeks cowork + days-to-weeks wall-time for legal/SMS/domain." Worth it — closure-by-staging would ship a known-broken patient registration to real users on first deployment.
+
+**Implications:**
+- K-2 must land first (registration must work or Phase M can't run real flows).
+- L-1 (patient-app Vercel project) can run wall-time-parallel with K.
+- L-4 (monitoring) / L-5 (domain) / L-6 (legal) can run wall-time-parallel with K and M; not strict M blockers.
+- Phase M is gated on K complete + L-1/L-2/L-3 complete. If new production-only bugs surface, plan a K' loop into the schedule.
+
+**Outcome:** Live as B07 closure framework. Phase J Section 5 documents the rationale; Phase J Section 6 documents the implementation. Phase K cowork prompts to be drafted in a follow-up session (Mo).
+
+---
+
+## D-084: Patient self-registration drops `patients.insert` (K-2c architectural)
+
+**Decision Date:** 2026-05-15
+**Context:** Finding I-16 (cowork extension 2026-05-15) — `createPatientAccount` in `packages/shared/lib/data/users.ts` has been architecturally broken since 2026-04-25 (TD-005 clinic_id rollout, D-041). The handler tries to insert into `patients` (clinic-presence table), but `patients.clinic_id` and `patients.global_patient_id` are both NOT NULL with no defaults — and a self-registered patient hasn't visited any clinic yet, so neither field has a value to supply. Three weeks of broken patient registration, undetected because no real user has signed up via the patient app (no production deployment exists per I-5).
+
+**Decision:** `createPatientAccount` writes `users` + `global_patients` only. Clinic-presence rows (`patients` table + PCR + DPR) are the frontdesk's responsibility on first clinic visit. K-2c implements this refactor.
+
+**Reasoning:** Aligns with the multi-tenant + phone-first identity model end-to-end (D-041 TD-005 clinic_id rollout + D-057 phone-first identity). Self-registered patients are canonical identities (`global_patients` row with `claimed=true`, `claimed_user_id=userId`, `normalized_phone=params.phone`, `display_name=params.fullName`); clinic presence is established on first visit, not at signup. The pre-TD-005 model (single `patients` row at self-registration) is fundamentally incompatible with the multi-tenant schema and was the unfixed remnant of the v1→v2 transition.
+
+**Implications:**
+- All patient-app read paths (dashboard, settings/family, prescriptions, appointments, vitals, visits, immunizations, lab-results, medications, conditions, allergies, notes, diary, medication-reminders, medication-intake, health-summary, sharing, messages, etc.) must query `global_patients` via `claimed_user_id`, NOT the `patients` table. K-2c includes a code audit of all such read paths + test updates.
+- Frontdesk first-visit flow (already implemented per Phase G `establishMinorClinicPresence` for minors + adult patient creation paths) is the canonical clinic-presence establishment path. No change there.
+- Risk: production-only bugs may surface in Phase M when real registration + real first-visit pairs run end-to-end for the first time; plan a K' loop into the schedule (D-083).
+
+**Trade-offs accepted:** Patient-app dashboard for a freshly-registered patient (pre-first-visit) has no PCR/DPR/clinic data to display — UI must handle the empty state cleanly. K-2c includes UI verification that empty-state renders correctly for a new self-registered patient.
+
+**Outcome:** Live as K-2c scope. Implementation lands in Phase K. Pairs with D-041 (TD-005 clinic_id rollout) closing out the multi-tenant transition for the patient-app entry path.
+
+---
+
+## D-085: Patient app gets patient-only auth surface (K-3b architectural)
+
+**Decision Date:** 2026-05-15
+**Context:** Finding I-9 — the patient app's `/auth` page (`apps/patient/app/(auth)/auth/page.tsx`) is the same multi-role component as the clinic app, which defaults `role` to `'doctor'` when no query param is present. A patient navigating directly to `/auth` lands on the doctor login UI by default. Phase J Mo-ratification 2026-05-15 chose option (2) over the minimum-unblock option (1, default flip).
+
+**Decision:** Patient app gets a patient-only `/auth` page. The multi-role auth page is removed from patient app entirely; doctor + frontdesk auth lives only in clinic app where it belongs. K-3b implements the split.
+
+**Reasoning:** Cleaner two-app separation. Patient app should NEVER offer doctor or frontdesk role selection — wrong-context UX and a code smell. The minimum-unblock option (flipping default `role` from `'doctor'` to `'patient'`) leaves the doctor/frontdesk branches present in the patient-app bundle as dead code paths, surfaces nothing useful, and risks future regressions where a `role=doctor` query param re-enables the wrong-context flow inside the patient app. K-3b expansion from "flag flip" (<1 hour) to "auth surface split" (~1 day cowork) is worth it now while we're in K-3 territory anyway.
+
+**Implications:**
+- K-3b scope: (1) read current multi-role `apps/patient/app/(auth)/auth/page.tsx`; (2) build a patient-only replacement that exposes only patient login + register tabs; (3) audit references — anything in the patient app that points at `/auth?role=...` must update; (4) confirm clinic app's multi-role auth page remains intact as the canonical doctor/frontdesk auth surface. K-3b time: ~1 day cowork.
+- Future patient-app enrichment (password reset per D-082, OAuth, biometric, magic-link, etc.) ships into the patient-only auth surface — no risk of leaking those into doctor/frontdesk flows.
+- K-4a (I-8 `/login` alias) targets the post-K-3b patient-only `/auth` — `/login` becomes an alias for `/auth` in the patient app (no `?role=patient` query needed once the surface is patient-only).
+- K-3c (I-12 `/choose-role` 404) collapses into K-3a's `/intro` splash — the patient app no longer surfaces a "choose role" back link once the patient-only auth surface ships.
+
+**Trade-offs accepted:** Mild code duplication between the patient-only auth page and the clinic-app multi-role auth page (login/register form fields, copy, validation). Acceptable — the two surfaces have different target users, different copy needs (patient-facing Arabic vs clinic-facing bilingual), and different future enrichment paths.
+
+**Outcome:** Live as K-3b scope. Implementation lands in Phase K. Pairs with D-082 (patient app's auth surface is the canonical location for future password-reset + OAuth + biometric).
+
+---
+
+*Last entry: D-085 | D-084 | D-083 | D-082 | D-081 | D-080 | D-079 | D-077 | D-074 (amended 2026-05-07) | 15 May 2026*
 *Add new decisions at the bottom with sequential ID.*
