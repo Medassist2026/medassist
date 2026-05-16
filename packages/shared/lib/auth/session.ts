@@ -23,6 +23,33 @@ export class ApiAuthError extends Error {
 }
 
 /**
+ * Sentinel for errors whose `message` is safe and intended to be shown
+ * to the end user. Throw this from a handler / data-layer when you have
+ * a deliberately-crafted user-facing message (e.g., validation copy,
+ * rate-limit notice) and want it to pass through `toApiErrorResponse`'s
+ * 500-fallback path verbatim.
+ *
+ * Unknown errors that are NOT `UserFacingError` or `ApiAuthError` get
+ * the caller's `fallbackMessage` returned to the client; their raw
+ * `.message` is logged server-side only. This prevents schema-info
+ * leakage (table names, column names, "relation" keyword, PG error
+ * codes) from reaching API consumers via the 500 path.
+ *
+ * Added 2026-05-15 by K-2a-followup (closes I-15 anti-pattern at the
+ * shared-helper level — K-2b only sanitized the register handler).
+ */
+export class UserFacingError extends Error {
+  readonly isUserFacing = true as const
+  readonly status: number
+
+  constructor(message: string, status: number = 500) {
+    super(message)
+    this.name = 'UserFacingError'
+    this.status = status
+  }
+}
+
+/**
  * Get the current authenticated user
  * Returns null if not authenticated
  */
@@ -164,6 +191,31 @@ export function requireServiceRole(request: Request): void {
 
 /**
  * Convert auth/redirect failures to API-safe responses.
+ *
+ * Sanitization contract (revised 2026-05-15 by K-2a-followup, closes
+ * Finding I-15 at the shared-helper level):
+ *
+ *   - `ApiAuthError`: message is treated as user-safe (auth classes own
+ *     their copy). Passed through verbatim with the carried status.
+ *   - Next.js redirect digest (`NEXT_REDIRECT;...`): collapsed to
+ *     "Unauthorized" (401) for /login redirects, "Forbidden" (403)
+ *     otherwise.
+ *   - `UserFacingError` (or any error with `isUserFacing === true`):
+ *     message passed through verbatim. Use this when a caller has
+ *     deliberately crafted user-visible copy.
+ *   - Any other error: treated as RAW / leaky. `console.error` logs the
+ *     raw error server-side for debugging; client receives ONLY the
+ *     caller's `fallbackMessage`. Never echo `error.message` for an
+ *     unknown error — that path leaked schema details (table names,
+ *     column names, "relation" keyword, PG error codes) pre-fix.
+ *
+ * Why fallback wins over `error.message`: the 140 callers in this repo
+ * uniformly pass an English action-level fallback ('Failed to fetch X',
+ * 'Failed to create Y'). The fallback is designed to be the user-safe
+ * default. The pre-fix behavior `error.message || fallbackMessage`
+ * inverted this — preferring raw error messages over the safe
+ * fallback. K-2b sanitized only the register handler; this revision
+ * sanitizes the helper itself so every caller is covered.
  */
 export function toApiErrorResponse(error: any, fallbackMessage: string) {
   if (error instanceof ApiAuthError) {
@@ -182,8 +234,16 @@ export function toApiErrorResponse(error: any, fallbackMessage: string) {
     )
   }
 
+  // Explicit opt-in: caller marked this error as user-facing.
+  if (error instanceof UserFacingError || error?.isUserFacing === true) {
+    const status = typeof error?.status === 'number' ? error.status : 500
+    return NextResponse.json({ error: error?.message ?? fallbackMessage }, { status })
+  }
+
+  // Unknown / raw error path: log server-side, return fallback only.
+  console.error('[toApiErrorResponse] unsanitized error:', error)
   return NextResponse.json(
-    { error: error?.message || fallbackMessage },
+    { error: fallbackMessage },
     { status: 500 }
   )
 }

@@ -437,6 +437,15 @@ export async function establishMinorClinicPresence(
   // Synthetic DEP_* phone (matches minors #2/#3 from mig 111 backfill;
   // avoids collision with the parent's real phone in adult patient
   // searches keyed off patients.phone).
+  //
+  // is_canonical=true: synthetic DEP_* phones are unique per call —
+  // they cannot form a dedup cluster with any organic phone. mig 079
+  // makes users.is_canonical NOT NULL with no default; omitting it
+  // would fail the entire onboard on every v2 frontdesk dependent
+  // path (same anti-pattern as I-14 / K-2a; this site shipped with
+  // Phase G 2026-05-11 but has been dormant — no real frontdesk
+  // session has exercised the v2 minor-onboard flow on staging since
+  // ship, per Postgres-log + DEP_* user probes 2026-05-15).
   // ──────────────────────────────────────────────────────────────────
   const syntheticPhone = `DEP_${Date.now()}_${nanoid(5).toUpperCase()}`
 
@@ -446,6 +455,7 @@ export async function establishMinorClinicPresence(
       id: userId,
       phone: syntheticPhone,
       role: 'patient',
+      is_canonical: true,
     })
   if (userErr) {
     await rollbackAuth(`users insert: ${userErr.message}`)
