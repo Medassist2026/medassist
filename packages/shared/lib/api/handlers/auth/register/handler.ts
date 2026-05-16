@@ -140,6 +140,18 @@ export async function POST(request: Request) {
     }
 
   } catch (error: any) {
+    // K-2b (Finding I-15, 2026-05-15): sanitize the 500 fallback so we
+    // never echo raw PostgreSQL error text to the client. The raw error
+    // can include table names, column names, and the "relation" keyword
+    // — all of which leak schema details to anyone probing the
+    // registration endpoint. The Arabic fallback is the ONLY thing
+    // returned; `console.error` below captures the raw error in Vercel
+    // logs for server-side debugging.
+    //
+    // The duplicate-phone 409 branch inspects `error.message` server-side
+    // for known PG substrings ('unique', 'duplicate', 'users_phone_key')
+    // and returns a clean Arabic message — that branch already sanitizes
+    // its response and is preserved as-is.
     console.error('Registration error:', error)
 
     // Catch duplicate phone constraint
@@ -152,7 +164,7 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json(
-      { error: error.message || 'فشل في إنشاء الحساب' },
+      { error: 'فشل في إنشاء الحساب. حاول مرة أخرى أو تواصل مع الدعم.' },
       { status: 500 }
     )
   }

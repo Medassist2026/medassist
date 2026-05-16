@@ -78,13 +78,21 @@ export async function createDoctorAccount(params: CreateDoctorParams) {
   const adminSupabase = createAdminClient('user-registration')
 
   // 2. Create user record
+  //
+  // is_canonical=true: this is a brand-new self-registering doctor. No
+  // dedup cluster exists at insertion time — by definition this is the
+  // canonical record for this phone. A future dedup pass (mig 078/079
+  // mechanism) may flip this to false if the user is later identified
+  // as a duplicate, but at creation time canonical is the only correct
+  // value. users.is_canonical is NOT NULL with no DB default (mig 079).
   const { error: userError } = await adminSupabase
     .from('users')
     .insert({
       id: userId,
       phone: params.phone,
       email: params.email || null,
-      role: 'doctor'
+      role: 'doctor',
+      is_canonical: true
     })
 
   if (userError) {
@@ -190,13 +198,21 @@ export async function createPatientAccount(params: CreatePatientParams) {
   const adminSupabase = createAdminClient('user-registration')
 
   // 2. Create user record
+  //
+  // is_canonical=true: this is a brand-new self-registering patient. See
+  // identical comment in createDoctorAccount for full rationale.
+  // NOTE: the subsequent `patients.insert` at step 3 below is the I-16
+  // architectural-break path (createPatientAccount missing clinic_id +
+  // global_patient_id); K-2c will refactor that separately. K-2a only
+  // closes the users.is_canonical NOT NULL violation.
   const { error: userError } = await adminSupabase
     .from('users')
     .insert({
       id: userId,
       phone: params.phone,
       email: params.email || null,
-      role: 'patient'
+      role: 'patient',
+      is_canonical: true
     })
 
   if (userError) {
@@ -365,12 +381,16 @@ export async function createFrontDeskAccount(params: CreateFrontDeskParams) {
   const frontDeskUniqueId = `FD${nanoid(8).toUpperCase()}`
 
   // 3. Create user record
+  //
+  // is_canonical=true: brand-new self-registering frontdesk staff. See
+  // identical comment in createDoctorAccount for full rationale.
   const { error: userError } = await adminSupabase
     .from('users')
     .insert({
       id: userId,
       phone: params.phone,
-      role: 'frontdesk'
+      role: 'frontdesk',
+      is_canonical: true
     })
 
   if (userError) {
