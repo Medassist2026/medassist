@@ -78,10 +78,19 @@ export async function POST(request: Request) {
         fullName
       })
 
+      // K-2c (2026-05-15, D-084): createPatientAccount return shape
+      // changed from {userId, patientUniqueId} to {userId, globalPatientId}.
+      // The patient now has a canonical global_patients identity but
+      // NO `patients` row — clinic-presence is created by frontdesk on
+      // first clinic visit. `uniqueId` is mapped from `globalPatientId`
+      // for API contract compatibility (the legacy `patientUniqueId`
+      // was a nanoid attached to the now-absent patients row); doctor
+      // and frontdesk paths retain their own role-specific uniqueIds.
       return NextResponse.json({
         success: true,
         userId: result.userId,
-        uniqueId: result.patientUniqueId,
+        uniqueId: result.globalPatientId,
+        globalPatientId: result.globalPatientId,
         role: 'patient'
       })
 

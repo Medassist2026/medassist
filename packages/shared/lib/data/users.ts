@@ -199,12 +199,9 @@ export async function createPatientAccount(params: CreatePatientParams) {
 
   // 2. Create user record
   //
-  // is_canonical=true: this is a brand-new self-registering patient. See
-  // identical comment in createDoctorAccount for full rationale.
-  // NOTE: the subsequent `patients.insert` at step 3 below is the I-16
-  // architectural-break path (createPatientAccount missing clinic_id +
-  // global_patient_id); K-2c will refactor that separately. K-2a only
-  // closes the users.is_canonical NOT NULL violation.
+  // is_canonical=true: brand-new self-registering patient — no dedup
+  // cluster at insertion time, so canonical is the only correct value
+  // (mig 079 makes users.is_canonical NOT NULL).
   const { error: userError } = await adminSupabase
     .from('users')
     .insert({
@@ -219,26 +216,53 @@ export async function createPatientAccount(params: CreatePatientParams) {
     throw new Error(userError.message)
   }
 
-  // 3. Create patient profile
-  const patientUniqueId = nanoid(10).toUpperCase()
-
-  const { error: patientError } = await adminSupabase
-    .from('patients')
+  // 3. Create canonical global_patients identity (K-2c, 2026-05-15, D-084).
+  //
+  // Pre-K-2c, this code path also inserted into `patients` (the
+  // clinic-presence table), but `patients.clinic_id` + `patients.global_patient_id`
+  // are NOT NULL with no defaults — self-registered patients haven't
+  // visited any clinic yet, so neither column has a value to supply.
+  // That insert had been architecturally broken since 2026-04-25 (TD-005
+  // clinic_id rollout, D-041); patient self-registration was non-functional
+  // for ~3 weeks, undetected because no real user has signed up via the
+  // patient app (no production deployment per I-5).
+  //
+  // K-2c per D-084 drops `patients.insert` entirely. Self-registered
+  // patients are canonical identities (`global_patients` row with
+  // `claimed=true`, `claimed_user_id=userId`, `normalized_phone`,
+  // `display_name`). Clinic-presence rows (`patients` + PCR + DPR) are
+  // the frontdesk's responsibility on first clinic visit.
+  //
+  // Patient-app read paths must query `global_patients` via
+  // `claimed_user_id`, NOT the `patients` table. Clinical-event tables
+  // (35 FK to patients.id — appointments, prescriptions, lab orders,
+  // vital signs, etc.) return empty until first clinic visit; that's
+  // the documented empty-state contract.
+  //
+  // Trade-off accepted: dashboard for a freshly-registered patient
+  // (pre-first-visit) has no clinical data to display — UI must handle
+  // empty state cleanly (verified Phase F + F.5 shipped this).
+  const { data: gpRow, error: gpError } = await adminSupabase
+    .from('global_patients')
     .insert({
-      id: userId,
-      unique_id: patientUniqueId,
-      phone: params.phone,
-      full_name: params.fullName,
-      registered: true
+      claimed: true,
+      claimed_user_id: userId,
+      claimed_at: new Date().toISOString(),
+      normalized_phone: params.phone,
+      display_name: params.fullName,
     })
+    .select('id')
+    .single()
 
-  if (patientError) {
-    throw new Error(patientError.message)
+  if (gpError || !gpRow) {
+    throw new Error(
+      `global_patients insert failed: ${gpError?.message ?? 'unknown'}`
+    )
   }
 
   return {
     userId,
-    patientUniqueId
+    globalPatientId: (gpRow as { id: string }).id
   }
 }
 
@@ -314,22 +338,51 @@ export async function getDoctorProfile(userId: string) {
 }
 
 /**
- * Get patient profile by user ID
+ * Get patient profile by user ID.
+ *
+ * Refactored 2026-05-15 (K-2c, D-084): queries `global_patients` via
+ * `claimed_user_id`, NOT `patients` via `id`. Patient identity is
+ * canonical at the gp level after K-2c; clinic-presence rows in
+ * `patients` are no longer guaranteed to exist for self-registered
+ * users (they're created by frontdesk on first clinic visit only).
+ *
+ * Return shape: a normalized object with `full_name` mapped from
+ * `global_patients.display_name` so the existing layout caller
+ * (`apps/patient/app/(patient)/layout.tsx`) continues to work without
+ * a corresponding rename. The raw `global_patients` row is also
+ * spread so future callers can access the canonical column names.
+ *
+ * Behavior for legacy self-registered users (33 test accounts on
+ * staging pre-2026-04-25 with `patients` rows but no claimed gp):
+ * returns `null`. Caller's existing `try/catch` falls back to phone
+ * for display name. Cleanup of these 33 test accounts is queued as
+ * a separate workstream (D-084 follow-up); strict refactor per
+ * Mo's ratification 2026-05-15.
  */
 export async function getPatientProfile(userId: string) {
   const supabase = await createClient()
 
   const { data, error } = await supabase
-    .from('patients')
-    .select('*, users(*)')
-    .eq('id', userId)
-    .single()
+    .from('global_patients')
+    .select('id, normalized_phone, display_name, date_of_birth, age, sex, preferred_language, claimed, claimed_at, account_status, is_minor, created_at')
+    .eq('claimed_user_id', userId)
+    .maybeSingle()
 
   if (error) {
     throw new Error(error.message)
   }
 
-  return data
+  if (!data) {
+    return null
+  }
+
+  // Map display_name → full_name so existing callers that destructure
+  // `profile.full_name` keep working. Spread the gp row so canonical
+  // column names are also accessible.
+  return {
+    ...data,
+    full_name: (data as { display_name?: string | null }).display_name ?? null,
+  }
 }
 
 /**

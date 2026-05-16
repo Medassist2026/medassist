@@ -43,12 +43,19 @@ export async function GET(request: Request) {
 
       const supabase = createAdminClient('patient-lab-results-fallback')
 
-      // Get patient ID
+      // Get patient ID. K-2c (2026-05-15, D-084): self-registered users
+      // post-refactor have no `patients` row until first clinic visit, so
+      // `.single()` would throw PGRST116 ("no rows returned"). Use
+      // `.maybeSingle()` so the fallback returns empty results cleanly
+      // instead of propagating a 500 to the client. The primary path
+      // (`getLabResults` against `lab_results_orders`) already
+      // empty-states for these users; this hardens the edge case where
+      // `getLabResults` throws for an unrelated reason.
       const { data: patient, error: patientError } = await supabase
         .from('patients')
         .select('id')
         .eq('id', ctx.resolvedPatientId)
-        .single()
+        .maybeSingle()
 
       if (patientError) throw patientError
 
