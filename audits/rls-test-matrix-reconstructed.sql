@@ -190,6 +190,25 @@ DELETE FROM public.patient_data_shares WHERE id::text LIKE '00000200%';
 DELETE FROM public.patient_delegations WHERE id::text LIKE '00000200%';
 DELETE FROM public.patients WHERE id::text LIKE '00000200%';
 
+-- Phase I pre-teardown cleanup: B07 Phase I fixtures (00000300-prefixed) created by
+-- rls_test_seed_b07_phase_i (mother/father/son personas) + Phase I.A workflow rows
+-- (Aya minor gps, father appointments, son delegation). Per Lesson #21 +
+-- audits/b07-phase-i-execution-2026-05-12.md Section 6 Option A retention decision.
+-- Aya minors got auto-generated UUIDs (not 00000300- prefix) so cleanup keys on
+-- guardian_global_patient_id linkage as well.
+DELETE FROM public.patient_delegations WHERE id::text LIKE '00000300%';
+DELETE FROM public.doctor_patient_relationships WHERE id::text LIKE '00000300%' OR global_patient_id IN (
+  SELECT id FROM public.global_patients WHERE guardian_global_patient_id::text LIKE '00000300%'
+);
+DELETE FROM public.patient_medication_intake WHERE patient_id::text LIKE '00000300%';
+DELETE FROM public.appointments WHERE patient_id::text LIKE '00000300%';
+DELETE FROM public.patients WHERE id::text LIKE '00000300%' OR global_patient_id::text LIKE '00000300%' OR global_patient_id IN (
+  SELECT id FROM public.global_patients WHERE guardian_global_patient_id::text LIKE '00000300%'
+);
+DELETE FROM public.patient_clinic_records WHERE global_patient_id::text LIKE '00000300%' OR global_patient_id IN (
+  SELECT id FROM public.global_patients WHERE guardian_global_patient_id::text LIKE '00000300%'
+);
+
 -- B07-FU-2 cleanup: clear stale sms_reminders that block teardown of
 -- test appointments. The cron emits these but rls_test_teardown's
 -- current scope does not include the table (see PROGRAM_STATE B07-FU-2).
