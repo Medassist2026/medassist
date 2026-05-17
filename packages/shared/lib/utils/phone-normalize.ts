@@ -13,6 +13,28 @@
  *     used by global_patients.normalized_phone column and the matching
  *     plpgsql function `public.normalize_phone_e164` in mig 071).
  *
+ * K-2d (2026-05-15, Finding I-17) — phone storage convention is now
+ * explicit and uniform across the codebase:
+ *
+ *   APPLICATION SCHEMA (public.*):
+ *     - users.phone                          → "+201XXXXXXXXX" (+E.164)
+ *     - global_patients.normalized_phone     → "+201XXXXXXXXX" (+E.164)
+ *     - patients.phone                       → "+201XXXXXXXXX" (+E.164)
+ *     - all other public.* phone columns     → "+201XXXXXXXXX" (+E.164)
+ *
+ *   AUTH SCHEMA (Supabase Auth, immutable convention):
+ *     - auth.users.phone                     → "201XXXXXXXXX" (NO leading '+')
+ *       Supabase strips the '+' before storing; reads return the bare
+ *       12-digit form. Mig 089 (Build 04 D7) normalized 29 pre-existing
+ *       auth.users.phone rows to match this convention.
+ *
+ *   CROSS-SCHEMA BRIDGE:
+ *     - Writing to auth.users.phone: pass +E.164; Supabase strips '+'.
+ *     - Reading auth.users.phone and comparing with public.*: use
+ *       `stripPlusForAuthUsers()` on the public side OR prepend '+' to
+ *       the auth side. The former is preferred (single direction of
+ *       conversion, matches the auth.* convention's stripped form).
+ *
  * Keep this function and the SQL `public.normalize_phone_e164` in
  * supabase/migrations/071_normalize_patient_phone.sql byte-for-byte
  * equivalent on the inputs they accept and the outputs they produce.
@@ -115,4 +137,28 @@ export function normalizeEgyptianPhone(input: string | null | undefined): string
  */
 export function isValidEgyptianE164(input: string | null | undefined): boolean {
   return normalizeEgyptianPhone(input) !== null
+}
+
+/**
+ * Cross-schema bridge: convert a public-schema phone (+E.164) into the
+ * `auth.users.phone` storage format (no leading '+'). Use when a caller
+ * needs to look up an auth row by phone given a public-schema value.
+ *
+ * Example:
+ *   const publicPhone = '+201500099999'                    // public.users.phone shape
+ *   const authPhone = stripPlusForAuthUsers(publicPhone)   // '201500099999'
+ *   const { data } = await admin.auth.admin.listUsers({ ... })  // filter by phone === authPhone
+ *
+ * For writes to `auth.users.phone` (via `auth.admin.createUser` or
+ * `auth.admin.updateUserById`), Supabase strips the '+' on insert, so
+ * passing the +E.164 form directly works fine and does NOT need this
+ * helper. The helper exists only for the read-side comparison case.
+ *
+ * Returns the input unchanged if it does not start with '+' — defensive
+ * against double-stripping.
+ *
+ * K-2d (2026-05-15, Finding I-17).
+ */
+export function stripPlusForAuthUsers(publicPhone: string): string {
+  return publicPhone.startsWith('+') ? publicPhone.slice(1) : publicPhone
 }
