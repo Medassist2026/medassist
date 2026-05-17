@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next"
 import "@shared/styles/globals.css"
 import { InstallPrompt } from '@shared/components/pwa/InstallPrompt'
+import { SentryInit } from '@shared/lib/sentry-client-init'
 
 export const viewport: Viewport = {
   themeColor: '#2563EB',
@@ -83,6 +84,7 @@ export default async function RootLayout({
         />
       </head>
       <body className="min-h-screen bg-background font-sans antialiased overscroll-none">
+        <SentryInit />
         {children}
         <InstallPrompt />
       </body>

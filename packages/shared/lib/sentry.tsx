@@ -22,36 +22,60 @@ import * as Sentry from '@sentry/nextjs'
 
 const SENTRY_DSN = process.env.NEXT_PUBLIC_SENTRY_DSN
 
+/**
+ * Initialize Sentry. Safe to call from BOTH server and client contexts —
+ * runtime branches on `typeof window` and only enables Replay when we have
+ * a browser. No-ops if `NEXT_PUBLIC_SENTRY_DSN` is unset so preview/staging
+ * deploys without a DSN don't emit `Sentry not configured` errors on every
+ * boot. Production sets DSN per `audits/phase-l-mo-walltime-tracker.md`
+ * (Mo provisions Sentry project + DSN as part of Phase L L-4 wiring).
+ *
+ * PHI redaction: `beforeSend` strips Authorization + Cookie request
+ * headers; replay configs mask all text and block media so PHI inside
+ * patient records is never captured in session replays.
+ *
+ * Phase L Bundle 6 (L-4, 2026-05-16) — wires Sentry into both apps via
+ * instrumentation.ts (server) + SentryInit client component (browser).
+ * @see DECISIONS_LOG.md D-091
+ */
 export function initSentry() {
   if (!SENTRY_DSN) {
-    console.warn('Sentry DSN not configured. Error tracking disabled.')
+    // Quiet no-op when DSN is absent — emit a one-liner so the operator
+    // knows Sentry is disabled but don't spam the log on every request.
+    if (typeof window === 'undefined' && process.env.NODE_ENV !== 'test') {
+      console.warn('[Sentry] DSN not configured — error tracking disabled (set NEXT_PUBLIC_SENTRY_DSN to enable).')
+    }
     return
   }
 
+  const isBrowser = typeof window !== 'undefined'
+
   Sentry.init({
     dsn: SENTRY_DSN,
-    
+
     // Environment
     environment: process.env.NODE_ENV,
-    
+
     // Release tracking
     release: process.env.NEXT_PUBLIC_APP_VERSION || '1.0.0',
-    
-    // Performance Monitoring
+
+    // Performance Monitoring — sample 10% in prod, 100% elsewhere
     tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
-    
-    // Session Replay (optional)
-    replaysSessionSampleRate: 0.1,
-    replaysOnErrorSampleRate: 1.0,
-    
-    // Integrations
-    integrations: [
-      Sentry.replayIntegration({
-        maskAllText: true,
-        blockAllMedia: true,
-      }),
-    ],
-    
+
+    // Session Replay (browser-only — Sentry.replayIntegration would
+    // throw if invoked under Node)
+    replaysSessionSampleRate: isBrowser ? 0.1 : 0,
+    replaysOnErrorSampleRate: isBrowser ? 1.0 : 0,
+
+    integrations: isBrowser
+      ? [
+          Sentry.replayIntegration({
+            maskAllText: true,    // PHI redaction — patient records contain Arabic clinical notes
+            blockAllMedia: true,  // PHI redaction — block all images / attachments
+          }),
+        ]
+      : [],
+
     // Filter out noisy errors
     ignoreErrors: [
       // Browser extensions
@@ -61,30 +85,32 @@ export function initSentry() {
       'MyApp_RemoveAllHighlights',
       'http://tt.teletracker.info',
       'atomicFindClose',
-      
+
       // Network errors
       'Failed to fetch',
       'NetworkError',
       'AbortError',
-      
+
       // Common user-triggered errors
       'ResizeObserver loop limit exceeded',
     ],
-    
+
     // Before sending to Sentry
-    beforeSend(event, hint) {
+    beforeSend(event, _hint) {
       // Don't send errors in development
       if (process.env.NODE_ENV === 'development') {
-        console.error('Sentry would capture:', event)
+        console.error('[Sentry] would capture:', event.exception?.values?.[0]?.value || event.message)
         return null
       }
-      
-      // Sanitize sensitive data
+
+      // PHI redaction: never send request headers that include credentials
       if (event.request?.headers) {
         delete event.request.headers['Authorization']
         delete event.request.headers['Cookie']
+        delete event.request.headers['authorization']
+        delete event.request.headers['cookie']
       }
-      
+
       return event
     },
   })

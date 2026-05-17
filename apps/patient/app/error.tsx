@@ -4,10 +4,12 @@
  * Route-level Error Boundary (Next.js App Router)
  * -------------------------------------------------
  * Catches rendering, lifecycle, and data-fetch errors within any nested
- * route segment under apps/clinic/app/*. Renders an Arabic-RTL fallback
+ * route segment under apps/patient/app/*. Renders an Arabic-RTL fallback
  * and lets the user retry via `reset()`.
  *
  * This MUST be a Client Component — Next.js requires it.
+ *
+ * Mirrors apps/clinic/app/error.tsx. Phase L Bundle 6 (L-4, 2026-05-16).
  */
 
 import { useEffect } from 'react'
@@ -26,7 +28,7 @@ export default function RouteError({
     console.error('[RouteError]', error.message, error.digest)
     Sentry.withScope((scope) => {
       scope.setTag('error_boundary', 'route')
-      scope.setTag('app', 'clinic')
+      scope.setTag('app', 'patient')
       if (error.digest) scope.setExtra('next_digest', error.digest)
       Sentry.captureException(error)
     })
@@ -75,7 +77,7 @@ export default function RouteError({
         <div className="flex flex-col gap-2">
           <button
             onClick={() => reset()}
-            className="w-full h-[44px] rounded-[12px] bg-[#16A34A] hover:bg-[#15803D] text-white font-cairo text-[14px] font-semibold transition-colors"
+            className="w-full h-[44px] rounded-[12px] bg-[#2DBE5C] hover:bg-[#22A04E] text-white font-cairo text-[14px] font-semibold transition-colors"
           >
             إعادة المحاولة
           </button>

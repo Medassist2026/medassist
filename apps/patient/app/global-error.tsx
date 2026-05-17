@@ -11,6 +11,9 @@
  * Keep it dependency-light: no shared layouts, no providers, no
  * client-side data fetching. Inline styles are used so we don't depend
  * on global CSS being available at this point.
+ *
+ * Mirrors apps/clinic/app/global-error.tsx. Phase L Bundle 6 (L-4,
+ * 2026-05-16).
  */
 
 import { useEffect } from 'react'
@@ -34,7 +37,7 @@ export default function GlobalError({
     console.error('[GlobalError]', error.message, error.digest)
     Sentry.withScope((scope) => {
       scope.setTag('error_boundary', 'global')
-      scope.setTag('app', 'clinic')
+      scope.setTag('app', 'patient')
       if (error.digest) scope.setExtra('next_digest', error.digest)
       Sentry.captureException(error)
     })
@@ -126,7 +129,7 @@ export default function GlobalError({
               height: '44px',
               border: 'none',
               borderRadius: '12px',
-              backgroundColor: '#16A34A',
+              backgroundColor: '#2DBE5C',
               color: '#FFFFFF',
               fontSize: '14px',
               fontWeight: 600,

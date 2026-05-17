@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next"
 import "@shared/styles/globals.css"
+import { SentryInit } from '@shared/lib/sentry-client-init'
 
 export const metadata: Metadata = {
   title: "MedAssist - صحتك في إيدك",
@@ -40,6 +41,7 @@ export default async function RootLayout({
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
       </head>
       <body className="min-h-screen bg-background font-sans antialiased">
+        <SentryInit />
         {children}
       </body>
     </html>
