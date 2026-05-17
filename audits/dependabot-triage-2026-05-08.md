@@ -433,11 +433,14 @@ This is a multi-week migration, not a batch task. Add to `Open strategic decisio
 
 Deferral A (Next 14 → 15) **shipped Mac-side at commit `feae943`** (D-093 + D-094). Bundle 7 took 3 verification iterations — see D-094 for the scope-discovery correction.
 
-**Vuln count delta (empirical):**
+**Vuln count delta (empirical — post-Dependabot-async-rescan):**
 - Pre-Bundle-7: 59 advisories (24 high, 28 moderate, 7 low)
-- Post-Bundle-7: 60 advisories (24 high, 29 moderate, 7 low)
+- Post-Bundle-7 (cached at push-time): 60 advisories — **this was the OLD lockfile's scan**, displayed in GitHub's `remote:` line at the Bundle 7 push because Dependabot hadn't yet re-scanned the new lockfile.
+- Post-Bundle-7 (after Dependabot async re-scan completed): **3 advisories (1 high, 2 moderate, 0 low)** — net **-56 advisories**, including the 5 Next-14-specific GHSAs cited above plus 51 others closed by the transitive cascade. The re-scan completed sometime between the Bundle 7 push and the Phase L closure push (`dcf8f18`); GitHub's display reflected the new count at the closure push.
 
-The "significant drop" the Bundle 7 plan predicted **did not materialize**. The 5 Next 14-specific advisories cited above CLOSED, but Next 15 + React 19 pulled in newer transitive deps (some with their own CVEs), net of which the total ticked from 59 → 60. Most of the remaining surface is dev-tooling / build-pipeline transitives (Tier 4), consistent with the §0.5 empirical-correction analysis. Worth recording as a counter-example to "major-version migrations always reduce vuln count" — they sometimes shift the surface instead of shrinking it. Adjust future migration expectations accordingly.
+The "significant drop" the Bundle 7 plan predicted **materialized** — the cached display at push-time hid the win for the first few minutes/hours post-push. Major-version migrations CAN deliver substantial vuln reductions; the lesson here is that GitHub's vuln-count display is **asynchronously re-computed** by Dependabot, so the push-time `remote:` count is the previous lockfile's scan. Empirical lesson for future migrations: wait for Dependabot's re-scan to complete (typically a few minutes to a few hours) before reading the vuln count.
+
+**Earlier framing in this section that said "did not materialize" and called this a "counter-example to major-version migrations always reduce vuln count" was WRONG** — corrected here based on the post-rescan empirical evidence visible at the `dcf8f18` push.
 
 **Deferral B (`next-pwa` migration) — CLOSED-AS-NOT-NEEDED:** the original triage assumed `next-pwa@5.6.0` was incompatible with Next 15. The Bundle 7 Mac-side build empirically refuted that — `next-pwa@5.6.0` compiled the service worker cleanly under Next 15.5.18 (visible in the clinic build output: `> [PWA] Service worker: …/public/sw.js`). The `peer react: ^16 || ^17 || ^18` constraint that triggered the original deferral is stale upstream metadata; `.npmrc legacy-peer-deps=true` (shipped as part of Bundle 7) lets npm install + at runtime everything works. The `@serwist/next` migration is reclassified from "Phase L Bundle 8 (required)" to "future modernization workstream (non-urgent)." Full rationale in D-094.
 

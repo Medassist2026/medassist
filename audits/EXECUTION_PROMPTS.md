@@ -509,6 +509,16 @@ const params = await context.params
 
 **Cross-reference:** `audits/next-15-migration-plan.md` (scope inventory; the original plan also missed this); `audits/dependabot-triage-2026-05-08.md` Tier 3 closure entry; commit `feae943`.
 
+### Lesson 25 — Dependabot vuln counts at git-push are pre-rescan (Phase L Bundle 8 docs-closure → vuln-count correction, 2026-05-16)
+
+**Rule:** the vuln count GitHub's `remote:` line shows at `git push` is Dependabot's PREVIOUS scan of the OLD lockfile, not the new one. After a lockfile change (npm install, major-version migration), Dependabot re-scans asynchronously — completion takes minutes to hours. Don't read the push-time number as the post-migration count.
+
+**Origin:** Phase L Bundle 7 (Next 15 migration) pushed at vuln count displayed = 60. Bundle 8 docs-closure pushed at vuln count displayed = 3. The "60" was the pre-Bundle-7 lockfile's scan, still cached at the time Bundle 7's push completed. The "3" was the Bundle 7 lockfile's actual post-migration count, after Dependabot's async re-scan landed. Actual delta: 59 → 3 (−56 closed by Next 15 migration). The bundle-8 docs characterized this as "did not materialize" before the correction; this lesson prevents that misread in future migrations.
+
+**Apply to:** future major-version migrations (Next 16+, React 20+, Postgres upgrades, etc.); future dependency-sweep workstreams. When predicting "significant drop" outcomes for migrations, the prediction is verifiable post-rescan, NOT at push-time.
+
+**Cross-reference:** D-094 (Dependabot Deferral B closed empirically); audits/dependabot-triage-2026-05-08.md (Tier 4 framing; vuln count snapshots).
+
 ---
 
 ```
