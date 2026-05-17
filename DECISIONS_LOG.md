@@ -1242,5 +1242,194 @@ Expected: 21 rows. Filter by event timestamp, NOT by net `length()` delta of ope
 
 ---
 
-*Last entry: D-088 | D-087 | D-086 | D-085 | D-084 | D-083 | D-082 | D-081 | D-080 | D-079 | D-077 | D-074 (amended 2026-05-07) | 15 May 2026*
+## D-089: `EG_PHONE_RE` and `E164_RE` are exported from `packages/shared/lib/utils/phone-validation.ts`; no inline regex in auth handlers (L-3 / Finding I-19 / TD-009)
+
+**Decision Date:** 2026-05-16
+**Context:** B07 Phase I Finding I-19 surfaced that the auth/login + auth/register handlers inlined a malformed Egyptian +E.164 regex `/^\+2001[0125][0-9]{8}$/` — an extra leading zero meant **no real Egyptian phone could match** in production mode (`DEV_BYPASS_OTP=false`). The bug was latent because staging + cowork-internal testing all run with `DEV_BYPASS_OTP=true`, which routes phone validation through the lenient `E164_RE` instead. Originally tracked as TD-009 ("drift risk — low urgency since the regex is correct today"); investigation reframed it as a latent production bug.
+
+**Decision:** The two server-boundary regexes used by `auth/login` and `auth/register` are **named, exported constants** in the canonical phone-utils module (`packages/shared/lib/utils/phone-validation.ts`):
+
+- `EG_PHONE_RE = /^\+20(10|11|12|15)[0-9]{8}$/` — production-mode strict Egyptian +E.164 validator. Carrier-prefix list (`10|11|12|15`) is the NTRA-assigned mobile range (Vodafone, Etisalat, Orange, WE).
+- `E164_RE = /^\+[1-9]\d{6,14}$/` — `DEV_BYPASS_OTP=true` lenient validator. Accepts any country code so cowork / Mo can test with non-Egyptian numbers.
+
+Auth handlers `import { EG_PHONE_RE, E164_RE } from '@shared/lib/utils/phone-validation'` and gate the choice on `DEV_BYPASS_OTP`. No inline regex literals.
+
+**Reasoning:**
+1. **Lockstep carrier-prefix discipline.** Three sites already encode the NTRA prefix list (`EGYPT_MOBILE_PREFIXES`, `EGYPT_LOCAL_PHONE_RE`, and now `EG_PHONE_RE`). When NTRA assigns a new prefix, all three must update together. Co-locating the new `EG_PHONE_RE` in the same file enforces that physical co-location — future contributors who change one will see the other two adjacent.
+2. **Single source of truth — eliminates drift class of bug.** The original I-19 bug was a literal copy-paste typo (`\+200` instead of `\+20`) that survived because each handler had its own inline copy. Exporting from one module reduces the surface area where this kind of typo can land.
+3. **Test infrastructure now exists.** New unit suite `packages/shared/lib/utils/__tests__/phone-validation-eg.test.ts` (28 tests) exercises VALID inputs (the four NTRA prefixes plus a real staging-fixture number `+201500099999`), REJECT historical malformed shapes (`+2001500099999` — the pre-L-3 form), REJECT non-Egyptian / shape edge cases, and the `E164_RE` lenient branch. Run via `npx tsx packages/shared/lib/utils/__tests__/phone-validation-eg.test.ts` (same hand-rolled harness as `phone-normalize.test.ts`). A regression in the regex now blows up a test, not a production login.
+4. **No swap to `validateEgyptianPhone()`.** The richer canonical validator operates on local-format (`01XXX`) and returns a result object; the handlers operate on `+E.164` and need a boolean. Wrapping `validateEgyptianPhone` in this code path would have to strip the `+20`, normalize, and call back — for a hot path that runs on every login attempt, the regex test is simpler and cheaper. Keeping the regex-based path means the canonical validator can evolve (e.g., add landline support) without churning the auth handlers.
+5. **Production deploy gate.** Phase M re-verification will exercise real OTP against real numbers post-L-2 SMS-gateway procurement; the broken regex would have blocked every production registration. L-3 lands well before that gate so Phase M can run cleanly.
+
+**Rejected alternatives:**
+- **Make `validateEgyptianPhone` E.164-aware:** more API surface in the rich validator (a `mode: 'e164' | 'local'` parameter) plus an allocation cost (result object) on every login attempt. The two boolean regexes are a thinner abstraction for the hot path.
+- **Inline + add a comment:** keeps the latent-drift bug class around. Even with a comment, future copy-paste will lose the comment first.
+- **Defense-in-depth schema CHECK constraint on `users.phone`:** would catch broken storage at write time but doesn't help the validation-rejecting-good-input case. Deferred per the Phase L prompt's irreversible-decision STOP rule (CHECK constraints on production data with mixed storage formats need separate forensic).
+
+**Implications:**
+- `packages/shared/lib/utils/phone-validation.ts` exports two new constants: `EG_PHONE_RE`, `E164_RE`.
+- `packages/shared/lib/api/handlers/auth/login/handler.ts` and `packages/shared/lib/api/handlers/auth/register/handler.ts` drop their inline regex declarations and import from the canonical site.
+- `apps/clinic/app/api/frontdesk/profile/route.ts` doc-comment that referenced the malformed shape `/^\+2001[0125][0-9]{8}$/` updated to the corrected `/^\+20(10|11|12|15)[0-9]{8}$/` with a cross-reference to the canonical site.
+- New test file `packages/shared/lib/utils/__tests__/phone-validation-eg.test.ts` (28 tests, all pass).
+- ARCHITECTURE.md TD-009 row marked **Resolved** with date + reference to this D-089.
+
+**Trade-offs accepted:**
+- Two phone-validation regimes still coexist (local-11-digit via `getEgyptianPhoneError` for client forms, +E.164 via `EG_PHONE_RE` for server-boundary auth). Per D-087 (asymmetric phone storage) this is by design — the local form is the human-typed face; the +E.164 form is the canonical wire format. Unifying them is the scope of TD-009-followup (storage canonicalization), not L-3.
+- 4 NTRA prefixes are hardcoded. If Egypt assigns a 5th carrier prefix, three sites need a coordinated edit. Mitigation: the lockstep doc-block on `EG_PHONE_RE` names the three sites explicitly so the grep target is obvious.
+
+**Outcome:** Live in B07 Phase L Bundle 2 (commit pending). Closes Finding I-19 and resolves TD-009 (drift-risk + latent-bug both addressed). Pairs with D-087 (phone storage convention).
+
+---
+
+## D-090: SMS gateway is an `SmsGateway` interface; vendor adapters slot in; `DEV_BYPASS_OTP` flips the active adapter (L-2-config)
+
+**Decision Date:** 2026-05-16
+**Context:** The Phase L production-deployment workstream needs production-grade SMS delivery (B07 Phase L Bundle 3 / L-2-config). Today the codebase calls a low-level `sendSMS(to, body)` primitive in `packages/shared/lib/sms/twilio-client.ts` directly from a handful of call sites (`send-otp/handler.ts`, `prescription-sms`, `reminder-service`, `phone-changes`, `privacy-codes`). The primitive already detects placeholder Twilio credentials and stubs cleanly, so staging works today without burning SMS budget — but there is no abstraction over the vendor and no per-environment switch over whether real SMS goes out at all.
+
+The Phase L scope splits SMS work in two:
+- **L-2-vendor** (Mo wall-time): procure a real SMS vendor + register a sender ID with Egyptian NTRA. Tracked in `audits/phase-l-mo-walltime-tracker.md`.
+- **L-2-config** (cowork): scaffold the abstraction so vendor adapters plug in cleanly when L-2-vendor lands.
+
+**Decision:** Introduce `SmsGateway` as an exported TypeScript interface in `packages/shared/lib/sms/gateway.ts`. Two adapters ship today:
+- `TwilioSmsGateway` — delegates to existing `sendSMS` primitive (which itself handles placeholder credentials). Active in production.
+- `ConsoleLogSmsGateway` — logs the body to stdout and returns a synthetic `messageId`. Active in preview/staging/local.
+
+A `getSmsGateway()` factory selects based on `process.env.DEV_BYPASS_OTP`:
+- `true` → `ConsoleLogSmsGateway`
+- `false` (or unset) → `TwilioSmsGateway`
+
+The factory result is cached per process. Tests can call `__resetSmsGatewayForTests()` between cases.
+
+The interface exposes four high-level operations:
+- `sendOtp({ phone, code, locale, purpose? })`
+- `sendShareConsent({ phone, clinicName, doctorName, privacyCode?, expiresInMinutes, locale })`
+- `sendShareExpiring({ phone, grantedToClinicName, expiresInMinutes, locale })`
+- `sendShareExpired({ phone, grantedToClinicName, locale })`
+
+Arabic-first templates live in the same module; English templates available via `locale: 'en'`. The four operations cover today's SMS-emitting needs (OTP + the three share-lifecycle notifications); new operations can be added with their own `Send<X>Params` types.
+
+**Reasoning:**
+1. **Vendor decoupling.** Vonage / Wassup / future vendors will be a single new class implementing `SmsGateway`. No scattered `sendSMS` calls to update.
+2. **Per-env switch lives in one place.** `getSmsGateway()` is the single site that reads `DEV_BYPASS_OTP`. Calling code says "send this OTP" and doesn't care which adapter does it — same way callers don't care whether Twilio credentials are placeholders or real.
+3. **Existing `sendSMS` primitive remains.** The low-level `sendSMS(to, body)` continues to work for the five legacy callers. Migration to the gateway abstraction is incremental, not a flag-day refactor. This is the **thinnest** path forward per REVIEW_CRITERIA: ship the abstraction, prove it works, migrate callers as the codebase touches them.
+4. **No production behavior change today.** Production already routes through `sendSMS` → `twilio-client.ts`. `TwilioSmsGateway` delegates to the same primitive. Until a legacy caller is migrated, production SMS path is byte-equivalent to pre-L-2-config.
+5. **Test surface.** New unit test `packages/shared/lib/sms/__tests__/gateway.test.ts` (13/13 pass) covers factory selection, `ConsoleLogSmsGateway` round-trip, Arabic + English templating, and `TwilioSmsGateway`'s placeholder-credential stub behavior.
+
+**Rejected alternatives:**
+- **Replace `sendSMS` everywhere in one big PR.** Five callers; each with subtle differences (prescription-sms formats the body in its own helper; reminder-service has retry logic). Breaking them all at once risks regressions in flows that aren't on the Phase L critical path. Migration is incremental.
+- **Add a vendor-selector to `sendSMS` itself instead of a new abstraction.** Keeps the API small but ties the vendor decision to the call site. Future Vonage adapter would need to know about every caller's params shape. Inversion of control loses.
+- **Make `SmsGateway` an abstract class with template methods.** TypeScript interfaces are sufficient; classes-with-template-methods would force inheritance discipline and over-engineer the common case.
+- **Configure adapter selection via something other than `DEV_BYPASS_OTP`.** `DEV_BYPASS_OTP` already gates whether OTP creation+send happens at all (see send-otp/handler.ts:54). Adding a new env var (`SMS_VENDOR=twilio|vonage|console`) decouples the two switches but creates a new way for staging to misconfigure — e.g., `DEV_BYPASS_OTP=true` + `SMS_VENDOR=twilio` would burn budget on a no-op. Coupling the two switches matches the operational invariant.
+
+**Implications:**
+- `packages/shared/lib/sms/gateway.ts` is the new public surface for SMS-emitting code.
+- `apps/{clinic,patient}/.env.example` already note the per-env split (shipped in Bundle 1).
+- `apps/{clinic,patient}/vercel.json` already set the Preview defaults (shipped in Bundle 1).
+- `audits/phase-l-mo-walltime-tracker.md` ships in this bundle — captures the L-2 SMS-vendor procurement status, the L-5 domain status, and the L-6 legal/regulatory status.
+- When the L-2-vendor procurement lands, cowork's wiring task is small (~2 hours): if Mo picks Twilio, no code change needed (just env vars in Vercel); if Mo picks Vonage, add a `VonageSmsGateway` class + flip the factory to read a `SMS_VENDOR` env var or detect-by-credentials.
+- Existing `sendSMS` callers continue to work unmodified.
+
+**Trade-offs accepted:**
+- Two SMS-emitting paths coexist (legacy `sendSMS` + new `SmsGateway`). Migration is incremental. Risk: future contributors might add new SMS code to `sendSMS` instead of the gateway. Mitigation: a code-comment in `twilio-client.ts` would point at the gateway; ARCHITECTURE §3 SMS row also calls this out.
+- The `SmsGateway` interface adds modest API surface (~150 lines including templates). Worth it for the vendor-decoupling.
+- Arabic/English templates are inline in `gateway.ts` rather than in the i18n module. Defensible because they're SMS-bounded (160-char SMS limit constrains complexity); revisit if templates grow.
+
+**Outcome:** Live in B07 Phase L Bundle 3 (commit pending). Pairs with D-082 (OTP scope), D-088 (6-digit OTP), D-089 (server-boundary phone regexes). Unblocks Phase M real-OTP testing conditional on L-2-vendor procurement (Mo wall-time).
+
+---
+
+## D-091: Sentry is the production error-tracking vendor; wired via instrumentation.ts + SentryInit client component (L-4)
+
+**Decision Date:** 2026-05-16
+**Context:** Phase L Bundle 6 (L-4 / observability) needs production-grade error tracking. Three candidate vendors per the prompt: Sentry, Vercel native error tracking, DataDog. `@sentry/nextjs ^10.38.0` was already in root + per-app dependencies. `packages/shared/lib/sentry.tsx` had a half-wired `initSentry()` helper from earlier work (DS-005 setup file). The clinic-app `error.tsx` + `global-error.tsx` had a "Sentry integration can be added later when @sentry/nextjs is installed" comment.
+
+**Decision:** Sentry is the production error-tracking vendor. Wired via:
+- **Server-side init:** `apps/{clinic,patient}/instrumentation.ts` runs `initSentry()` in the Next 14.2 `register()` hook (enabled per app via `experimental.instrumentationHook: true` in `next.config.js` — removed in Next 15 which makes it default).
+- **Client-side init:** new `packages/shared/lib/sentry-client-init.tsx` exports a `SentryInit` client component (renders nothing; calls `initSentry()` in `useEffect`). Mounted once into each app's root layout.
+- **Error boundaries:** both apps' `error.tsx` + `global-error.tsx` call `Sentry.captureException` inside `useEffect` with tags `error_boundary` (`route` | `global`) and `app` (`clinic` | `patient`); existing `console.error` retained as defense-in-depth.
+- **Patient parity:** patient app previously had no `error.tsx`/`global-error.tsx`; created in this bundle mirroring clinic's structure + theme color.
+- **PHI redaction:** `beforeSend` hook strips Authorization + Cookie headers (both casings); Replay configured with `maskAllText: true` + `blockAllMedia: true` so PHI inside patient records is never captured in session replays.
+- **No-op when DSN absent:** `initSentry()` returns early when `NEXT_PUBLIC_SENTRY_DSN` is unset, with a single startup-log warning (no per-request spam). Preview/staging deploys without a DSN remain quiet.
+- **No `withSentryConfig` wrapper today:** source-map upload requires `SENTRY_AUTH_TOKEN` which Mo provisions as a follow-up Mo wall-time step (see `audits/phase-l-mo-walltime-tracker.md` §L-4). Without it Sentry still receives errors, just with minified stack traces; cowork follow-up commit lands the wrapper once Mo provides the token.
+
+**Reasoning:**
+1. **SDK already installed.** `@sentry/nextjs ^10.38.0` in root + per-app deps. Switching vendors mid-Phase-L would mean uninstalling Sentry + installing alternative + rewriting the existing `packages/shared/lib/sentry.tsx` helper. Not worth it for a vendor swap that has no concrete benefit.
+2. **Healthcare-grade redaction.** Sentry has first-class `beforeSend` hooks for PHI-style redaction. Vercel native error tracking is newer and less customizable. DataDog has redaction but is overkill for an MVP-scale healthcare app (DataDog APM costs scale aggressively).
+3. **Free tier sufficient for MVP.** Sentry free tier = 5k events/month, sufficient for a closed-beta clinic deployment (~10 doctors, ~500 patient interactions/month). Mo can upgrade if event volume warrants.
+4. **Industry baseline.** Sentry is the dominant Next.js error-tracking choice. Reduces operational surprise; standard tooling.
+5. **Mo amendment self-apply.** Per Mo's 2026-05-15 amendment ("for product decisions with well-rationaled recommendations grounded in existing D-NNN decisions, cowork may self-apply"), cowork applied Sentry rather than STOPping. Grounding: D-082 production-for-release reframe (real users need real error tracking before Phase M) + healthcare-data PHI context + free-tier-sufficient-for-MVP framing. Mo can override post-hoc if they prefer a different vendor; the abstraction in `packages/shared/lib/sentry.tsx` is the migration point (~30 min cowork to swap).
+
+**Rejected alternatives:**
+- **Vercel native error tracking:** less mature; weaker PHI redaction hooks; locks observability to the Vercel deployment surface.
+- **DataDog:** enterprise-grade APM, overkill + expensive for MVP. Revisit if traffic warrants real APM tracing.
+- **No error tracking until post-launch:** unacceptable for healthcare data. Production-for-release reframe (D-083) requires it.
+- **`withSentryConfig` wrapper today (with placeholder auth token):** the wrapper validates the auth token at build time; a placeholder breaks `npm run build`. Better to wire runtime Sentry now and add source-map upload as a follow-up Mo-step.
+
+**Implications:**
+- New file: `packages/shared/lib/sentry-client-init.tsx`
+- New files: `apps/clinic/instrumentation.ts`, `apps/patient/instrumentation.ts`
+- New files: `apps/patient/app/error.tsx`, `apps/patient/app/global-error.tsx` (mirror of clinic; patient previously had none)
+- Modified: `packages/shared/lib/sentry.tsx` — `initSentry()` now safe on server (skips `replayIntegration` when `typeof window === 'undefined'`); enhanced PHI redaction (lowercase header variants); quieter no-op when DSN absent.
+- Modified: `apps/{clinic,patient}/next.config.js` — `experimental.instrumentationHook: true` (Next 14.2 flag).
+- Modified: `apps/{clinic,patient}/app/layout.tsx` — `SentryInit` import + mount.
+- Modified: `apps/clinic/app/error.tsx` + `apps/clinic/app/global-error.tsx` — `Sentry.captureException` calls.
+- New audit doc section: `audits/phase-l-mo-walltime-tracker.md` §L-4 — Sentry DSN provisioning + (optional) source-map upload + synthetic uptime tracking.
+- ARCHITECTURE.md §3 Error Tracking row rewritten.
+
+**Trade-offs accepted:**
+- No source-map upload today → minified stack traces in Sentry until Mo provisions auth token. Cowork follow-up is small (~30 min).
+- `experimental.instrumentationHook` becomes obsolete in Next 15 (default-on). Leaving the flag set is harmless until L-7 lands; L-7 (Next 14→15 migration) removes it.
+- Sentry free tier event quota (5k/month) — sufficient for closed beta. Mo monitors quota; upgrade if volume warrants.
+
+**Outcome:** Live in B07 Phase L Bundle 6 (commit pending). Wired but inert until Mo provisions DSN per `audits/phase-l-mo-walltime-tracker.md` §L-4. Pairs with D-083 (production-for-release reframe).
+
+---
+
+## D-092: Next 14→15 migration (L-7) + next-pwa→@serwist/next (L-8) execution deferred to a Mac-side cowork session; plans shipped 2026-05-16
+
+**Decision Date:** 2026-05-16
+**Context:** Phase L Bundle 7 (L-7 Next 14→15) and Bundle 8 (L-8 next-pwa → @serwist/next) are the dependabot-deferral closures (Deferral A + Deferral B from `audits/dependabot-triage-2026-05-08.md`). Both depend on running `npm install` to land the new types before cowork can verify the migration with `tsc --noEmit` + `lint:scopes` + `next build`. The cowork sandbox CANNOT safely run `npm install` (the swc-lockfile-patch `ENOWORKSPACES` warning visible on every Mac-side build hints at lockfile-churn risk + cold `next build` exceeds the 45 s bash-call budget).
+
+The Phase L cowork prompt's STOP-able designation for Bundle 7 anticipated this: "Yes — breaking changes that require UX rework" is the explicit STOP condition. The sandbox-can't-verify case is the same category of "responsible defer."
+
+**Decision:** Phase L Bundle 7 (L-7) and Bundle 8 (L-8) ship **plans, not executions**, in this session. The plans are:
+
+- `audits/next-15-migration-plan.md` (Bundle 7) — full inventory of affected callsites (18 dynamic API routes, 5 dynamic page.tsx files, 5 `cookies()`/`headers()` sites, 0 `useFormState` sites, `themeColor` already-done per K-3, the `experimental.instrumentationHook` flag-removal, the `fetch` caching-default audit, the Node 20 engines bump), step-by-step Mac-side execution checklist, cross-references to dependabot triage doc + Next 15 release notes.
+- `audits/next-pwa-migration-plan.md` (Bundle 8) — vendor analysis (`next-pwa@5.6.0` stale + Next 15 incompatibility; `@serwist/next` actively maintained; "drop PWA" option B; option weighting), implementation plan for the recommended path, fallback paths.
+
+Execution lands in a **separate Mac-side cowork session** where:
+1. `npm install` runs cleanly with full lockfile reconciliation
+2. `tsc --noEmit` operates against the actual Next 15 types
+3. `npm run build -w @medassist/{clinic,patient}` completes without sandbox time-budget contention
+4. The husky `pre-push` 5-pass gate (root tsc + clinic tsc + lint:scopes + clinic build + patient build per Lesson #17) catches any regression before push
+
+**Reasoning:**
+1. **Cannot honestly verify in sandbox.** Without `npm install`, sandbox `tsc` reports against Next 14.2.35 types — irrelevant to Next 15 correctness. False-positives + false-negatives. Cowork shouldn't ship a commit that claims "gates pass" against the wrong dependency surface.
+2. **Per-bundle commit discipline preserved.** The plan + DECISIONS_LOG entry + state-doc updates fit the bundle cadence. Mac-side execution lands as its own commit; the deferral is explicit, not hidden.
+3. **Lockfile risk.** Mo's prior Mac-side push surfaced "Found lockfile missing swc dependencies, patching... ENOWORKSPACES" on every build. Running `npm install` in the sandbox could chase the same warning into a churned lockfile that Mo then has to revert. Defer the lockfile mutation to where `npm install` runs in its production environment.
+4. **Mo amendment alignment.** "For product decisions with well-rationaled recommendations grounded in existing D-NNN decisions, cowork may self-apply" — but the recommendation HERE is *defer execution*, with grounding in Phase L's STOP-able designation for L-7 + the sandbox capability limits. Self-applying the defer rather than blindly pushing is the responsible call.
+5. **Bundle 8 inherits the same dependency.** `next-pwa`'s Next-15-incompatibility (or the `@serwist/next` swap) cannot be verified without Next 15 actually installed. Bundling 7 + 8 plans together keeps the Mac-side cowork session focused.
+
+**Rejected alternatives:**
+- **Update `package.json` to next@15 without `npm install`, push, and let Mac-side `npm install` reconcile.** Risk: pre-push hook fails or, worse, succeeds in a weird state because the lockfile is out-of-date. Risk-not-worth-it; Mo's build environment is the verification surface.
+- **Run `npm install` in the sandbox and accept the lockfile churn.** Risk: introduces a divergent lockfile compared to Mac state; resolving the divergence on push is a separate workstream cowork can't verify.
+- **Skip L-7 + L-8 entirely and let Phase M run on Next 14.** Defensible for closed-beta (Next 14 is still supported), but Deferral A + B then linger past Phase M. The plan shipped here means a Mac-side cowork session can execute in 1-2 days as a focused workstream.
+- **Use a sandbox-isolated worktree** (per Agent tool's `isolation: "worktree"` mode). Could work for the type-check pass but `npm run build` still exceeds the 45 s budget. Not a complete solution.
+
+**Implications:**
+- **Bundle 7 deliverable** = `audits/next-15-migration-plan.md` (NEW) + this D-092 entry + STATE_OF_WORK/PROGRAM_STATE bumps. Production-launch readiness L-7 row marked **plan-shipped; execution pending Mac-side cowork session**.
+- **Bundle 8 deliverable** = `audits/next-pwa-migration-plan.md` (NEW) + this D-092 entry (one D-NNN covers both) + state-doc bumps. L-8 row similarly marked **plan-shipped; execution pending Mac-side cowork session**.
+- **Mac-side cowork session scope** ≈ 1-2 days. Single commit per bundle (L-7 + L-8 in two commits or one bundled — cowork's call when the session lands).
+- **Dependabot inventory update** = `audits/dependabot-triage-2026-05-08.md` notes Deferrals A + B as "plan ready; execution pending" (rather than the current "open" framing). Owner stays cowork-with-Mo-coordination.
+
+**Trade-offs accepted:**
+- Phase M (re-verification) may run against Next 14 if the Mac-side session lags. Acceptable: Next 14 is still supported; the production deployment can sit on 14 for closed-beta. Mo coordinates the Mac-side session before broad public launch.
+- The plans MAY surface a `STOP` condition during Mac-side execution (e.g., a removed Next API that requires UX rework). The plans don't pre-resolve that case; the Mac-side cowork session surfaces it to Mo per the standard STOP protocol.
+- Two D-NNN entries (one per bundle) would have been more granular but the deferral rationale is identical; a single D-092 with split implications keeps DECISIONS_LOG concise.
+
+**Outcome:** Plans live in B07 Phase L Bundles 7+8 (commits pending). Mac-side execution closes Deferrals A + B in a separate cowork session. Pairs with D-083 (production-for-release reframe).
+
+---
+
+*Last entry: D-092 | D-091 | D-090 | D-089 | D-088 | D-087 | D-086 | D-085 | D-084 | D-083 | D-082 | D-081 | D-080 | D-079 | D-077 | D-074 (amended 2026-05-07) | 16 May 2026*
 *Add new decisions at the bottom with sequential ID.*

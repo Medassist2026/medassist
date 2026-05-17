@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 import { createDoctorAccount, createPatientAccount, createFrontDeskAccount } from '@shared/lib/data/users'
 import { createAdminClient } from '@shared/lib/supabase/admin'
 import { NextResponse } from 'next/server'
+import { EG_PHONE_RE, E164_RE } from '@shared/lib/utils/phone-validation'
 
 export async function POST(request: Request) {
   try {
@@ -23,10 +24,12 @@ export async function POST(request: Request) {
     }
 
     // ── Server-side phone format validation ──
-    // In dev bypass mode, accept any E.164-ish number to allow testing with fake numbers
+    // Production: EG_PHONE_RE (+20 + 10/11/12/15 + 8 digits — canonical Egyptian
+    //   E.164 mobile). In dev bypass mode, accept any E.164-ish number for
+    //   testing with fake numbers (E164_RE). Both regexes imported from the
+    //   canonical site `packages/shared/lib/utils/phone-validation.ts` per L-3
+    //   / Finding I-19 / TD-009 — single source of truth, no more inline drift.
     const DEV_BYPASS_OTP = process.env.DEV_BYPASS_OTP === 'true'
-    const EG_PHONE_RE = /^\+2001[0125][0-9]{8}$/
-    const E164_RE = /^\+[1-9]\d{6,14}$/
     const phoneValid = DEV_BYPASS_OTP ? E164_RE.test(phone) : EG_PHONE_RE.test(phone)
     if (!phoneValid) {
       return NextResponse.json(

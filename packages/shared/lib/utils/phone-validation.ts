@@ -45,6 +45,35 @@ const EGYPT_MOBILE_PREFIXES: Record<string, string> = {
 /** Canonical regex for a local Egyptian mobile (11 digits, prefix 010/011/012/015). */
 export const EGYPT_LOCAL_PHONE_RE = /^01[0125]\d{8}$/
 
+/**
+ * Canonical regex for an Egyptian mobile number in +E.164 form:
+ *   +20 + (10|11|12|15) + 8 digits = 13 characters total.
+ *
+ * Examples that match: +201012345678, +201112345678, +201212345678, +201512345678
+ * Examples that reject: +20101234567 (too short), +2001012345678 (extra leading
+ * zero — the historical malformed form used inline in login/register handlers
+ * prior to L-3, fixed 2026-05-16 per Finding I-19 / TD-009), 01012345678 (no
+ * +20 prefix), +1234567890 (wrong country code).
+ *
+ * Server-boundary use: `auth/login/handler.ts`, `auth/register/handler.ts`
+ * gate this regex behind `DEV_BYPASS_OTP=false` (production); when bypass is
+ * on (preview/staging/local), a lenient E.164 regex accepts any country code
+ * so cowork / Mo can test with non-Egyptian numbers.
+ *
+ * Carrier-prefix gate (`(10|11|12|15)`) mirrors `EGYPT_MOBILE_PREFIXES` above
+ * and `EGYPT_LOCAL_PHONE_RE` below in lockstep — when Egypt's NTRA assigns a
+ * new carrier prefix, update all three together.
+ */
+export const EG_PHONE_RE = /^\+20(10|11|12|15)[0-9]{8}$/
+
+/**
+ * Lenient E.164-shaped regex — `+` followed by 7-15 digits with a non-zero
+ * leading digit. Used in DEV_BYPASS_OTP mode (preview/staging/local) by the
+ * server auth handlers so cowork / Mo can test with fake numbers that don't
+ * map to a real Egyptian carrier. Production code path uses `EG_PHONE_RE`.
+ */
+export const E164_RE = /^\+[1-9]\d{6,14}$/
+
 const ARABIC_INDIC_DIGITS = '٠١٢٣٤٥٦٧٨٩'
 
 /**

@@ -16,8 +16,10 @@ export const dynamic = 'force-dynamic'
  * NOTE on storage format: Phase A intentionally DOES NOT canonicalize the
  * stored phone format. Production currently has 170/288 users stored in the
  * local 11-digit `01XXXXXXXXX` form, and the login handler's phone regex
- * /^\+2001[0125][0-9]{8}$/ uses yet another shape. Storage canonicalization
- * is part of TD-009 and is out of scope for Phase A. We validate the input
+ * /^\+20(10|11|12|15)[0-9]{8}$/ (EG_PHONE_RE, canonical site
+ * `packages/shared/lib/utils/phone-validation.ts` per L-3 / I-19 fix
+ * 2026-05-16) uses the +E.164 shape. Storage canonicalization remains the
+ * scope of TD-009 follow-up and is out of scope for Phase A. We validate the input
  * strictly via getEgyptianPhoneError (which expects local 11-digit form, the
  * same format the existing client submits via normalizeEgyptianDigits) and
  * write back the cleaned input — preserving the predominant storage format.

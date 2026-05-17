@@ -54,6 +54,24 @@ Phone is the canonical patient identity — it's how the system deduplicates, li
 
 This distinction — discovery on Check-in, identity on Register — ensures the phone-based global identity promise is enforced by the UI, not just by the database.
 
+### Doctor-side messaging: delegate attribution badge (L-K2e2, 2026-05-16)
+
+Per D-068 (actor ≠ subject) a delegate (e.g., a son acting for his father) may send messages on behalf of a principal patient. The conversation is owned by the principal's global patient; `messages.sender_id` records the acting user. The doctor-side messages UI surfaces a small "تم الإرسال بواسطة <name>" badge above any patient-side message whose `sender_id` differs from the principal so the doctor knows who composed the text. Principal-sent patient messages render unchanged (no badge). Doctor-side messages never carry the badge. The badge resolves the delegate's `users.full_name` via an admin-scoped lookup (`'doctor-messages-delegate-lookup'`) — RLS would otherwise hide unrelated users rows from the doctor session.
+
+### OTP behavior per environment (L-2-config, 2026-05-16)
+
+OTP is a rare event by design (D-082): existing-user sign-in is password-only; OTP is reserved for new-account phone-verification at registration and the future password-reset recovery channel. Per environment:
+
+- **Production:** Real SMS goes out via the configured vendor adapter (today: Twilio, fronted by `TwilioSmsGateway`). Six-digit code per D-088. Patient enters the code; verify-otp handler hash-equality-checks.
+- **Preview / Staging:** `DEV_BYPASS_OTP=true`. No real SMS. UI shows a bypass hint next to the OTP input so cowork / Mo can complete the flow with any 6-digit code (verify-otp short-circuits when bypass is on).
+- **Local dev:** Same as Preview.
+
+The vendor selection and the env split are decoupled — `SmsGateway` is an interface (D-090); swapping to Vonage or another vendor is a single-file change at `packages/shared/lib/sms/gateway.ts`.
+
+### Phone format & validation (L-3, 2026-05-16)
+
+Patients type local 11-digit Egyptian mobile numbers (`010XXXXXXXX` / `011XXXXXXXX` / `012XXXXXXXX` / `015XXXXXXXX`). Client-side `getEgyptianPhoneError` rejects anything that isn't an NTRA-assigned carrier prefix (10 = Vodafone, 11 = Etisalat, 12 = Orange, 15 = WE). Server-boundary auth handlers (`auth/login`, `auth/register`) gate the canonical `+E.164` form `+20(10|11|12|15)[0-9]{8}` via the exported `EG_PHONE_RE` constant in `packages/shared/lib/utils/phone-validation.ts` — single source of truth, no inline drift. In `DEV_BYPASS_OTP=true` environments (preview/staging/local) a lenient `E164_RE` accepts any country code so cowork / Mo can test with non-Egyptian numbers; production swings to the strict `EG_PHONE_RE`. When the NTRA assigns a new carrier prefix, the three lockstep sites — `EGYPT_MOBILE_PREFIXES`, `EGYPT_LOCAL_PHONE_RE`, `EG_PHONE_RE` — must update together.
+
 ## Target Market
 
 **Primary:** Egyptian private clinics — solo and two-doctor practices (75-85% of market)
