@@ -89,6 +89,37 @@ export class InvalidDependentError extends Error {
   }
 }
 
+/**
+ * Thrown by `createMinorGlobalPatient` when K-1a dedup finds **two or
+ * more** existing minor gps under the same guardian with the exact same
+ * `(display_name, date_of_birth, sex)` tuple. The caller must disambiguate:
+ *
+ *   - If the caller intends to create a NEW dependent who happens to
+ *     share the tuple (twins with the same name, real-world edge case),
+ *     they re-send with `forceCreateNew: true`.
+ *   - If the caller intends to operate on an existing dependent, they
+ *     should use the explicit `minorGlobalPatientId` flow (e.g., reading
+ *     the list first, picking one, and addressing it by id).
+ *
+ * API handlers map this to HTTP 409 (conflict). The `matchedIds` field
+ * surfaces the colliding gp ids so the UI can render a disambiguation
+ * picker if it wants to.
+ *
+ * Phase K-1a (2026-05-15), Mo's Phase J I-1 ratification.
+ */
+export class AmbiguousDependentMatchError extends Error {
+  readonly code = 'DEPENDENT_AMBIGUOUS_MATCH' as const
+  readonly matchedIds: readonly string[]
+  constructor(matchedIds: readonly string[], message?: string) {
+    super(
+      message ??
+        `Multiple existing dependents match the (display_name, date_of_birth, sex) tuple under this guardian. Use forceCreateNew=true to create a new dependent anyway, or address an existing dependent by id. matchedIds=${matchedIds.join(',')}`
+    )
+    this.name = 'AmbiguousDependentMatchError'
+    this.matchedIds = matchedIds
+  }
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 // Internal helpers
 // ──────────────────────────────────────────────────────────────────────────
@@ -132,6 +163,55 @@ function validateDateOfBirth(dateOfBirth: string | undefined): void {
   }
 }
 
+/**
+ * K-1a write-time dedup lookup helper (2026-05-15, Phase J I-1 ratification).
+ *
+ * Returns all minor gps under the guardian whose
+ * `(display_name, date_of_birth, sex)` tuple matches the given inputs.
+ * Both `dateOfBirth` and `sex` use strict null-equality — a row with
+ * `date_of_birth=NULL` matches only when the input `dateOfBirth=null`,
+ * and a row with `sex=NULL` matches only when input `sex=null`.
+ *
+ * The SQL filter is bounded to `(guardian, display_name, is_minor=true)`
+ * which is typically 0-3 rows on a real guardian; null-safe equality for
+ * dob/sex is performed in TypeScript to sidestep PostgREST's lack of an
+ * `IS NOT DISTINCT FROM` operator.
+ *
+ * Returns the matched rows (id only) in stable order by `created_at ASC`
+ * — the caller (`createMinorGlobalPatient`) uses [0] when reusing so the
+ * oldest match wins (audit-trail stability).
+ */
+async function findExistingMinor(
+  supabase: ReturnType<typeof createAdminClient>,
+  args: {
+    guardianGlobalPatientId: string
+    displayName: string
+    dateOfBirth: string | null
+    sex: string | null
+  }
+): Promise<{ id: string; date_of_birth: string | null; sex: string | null }[]> {
+  const { data, error } = await supabase
+    .from('global_patients')
+    .select('id, date_of_birth, sex, created_at')
+    .eq('is_minor', true)
+    .eq('guardian_global_patient_id', args.guardianGlobalPatientId)
+    .eq('display_name', args.displayName)
+    .order('created_at', { ascending: true })
+
+  if (error) {
+    throw new Error(
+      `findExistingMinor lookup failed: ${(error as { message?: string }).message ?? 'unknown'}`
+    )
+  }
+
+  const rows = (data as { id: string; date_of_birth: string | null; sex: string | null }[] | null) ?? []
+  return rows.filter(
+    (r) =>
+      r.date_of_birth === args.dateOfBirth &&
+      r.sex === args.sex
+  )
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 // 1. createMinorGlobalPatient — guardian registers a new dependent
 // ──────────────────────────────────────────────────────────────────────────
@@ -162,10 +242,41 @@ export interface CreateMinorGlobalPatientInput {
    * onboard` migration documents the bridge.)
    */
   createdByUserId: string
+  /**
+   * K-1a dedup escape hatch (2026-05-15, Mo's Phase J I-1 ratification).
+   *
+   * Default behavior (`forceCreateNew` absent or false): the function
+   * looks up `(guardian, display_name, date_of_birth, sex)` matches
+   * before inserting. Exactly 1 match → reuse the existing minor gp's
+   * id; 2+ matches → throw `AmbiguousDependentMatchError`; 0 matches →
+   * proceed with insert as before.
+   *
+   * `forceCreateNew: true` skips the lookup entirely and always inserts
+   * a fresh minor gp. Use for the twins-same-name case where the
+   * caller has confirmed intent.
+   *
+   * UX flow:
+   *   1. UI submits without forceCreateNew. Server reuses on match (the
+   *      common case, prevents I-1 duplicate-minor bug); server throws
+   *      409 + matchedIds on multi-match (rare).
+   *   2. On 409, UI shows "There's already a dependent matching this —
+   *      did you mean them, or is this a twin?" Two CTAs: "open
+   *      existing" (uses returned matchedIds[]) and "create new anyway"
+   *      (re-submits with forceCreateNew=true).
+   */
+  forceCreateNew?: boolean
 }
 
 export interface CreateMinorGlobalPatientResult {
   minorGlobalPatientId: string
+  /**
+   * True when the K-1a dedup fired and we returned an existing minor gp's
+   * id instead of inserting a new row. The caller can use this to short-
+   * circuit downstream work (e.g., skip "registration successful" toast,
+   * route directly to the existing dependent's detail page). Absent /
+   * false on a fresh insert.
+   */
+  reused?: boolean
 }
 
 /**
@@ -234,6 +345,57 @@ export async function createMinorGlobalPatient(
     throw new GuardianAuthorityError(
       'Only the guardian (claimed_user_id of the guardian gp) may register a dependent'
     )
+  }
+
+  // ─── K-1a dedup (2026-05-15, Mo's Phase J I-1 ratification) ───────────
+  //
+  // Look up existing minors under this guardian with the same
+  // (display_name, date_of_birth, sex) tuple. Default behavior:
+  //   - 0 matches → fall through to insert (new dependent)
+  //   - 1 match   → reuse the existing minor gp's id, emit
+  //                 GUARDIAN_LINK_REUSED audit, return early
+  //   - 2+ matches → throw AmbiguousDependentMatchError (handler → 409
+  //                 with matchedIds[] for the UI's disambiguation picker)
+  //
+  // `forceCreateNew: true` skips the lookup entirely — the twins-same-
+  // name escape hatch.
+  //
+  // Postgres `IS NOT DISTINCT FROM` is NULL-safe equality but PostgREST
+  // doesn't expose it directly. We bound the query to the guardian +
+  // display_name (typically 0-3 rows for a real guardian) and filter by
+  // dob/sex in TypeScript with strict null-equality. Cheap at every
+  // guardian's expected scale.
+  if (args.forceCreateNew !== true) {
+    const existing = await findExistingMinor(supabase, {
+      guardianGlobalPatientId: args.guardianGlobalPatientId,
+      displayName: args.displayName.trim(),
+      dateOfBirth: args.dateOfBirth ?? null,
+      sex: normalizedSex,
+    })
+    if (existing.length === 1) {
+      const reusedId = existing[0]!.id
+      await emitPatientAuditWithAuthority({
+        subjectGlobalPatientId: reusedId,
+        actorUserId: args.createdByUserId,
+        actorKind: 'user',
+        action: 'GUARDIAN_LINK_REUSED',
+        entityType: 'global_patients',
+        entityId: reusedId,
+        authorityBasis: 'guardian_of_minor',
+        metadata: {
+          guardian_global_patient_id: args.guardianGlobalPatientId,
+          reused_minor_global_patient_id: reusedId,
+          attempted_display_name: args.displayName.trim(),
+          attempted_date_of_birth: args.dateOfBirth ?? null,
+          attempted_sex: normalizedSex,
+        },
+      })
+      return { minorGlobalPatientId: reusedId, reused: true }
+    }
+    if (existing.length > 1) {
+      throw new AmbiguousDependentMatchError(existing.map((r) => r.id))
+    }
+    // existing.length === 0 → fall through to insert below.
   }
 
   // Insert the minor row. Mig 109's two CHECKs hold by construction:
@@ -658,7 +820,7 @@ export async function listDependentsByGuardian(
     )
     .eq('is_minor', true)
     .in('guardian_global_patient_id', guardianGpIds)
-    .order('created_at', { ascending: false })
+    .order('created_at', { ascending: true })
 
   if (minorErr) {
     throw new Error(
@@ -666,7 +828,65 @@ export async function listDependentsByGuardian(
     )
   }
 
-  return (minors as unknown as MinorGlobalPatient[]) ?? []
+  const rows = (minors as unknown as MinorGlobalPatient[]) ?? []
+
+  // K-1b read-time dedup (2026-05-15, Phase J I-1 ratification, I-18 fix).
+  //
+  // Defense-in-depth: even when K-1a's write-time dedup is in place, the
+  // patient-app list MUST still dedup. Legacy data created pre-K-1a may
+  // contain duplicates (Phase I-1 evidence: 2 IDENTICAL "Aya" rows in
+  // the staging set demonstrated this — one organic + one SQL-injected
+  // to replicate the bug for the I-18 UI evidence capture).
+  //
+  // Dedup tuple per Mo's Phase J ratification: `(guardian, display_name,
+  // date_of_birth, sex)`. The query orders by `created_at ASC` so the
+  // FIRST occurrence (oldest) wins; subsequent duplicates are dropped.
+  // The dropped ids are surfaced on the kept row's `_duplicate_ids` so
+  // future cleanup tooling can identify exactly which rows to merge or
+  // delete. The K-2c-followup legacy-test-account cleanup workstream
+  // will sweep these.
+  //
+  // Real twins (same tuple, intended): require explicit
+  // `forceCreateNew=true` on the write path (K-1a). Twins that slip
+  // past write-time dedup (legacy or future bypass) still get collapsed
+  // here — the UI shows ONE row, which is the safer default. Future:
+  // surface the dropped tuple-mate via a "twin / duplicate?" affordance
+  // on the detail page.
+  return dedupMinorsByGuardianTuple(rows)
+}
+
+/**
+ * K-1b read-time dedup helper. Exported for testing (no other production
+ * caller needs it directly — `listDependentsByGuardian` is the canonical
+ * read surface).
+ *
+ * Tuple: `(guardian_global_patient_id, display_name, date_of_birth, sex)`.
+ * Strict null-equality across the tuple (NULL only equals NULL).
+ * Stable: keeps the FIRST occurrence per tuple (input order — call site
+ * sorts by `created_at ASC` so oldest wins). Dropped ids are attached to
+ * the kept row's `_duplicate_ids` for forensics.
+ */
+export function dedupMinorsByGuardianTuple(
+  rows: MinorGlobalPatient[]
+): (MinorGlobalPatient & { _duplicate_ids?: string[] })[] {
+  const byTuple = new Map<string, MinorGlobalPatient & { _duplicate_ids?: string[] }>()
+  const keyOf = (r: MinorGlobalPatient): string =>
+    [
+      r.guardian_global_patient_id ?? '',
+      r.display_name ?? '',
+      r.date_of_birth ?? '',
+      r.sex ?? '',
+    ].join('|')
+  for (const row of rows) {
+    const k = keyOf(row)
+    const kept = byTuple.get(k)
+    if (!kept) {
+      byTuple.set(k, { ...row })
+    } else {
+      kept._duplicate_ids = [...(kept._duplicate_ids ?? []), row.id]
+    }
+  }
+  return Array.from(byTuple.values())
 }
 
 // ──────────────────────────────────────────────────────────────────────────

@@ -1129,5 +1129,118 @@ Expected: 21 rows. Filter by event timestamp, NOT by net `length()` delta of ope
 
 ---
 
-*Last entry: D-085 | D-084 | D-083 | D-082 | D-081 | D-080 | D-079 | D-077 | D-074 (amended 2026-05-07) | 15 May 2026*
+## D-086: Minor dependent dedup tuple is (guardian, display_name, date_of_birth, sex); twins require explicit forceCreateNew opt-in
+
+**Decision Date:** 2026-05-15
+**Context:** Phase I.A Finding I-1 (cowork extension 2026-05-15) — the v2 frontdesk dependent-onboard path created a duplicate minor gp when a patient-app dependent already existed under the same guardian. Phase I.B cowork session SQL-injected a second identical "Aya Test" row to replicate the bug for the I-18 UI evidence capture; the patient-app `/patient/settings/family` list rendered both rows verbatim (zero UI dedup). Mo's Phase J 2026-05-15 ratification specified the dedup tuple AND the twins-handling escape hatch in one ruling.
+
+**Decision:** The duplicate-minor dedup tuple is `(guardian_global_patient_id, display_name, date_of_birth, sex)` — strict null-equality across all four fields (NULL only equals NULL). Dedup fires at TWO layers:
+
+1. **Write-time (K-1a):** `createMinorGlobalPatient` looks up the tuple before insert. Exactly 1 match → return the existing minor gp's id, emit `GUARDIAN_LINK_REUSED` audit, return 200. 2+ matches → throw `AmbiguousDependentMatchError`, API returns 409 + `matchedIds[]` for the UI's disambiguation picker. 0 matches → fall through to insert as before. The caller can opt OUT with `forceCreateNew: true` — the twins-same-name escape hatch — which skips the lookup entirely.
+
+2. **Read-time (K-1b):** `listDependentsByGuardian` dedups by the same tuple after the SQL query. Stable: oldest `created_at` wins. Dropped duplicate ids are surfaced on the kept row's `_duplicate_ids` for forensics. Defense-in-depth: even when K-1a is in place, legacy data may contain duplicates.
+
+**Reasoning:** The 4-tuple is the load-bearing identity for a minor under a specific guardian. Egyptian household context — a mother typically has at most a handful of children; collisions on this tuple are overwhelmingly duplicates (one path tried to register the same child twice), not twins. Mo's ratification: optimize for the common case (reuse), make twins an explicit opt-in via `forceCreateNew: true` rather than the default. The 409 + `matchedIds[]` on multi-match is the rare but real "I already have twins, registering a third sibling with the same name" case — UI shows a disambiguation picker rather than silently failing.
+
+**Rejected alternatives:**
+- **Reject duplicates outright (no twins escape hatch):** breaks the rare but legitimate Egyptian-naming case where twins share a name (common cultural pattern with first-name + family-suffix differentiating in spoken use but stored as the same `display_name`).
+- **Auto-suffix duplicate display names ("Aya (2)"):** clutters the UI for the common case where the second registration was actually a duplicate. Reuse is the correct semantic.
+- **Tuple based on phone:** minors have NO phone (synthetic `DEP_*` per Phase G). Phone is not a usable dedup key for minors.
+- **Tuple includes `preferred_language`:** noisy field that often differs between two registrations of the same child (UI default vs explicit selection); over-fragments the tuple.
+
+**Implications:**
+- `GUARDIAN_LINK_REUSED` audit action added to `AuditAction` enum (`packages/shared/lib/data/audit.ts`). Emitted when K-1a dedup fires; subject = the EXISTING minor gp (the one being reused), actor = caller, authority basis = `guardian_of_minor`. Metadata carries `attempted_display_name`, `attempted_date_of_birth`, `attempted_sex`, `guardian_global_patient_id`, `reused_minor_global_patient_id`.
+- `AmbiguousDependentMatchError` class added to `packages/shared/lib/data/dependents.ts`. Maps to HTTP 409 in both API handlers (`/api/patient/dependents/register` and `/api/patients/onboard` v2 dependent path).
+- `createMinorGlobalPatient` return type extended with optional `reused?: boolean` so callers can short-circuit "registration successful" toast and route directly to the existing detail page when appropriate.
+- `listDependentsByGuardian` exports `dedupMinorsByGuardianTuple()` helper for testing + any future read-path that needs the same dedup semantics.
+- API contract:
+  - `POST /api/patient/dependents/register` and `POST /api/patients/onboard` (when `isDependent: true`) accept an optional `forceCreateNew: boolean` body field.
+  - 200 on reuse (existing dependent returned), 201 on fresh create.
+  - 409 + `code: 'DEPENDENT_AMBIGUOUS_MATCH'` + `matchedIds: string[]` on multi-match.
+
+**Trade-offs accepted:**
+- Read-time dedup adds an O(n) post-query pass; n is small (typical guardian has 1-5 minors) so cost is negligible.
+- The K-1b read-time dedup silently collapses legacy duplicates without surfacing them to the UI today — a future cleanup workstream will sweep the staging legacy data (33 test accounts surfaced during K-2c audit). The collapsed rows' ids are preserved on `_duplicate_ids` so cleanup tooling has the full forensic trail.
+- The tuple uses strict null-equality, so a guardian who first registered "Aya" with no DOB, then later registered "Aya" WITH a DOB, gets TWO rows (not a reuse). This is the conservative direction: DOB difference is a real distinguisher; reusing across it could silently lose data.
+
+**Outcome:** Live in B07 Phase K-1 (commit pending). Resolves I-1 (architectural duplicate creation) and I-18 (UI dedup evidence). The patient-app dependents list and the frontdesk v2 onboard path both now enforce the dedup. K-2c's empty-state contract for self-registered patients remains unaffected — minor dedup is orthogonal to clinic-presence semantics.
+
+---
+
+## D-087: Phone storage convention is +E.164 application-side, bare 12-digit auth.users-side; cross-schema bridge via stripPlusForAuthUsers()
+
+**Decision Date:** 2026-05-15
+**Context:** Phase I.B Finding I-17 surfaced an asymmetric phone format across schemas: `auth.users.phone` stores `201XXXXXXXXX` (no `+`) while application-schema columns (`users.phone`, `global_patients.normalized_phone`, etc.) store `+201XXXXXXXXX`. The asymmetry has been live since the v2 identity rollout (mig 071's `normalize_phone_e164` plpgsql function outputs `+E.164`); mig 089 (Build 04 D7) normalized 29 pre-existing `auth.users.phone` rows to confirm the auth-side convention. Pre-K-2d there was no explicit codified convention — call sites discovered the asymmetry empirically.
+
+**Decision:** Codify the convention explicitly:
+
+1. **Application schema** (`public.*`) — every phone column stores **`+E.164`** form (`+201XXXXXXXXX`). Includes `users.phone`, `global_patients.normalized_phone`, `patients.phone`, `patient_phone_history.normalized_phone`, all clinical-table phone columns.
+
+2. **`auth.users.phone`** — stores **bare 12-digit** form (`201XXXXXXXXX`, no `+`) per immutable Supabase Auth convention. Supabase strips the `+` on insert (via `auth.admin.createUser`/`updateUserById`) and serves the bare form on read.
+
+3. **Cross-schema bridge** — `stripPlusForAuthUsers(publicPhone)` in `packages/shared/lib/utils/phone-normalize.ts` converts the public-schema `+E.164` form to the auth-side bare form for read-side comparisons. For writes to `auth.users.phone`, pass `+E.164` directly — Supabase strips the `+` so no caller-side helper is needed.
+
+4. **Two TS normalizers** intentionally coexist:
+   - `phone-validation.ts::normalizePhone` → returns `201XXXXXXXXX` (12-digit, no `+`). Used widely by legacy app code. NOT changed.
+   - `phone-normalize.ts::normalizeEgyptianPhone` → returns `+201XXXXXXXXX` (+E.164). Canonical for new code touching `global_patients.normalized_phone` or any cross-tenant identity work. Byte-for-byte parity with mig 071's plpgsql `normalize_phone_e164` (parity-tested).
+
+**Reasoning:** Supabase Auth's bare-form storage is immutable infrastructure — we don't control it. Forcing application schema to match (no `+`) would lose useful semantic information (`+` = "this is E.164, country-code-prefixed"). Forcing auth to match the application form is impossible. The bridge helper is the minimum-surface fix: one direction of conversion (strip), one canonical place to call it. The two TS normalizers stay separated because `phone-validation.ts::normalizePhone` has many call sites in legacy code (registration forms, search inputs, dedup logic) that ARE correct in the 12-digit form — migrating them all to `+E.164` would be a high-blast-radius refactor with no semantic gain.
+
+**Implications:**
+- NEW `stripPlusForAuthUsers(publicPhone: string)` helper in `packages/shared/lib/utils/phone-normalize.ts`. Defensive: returns input unchanged if no leading `+`.
+- Doc-block in `phone-normalize.ts` codifies the storage convention table + bridge rules.
+- ARCHITECTURE.md §5.4 captures the convention.
+- NO schema migration required this commit. A future CHECK constraint on `users.phone` + `global_patients.normalized_phone` (enforcing the `+` prefix) is a candidate defense-in-depth migration; deferred per the prompt's irreversible-decision STOP rule.
+- Existing call sites NOT refactored: per REVIEW_CRITERIA "prefer thinness," call sites that already work correctly are left alone. The `phone-changes.ts:656` manual `'+20' + raw.substring(1)` conversion is correct (input has been validated as 11-digit local form earlier in the handler); could route through `normalizeEgyptianPhone()` for consistency but the cost-benefit doesn't warrant churn.
+
+**Rejected alternatives:**
+- **Single TS normalizer for everything:** would require migrating ~140 call sites; the legacy 12-digit form is semantically correct for many of them (especially dedup keys where `+` adds no signal).
+- **Migration to add CHECK constraints:** would catch future regressions but adds a migration to this commit's scope (the prompt's STOP rule applies — irreversible). Deferred as a future hardening candidate.
+- **Force `auth.users.phone` to store `+E.164`:** impossible — Supabase Auth normalizes on insert.
+
+**Trade-offs accepted:**
+- Two TS normalizers coexist (`normalizePhone` 12-digit, `normalizeEgyptianPhone` +E.164). Slight cognitive overhead — but the file-level doc-block makes the distinction explicit, and the two have orthogonal use cases (legacy app dedup vs canonical identity).
+- Cross-schema bridge is one helper, one direction (strip). The opposite direction (add `+`) is also valid but never needed in practice — every reader of `auth.users.phone` is comparing to a `+E.164` source, so stripping the source is simpler than prepending to the auth value.
+
+**Outcome:** Live in B07 Phase K-2d (commit pending). Resolves I-17 by codifying the convention rather than mass-refactoring call sites.
+
+---
+
+## D-088: OTP digit count is 6 (was 4) — healthcare-data + D-082 framing
+
+**Decision Date:** 2026-05-15
+**Context:** Phase I.B Finding I-10 surfaced an asymmetry between the OTP UI (4 input boxes hardcoded in both patient-app and clinic-app `/otp` pages) and the API contract (verify-otp handler is length-agnostic; uses hash equality). The generator produced 4-digit codes (`crypto.randomInt(1000, 10000)`). Phase J Mo-ratification 2026-05-15 flagged this as a decision point with cowork's explicit recommendation to go to 6 digits; the Phase K-completion prompt empowered cowork to apply that recommendation without re-confirming if grounded in product docs + REVIEW_CRITERIA.
+
+**Decision:** OTP is **6 digits** across all surfaces (generator, both `/otp` pages, dev-bypass hint, documentation).
+
+**Reasoning:**
+1. **D-082 framing — OTP scope is rare.** Per D-082, existing-user sign-in is password-only by product spec; OTP is reserved for (a) new-account phone-verification at registration and (b) future password-reset recovery channel (Prompt 10 territory). A user encounters OTP at most a handful of times in their lifetime. The marginal one-time UX friction of 6 vs 4 digits is negligible compared to the daily friction it does NOT add to login.
+2. **Healthcare-data context.** MedAssist holds Egyptian patient PHI subject to PDPL accounting-of-disclosures requirements. The security-vs-friction tradeoff tilts toward security for rare events.
+3. **Brute-force resistance.** 10^6 = 1,000,000 codes vs 10^4 = 10,000 codes — two orders of magnitude harder to brute-force. With proper rate-limiting (currently 5/min on send-otp endpoint per `enforceRateLimit`), 4 digits is defensible, but defense-in-depth costs nothing meaningful here.
+4. **Industry baseline.** Healthcare apps (Apple Health, banking, most medical apps) use 6-digit OTP universally. 4-digit OTP is more common in delivery/grocery apps where SMS friction is a daily annoyance. Aligning with healthcare convention reduces user surprise.
+5. **Production-for-release reframe (D-083).** Phase J's M-gated closure framework requires production-deployment-ready code. The Phase L SMS gateway procurement happens post-K; cowork's 6-digit ship establishes the canonical generator before real SMS goes out. Pre-Phase L the dev-bypass mode accepts any 6-digit code, so test flows continue to work seamlessly.
+
+**Rejected alternatives:**
+- **Keep 4 digits:** less friction at registration, but the friction is one-time and the security delta is real. Industry-baseline mismatch would be a small UX surprise.
+- **Configurable digit count (env var):** over-engineering for a value that doesn't actually need to vary per deployment. Locked numerics are simpler to reason about.
+- **8-digit OTP:** standard for high-stakes financial wire transfers; overkill for patient-app registration verification + password reset. 6 hits the right tradeoff.
+
+**Implications:**
+- Generator: `crypto.randomInt(100000, 1000000)` in `packages/shared/lib/auth/otp.ts::generateOTPCode()` (was `1000, 10000`).
+- Both UIs: `apps/patient/app/(auth)/otp/page.tsx` and `apps/clinic/app/(auth)/otp/page.tsx` — `useState(['', '', '', '', '', ''])` (was 4 empty strings), auto-advance to `index < 5` (was `< 3`), auto-submit on `index === 5` (was `=== 3`), length check `=== 6` (was `=== 4`), Arabic error copy `'أدخل الرمز المكون من ٦ أرقام'` (was `٤`).
+- Dev-bypass hint button in clinic-app: pre-fills `['1','2','3','4','5','6']` (was `['1','2','3','4']`).
+- send-otp handler doc comment: "The OTP page will accept any 6-digit code" (was 4).
+- verify-otp handler: unchanged — it's hash-equality based, length-agnostic. Old 4-digit codes in flight at the moment of deploy will continue to verify until they expire (5-minute TTL); no migration needed.
+- DEV_BYPASS_OTP semantics: unchanged (skips OTP creation entirely; UI accepts any 6-digit code locally).
+- audit_events / otp_codes schema: unchanged (codes stored as hash, no length column).
+
+**Trade-offs accepted:**
+- Existing 4-digit codes in flight at deploy time will fail (user enters their old 4-digit code into a 6-box UI). 5-minute TTL means the maximum disruption window is 5 minutes post-deploy. Acceptable — staging is not under real user load, and Phase L production deployment is gated on K + L + M completion (the bump is well before any real user traffic).
+- Cowork applying the decision without re-confirming Mo: justified by the Phase K-completion prompt's explicit instruction ("if no product docs or REVIEW_CRITERIA can help, surface — otherwise proceed") plus the prompt's own pre-flagged recommendation of 6 digits.
+
+**Outcome:** Live in B07 Phase K-4 (commit pending). Closes Finding I-10. Pairs with D-082 (which defined OTP's narrow scope).
+
+---
+
+*Last entry: D-088 | D-087 | D-086 | D-085 | D-084 | D-083 | D-082 | D-081 | D-080 | D-079 | D-077 | D-074 (amended 2026-05-07) | 15 May 2026*
 *Add new decisions at the bottom with sequential ID.*

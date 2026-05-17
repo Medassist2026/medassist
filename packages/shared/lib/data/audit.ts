@@ -223,11 +223,25 @@ export type AuditAction =
   //      forward-compatible. metadata carries previous_guardian_id and
   //      new_guardian_id alongside global_patient_id (the child).
   //
+  //    GUARDIAN_LINK_REUSED — emitted when createMinorGlobalPatient's K-1a
+  //      dedup fires (Phase K, 2026-05-15, Mo's Phase J I-1 ratification):
+  //      the (guardian, display_name, date_of_birth, sex) tuple matches an
+  //      existing minor gp under the guardian, so the existing id is
+  //      returned to the caller instead of inserting a duplicate. actor=
+  //      caller (parent or staff bridging on parent's behalf); subject=
+  //      the EXISTING minor gp being reused (NOT a new row). metadata
+  //      carries `attempted_display_name`, `attempted_date_of_birth`,
+  //      `attempted_sex`, `guardian_global_patient_id`, and
+  //      `reused_minor_global_patient_id` so forensics can reconstruct the
+  //      dedup decision after the fact. Authority basis remains
+  //      `guardian_of_minor`.
+  //
   //    BACKFILL_DEPENDENT_GUARDIAN_RECONSTRUCTION — written by mig 111 only
   //      (one-off backfill). Reserved here for completeness; production code
   //      paths do NOT emit this action.
   | 'GUARDIAN_LINK_CREATED'
   | 'GUARDIAN_LINK_TRANSFERRED'
+  | 'GUARDIAN_LINK_REUSED'
   | 'BACKFILL_DEPENDENT_GUARDIAN_RECONSTRUCTION'
   // ── Patient delegations (B07 Phase B/C — Pattern B adult delegation) ────
   //    Two-step grant flow per architectural review §5.3: principal grants

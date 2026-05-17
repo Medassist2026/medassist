@@ -11,6 +11,7 @@ import { findGlobalPatientByPhone } from '@shared/lib/data/global-patients'
 import {
   createMinorGlobalPatient,
   establishMinorClinicPresence,
+  AmbiguousDependentMatchError,
   GuardianAuthorityError,
   InvalidDependentError,
 } from '@shared/lib/data/dependents'
@@ -35,17 +36,22 @@ export async function POST(request: Request) {
     const user = await requireApiRole(['doctor', 'frontdesk'])
     
     const body = await request.json()
-    const { 
-      phone, 
-      fullName, 
-      age, 
-      sex, 
-      isDependent, 
+    const {
+      phone,
+      fullName,
+      age,
+      sex,
+      isDependent,
       parentPhone,
       doctorId,     // Required for frontdesk flows
       patientCode,  // Optional: if patient shares their code
       isGhostMode,  // Optional: no records created
-      ghostReasonCategory
+      ghostReasonCategory,
+      // K-1a (2026-05-15, Phase J I-1 ratification): when true on an
+      // isDependent=true onboard, skip the (guardian, name, dob, sex)
+      // dedup lookup and create a fresh minor anyway. Twins escape hatch.
+      // Default false → dedup on; multi-match returns 409 with matchedIds.
+      forceCreateNew,
     } = body
 
     const assignedDoctorId = user.role === 'frontdesk' ? doctorId : user.id
@@ -253,6 +259,7 @@ export async function POST(request: Request) {
           sex: mappedSex,
           preferredLanguage: undefined, // defaults to 'ar' in data layer
           createdByUserId: parentGp.claimed_user_id,
+          forceCreateNew: forceCreateNew === true,
         })
 
         // Phase G: complete the four-row shape at the registering clinic
@@ -345,6 +352,19 @@ export async function POST(request: Request) {
           return NextResponse.json(
             { error: e.message, code: e.code },
             { status: 403 }
+          )
+        }
+        if (e instanceof AmbiguousDependentMatchError) {
+          // K-1a multi-match path: frontdesk UI shows a disambiguation
+          // picker built from `matchedIds`. Resubmit with
+          // `forceCreateNew: true` to create a fresh row anyway (twins).
+          return NextResponse.json(
+            {
+              error: e.message,
+              code: e.code,
+              matchedIds: e.matchedIds,
+            },
+            { status: 409 }
           )
         }
         throw e

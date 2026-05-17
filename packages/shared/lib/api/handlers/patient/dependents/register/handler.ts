@@ -34,6 +34,7 @@ import { NextResponse } from 'next/server'
 import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
 import { createAdminClient } from '@shared/lib/supabase/admin'
 import {
+  AmbiguousDependentMatchError,
   createMinorGlobalPatient,
   GuardianAuthorityError,
   InvalidDependentError,
@@ -44,6 +45,17 @@ interface RegisterBody {
   dateOfBirth?: unknown
   sex?: unknown
   preferredLanguage?: unknown
+  /**
+   * K-1a dedup escape hatch — when true, skip the
+   * `(guardian, display_name, date_of_birth, sex)` dedup lookup and
+   * always insert a fresh minor gp. UX flow:
+   *   1. UI submits without forceCreateNew (default false → dedup on)
+   *   2. On 409 + `code: 'DEPENDENT_AMBIGUOUS_MATCH'`, UI shows a
+   *      disambiguation picker with the returned `matchedIds`
+   *   3. If user picks "create new anyway" (twins case), UI resubmits
+   *      with forceCreateNew=true
+   */
+  forceCreateNew?: unknown
 }
 
 export async function POST(request: Request) {
@@ -61,6 +73,7 @@ export async function POST(request: Request) {
       raw.preferredLanguage === 'ar' || raw.preferredLanguage === 'en'
         ? raw.preferredLanguage
         : undefined
+    const forceCreateNew = raw.forceCreateNew === true
 
     // ─── Body validation ─────────────────────────────────────────────────
     if (!displayName || displayName.length === 0) {
@@ -132,15 +145,20 @@ export async function POST(request: Request) {
       sex,
       preferredLanguage,
       createdByUserId: user.id,
+      forceCreateNew,
     })
 
+    // 200 on reuse, 201 on fresh create. `reused: true` lets the UI skip
+    // the "registration successful" toast and instead route the guardian
+    // straight to the existing dependent's detail page if they want.
     return NextResponse.json(
       {
         success: true,
         minorGlobalPatientId: result.minorGlobalPatientId,
         displayName,
+        reused: result.reused === true,
       },
-      { status: 201 }
+      { status: result.reused === true ? 200 : 201 }
     )
   } catch (error: any) {
     if (error instanceof InvalidDependentError) {
@@ -153,6 +171,19 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: error.message, code: error.code },
         { status: 403 }
+      )
+    }
+    if (error instanceof AmbiguousDependentMatchError) {
+      // K-1a multi-match path: UI shows a disambiguation picker. The
+      // matchedIds[] is the only payload the picker needs; the message
+      // is informational.
+      return NextResponse.json(
+        {
+          error: error.message,
+          code: error.code,
+          matchedIds: error.matchedIds,
+        },
+        { status: 409 }
       )
     }
     console.error('POST /api/patient/dependents/register error:', error)
