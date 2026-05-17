@@ -101,7 +101,7 @@ function ResetPasswordContent() {
 
       setSuccess(true)
       // Auto-redirect to login after 2 seconds
-      setTimeout(() => router.push('/auth?role=doctor'), 2000)
+      setTimeout(() => router.push('/auth'), 2000)
     } catch {
       setError('حدث خطأ. حاول مرة أخرى')
     } finally {
@@ -219,7 +219,7 @@ function ResetPasswordContent() {
 
         {/* Back to login */}
         <button
-          onClick={() => router.push('/auth?role=doctor')}
+          onClick={() => router.push('/auth')}
           className="w-full mt-4 text-sm text-gray-500 hover:text-gray-700 text-center"
         >
           ← {ar.login}

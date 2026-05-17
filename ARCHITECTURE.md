@@ -125,16 +125,36 @@ medassist/
 
 ### 4.1 Auth Flow
 
+The two apps have **separate auth surfaces** per D-085 (K-3b, 2026-05-15). Doctor / frontdesk auth lives ONLY in the clinic app; the patient app has a patient-only entry layer.
+
+**Patient app (patient-only):**
+
 ```
 User opens app
-  → /role-select (choose: doctor / frontdesk / patient)
-  → /login or /auth (tabbed login + register)
+  → / (server redirect to /intro)
+  → /intro (Arabic-first splash + Sign-in / Register CTAs)
+  → /auth?tab=login or /auth?tab=register (patient-only, no role selector)
+  → Supabase signInWithPassword OR phone-OTP for new registration
+  → API validates: users.role === 'patient'
+  → Session cookie set (httpOnly, Supabase manages refresh)
+  → Redirect to /patient/dashboard
+  → OTP verification for registration + password reset
+```
+
+**Clinic app (multi-role doctor / frontdesk):**
+
+```
+User opens app
+  → /role-select (choose: doctor / frontdesk)
+  → /login (tabbed login + register; role-aware copy)
   → Supabase signInWithPassword (phone resolved to email internally)
   → API validates: users.role === selected role
   → Session cookie set (httpOnly, Supabase manages refresh)
   → Redirect to role-specific dashboard
   → OTP verification for registration + password reset
 ```
+
+Pre-D-085 the patient app had a multi-role `/auth` page that defaulted to `role=doctor` when no query param was present (Finding I-9). K-3b split the surfaces: future patient-app auth features (password reset per D-082, OAuth, biometric) ship into the patient-only surface with no leak risk into doctor/frontdesk flows.
 
 ### 4.2 Role-Based Route Protection
 

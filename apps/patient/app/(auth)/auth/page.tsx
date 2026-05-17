@@ -1,7 +1,34 @@
 'use client'
 
+/**
+ * Patient-only auth page (K-3b, 2026-05-15, D-085).
+ *
+ * Pre-K-3b this page accepted a `?role=` query parameter and rendered
+ * doctor / frontdesk / patient variants (with a specialty selector for
+ * the doctor case). When the param was absent, role defaulted to
+ * `'doctor'` — a patient navigating directly to `/auth` landed on the
+ * doctor login UI (Finding I-9). This was a copy-paste from the
+ * clinic-app routing era; clinic-app actually uses `/login` + `/role-
+ * select` and does NOT have an `/auth` route, so there was never a
+ * legitimate caller for the doctor / frontdesk branches inside the
+ * patient app.
+ *
+ * Phase J Mo ratification (2026-05-15) ruled option (2) — split auth
+ * surfaces. The patient app now exposes a patient-only `/auth`; doctor
+ * + frontdesk auth lives ONLY in the clinic-app's `/login` and
+ * `/role-select` routes. See D-085 for the architectural rationale.
+ *
+ * Future patient-app enrichments (password reset per D-082, OAuth,
+ * biometric, magic-link) ship into this surface without leak risk into
+ * doctor/frontdesk flows.
+ *
+ * The page accepts `?tab=login` (default) or `?tab=register` so the
+ * `/intro` splash CTAs can deep-link directly to the right tab.
+ */
+
 import { Suspense } from 'react'
-import { useState, useMemo, useRef, useEffect } from 'react'
+import { useState, useEffect } from 'react'
+import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { ar } from '@shared/lib/i18n/ar'
 import {
@@ -10,98 +37,40 @@ import {
   normalizeEgyptianDigits,
 } from '@shared/lib/utils/phone-validation'
 
-// ============================================================================
-// EGYPTIAN MEDICAL SPECIALTIES
-// ============================================================================
-const SPECIALTIES = [
-  { value: 'general-practitioner', label: 'طبيب عام / باطنة' },
-  { value: 'pediatrics', label: 'أطفال' },
-  { value: 'cardiology', label: 'قلب وأوعية دموية' },
-  { value: 'endocrinology', label: 'غدد صماء وسكر' },
-  { value: 'dermatology', label: 'جلدية' },
-  { value: 'ophthalmology', label: 'عيون' },
-  { value: 'ent', label: 'أنف وأذن وحنجرة' },
-  { value: 'orthopedics', label: 'عظام' },
-  { value: 'neurology', label: 'مخ وأعصاب' },
-  { value: 'psychiatry', label: 'طب نفسي' },
-  { value: 'obstetrics-gynecology', label: 'نساء وتوليد' },
-  { value: 'general-surgery', label: 'جراحة عامة' },
-  { value: 'urology', label: 'مسالك بولية' },
-  { value: 'nephrology', label: 'كلى' },
-  { value: 'pulmonology', label: 'صدر' },
-  { value: 'gastroenterology', label: 'جهاز هضمي' },
-  { value: 'rheumatology', label: 'روماتيزم' },
-  { value: 'oncology', label: 'أورام' },
-  { value: 'hematology', label: 'أمراض دم' },
-  { value: 'infectious-disease', label: 'أمراض معدية' },
-  { value: 'family-medicine', label: 'طب الأسرة' },
-  { value: 'emergency-medicine', label: 'طوارئ' },
-  { value: 'anesthesiology', label: 'تخدير' },
-  { value: 'radiology', label: 'أشعة' },
-  { value: 'pathology', label: 'باثولوجي' },
-  { value: 'physical-therapy', label: 'علاج طبيعي' },
-  { value: 'plastic-surgery', label: 'جراحة تجميل' },
-  { value: 'cardiothoracic-surgery', label: 'جراحة قلب وصدر' },
-  { value: 'neurosurgery', label: 'جراحة مخ وأعصاب' },
-  { value: 'vascular-surgery', label: 'جراحة أوعية دموية' },
-  { value: 'dentistry', label: 'أسنان' },
-  { value: 'hepatology', label: 'كبد' },
-  { value: 'neonatology', label: 'حديثي الولادة' },
-  { value: 'geriatrics', label: 'طب المسنين' },
-  { value: 'allergy-immunology', label: 'حساسية ومناعة' },
-  { value: 'pain-management', label: 'علاج الألم' },
-]
-
 type Tab = 'login' | 'register'
-type UserRole = 'doctor' | 'frontdesk' | 'patient'
 
 function AuthContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const role = (searchParams.get('role') as UserRole) || 'doctor'
+  const tabParam = searchParams.get('tab')
+  const initialTab: Tab = tabParam === 'register' ? 'register' : 'login'
 
-  const [activeTab, setActiveTab] = useState<Tab>('login')
+  const [activeTab, setActiveTab] = useState<Tab>(initialTab)
   const [phone, setPhone] = useState('')
   const [phoneTouched, setPhoneTouched] = useState(false)
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [fullName, setFullName] = useState('')
-  const [specialty, setSpecialty] = useState('')
-  const [specialtySearch, setSpecialtySearch] = useState('')
-  const [showSpecialtyDropdown, setShowSpecialtyDropdown] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
-  const specialtyRef = useRef<HTMLDivElement>(null)
-
-  // Close specialty dropdown on outside click
+  // If the URL `?tab=` param changes (e.g., user clicks the other CTA
+  // on /intro), sync the active tab without remounting the form.
   useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (specialtyRef.current && !specialtyRef.current.contains(e.target as Node)) {
-        setShowSpecialtyDropdown(false)
-      }
+    if (tabParam === 'register' && activeTab !== 'register') {
+      setActiveTab('register')
+      setError('')
+    } else if (tabParam !== 'register' && activeTab !== 'login') {
+      // tab=login or unset both mean "login"
+      setActiveTab('login')
+      setError('')
     }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [])
-
-  const filteredSpecialties = useMemo(() => {
-    if (!specialtySearch) return SPECIALTIES
-    return SPECIALTIES.filter(s =>
-      s.label.includes(specialtySearch) || s.value.includes(specialtySearch.toLowerCase())
-    )
-  }, [specialtySearch])
-
-  const getRoleLabelAr = (r: UserRole) => {
-    switch (r) {
-      case 'doctor': return ar.iAmDoctor
-      case 'frontdesk': return ar.iManageClinic
-      case 'patient': return ar.iManageHealth
-    }
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabParam])
 
   const formatPhone = (raw: string) => {
-    // Ensure +20 prefix for Egyptian numbers
+    // Ensure +20 prefix for Egyptian numbers (consumed by the login /
+    // register handlers + the shared phone validator).
     const digits = raw.replace(/\D/g, '')
     if (digits.startsWith('20')) return '+' + digits
     if (digits.startsWith('0')) return '+20' + digits.slice(1)
@@ -126,22 +95,24 @@ function AuthContent() {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: formattedPhone, password, role }),
+        body: JSON.stringify({
+          phone: formattedPhone,
+          password,
+          // Patient-only surface — role hardcoded per D-085. The login
+          // handler still requires a role in the body for shared
+          // multi-role API contract; we always pass 'patient' here.
+          role: 'patient',
+        }),
       })
       const data = await res.json()
       if (!res.ok) {
         setError(data.error || 'فشل تسجيل الدخول')
         return
       }
-      // BUG-001 FIX: session cookie timing
+      // BUG-001 session cookie timing — preserved from pre-K-3b version.
       router.refresh()
       await new Promise(r => setTimeout(r, 150))
-      const redirects: Record<UserRole, string> = {
-        doctor: '/doctor/dashboard',
-        patient: '/patient/dashboard',
-        frontdesk: '/frontdesk/dashboard',
-      }
-      router.push(redirects[role])
+      router.push('/patient/dashboard')
     } catch {
       setError('حدث خطأ. حاول مرة أخرى')
     } finally {
@@ -169,16 +140,14 @@ function AuthContent() {
       setError('كلمات المرور غير متطابقة')
       return
     }
-    if (role === 'doctor' && !specialty) {
-      setError('التخصص مطلوب')
-      return
-    }
 
     setLoading(true)
     try {
       const formattedPhone = formatPhone(phone)
 
-      // Check if phone already registered BEFORE sending OTP
+      // Check if phone already registered BEFORE sending OTP. This
+      // surfaces "already registered → sign in" UX up-front rather than
+      // burning an SMS first.
       const checkRes = await fetch('/api/auth/check-phone', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -192,7 +161,7 @@ function AuthContent() {
         }
       }
 
-      // Send OTP
+      // Send OTP for registration verification.
       const otpRes = await fetch('/api/auth/send-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -205,13 +174,13 @@ function AuthContent() {
         return
       }
 
-      // Store registration data in sessionStorage for OTP page to complete
+      // Store registration data in sessionStorage for the /otp page to
+      // complete after verification. Role hardcoded 'patient' per D-085.
       sessionStorage.setItem('pendingRegistration', JSON.stringify({
         phone: formattedPhone,
         password,
-        role,
+        role: 'patient',
         fullName,
-        specialty: role === 'doctor' ? specialty : undefined,
       }))
 
       router.push(`/otp?phone=${encodeURIComponent(formattedPhone)}&purpose=registration`)
@@ -228,18 +197,13 @@ function AuthContent() {
       {/* Logo */}
       <div className="mb-6 flex items-center gap-3">
         <div className="w-10 h-10 bg-primary-600 rounded-xl flex items-center justify-center">
-          <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+          <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
             <line x1="12" y1="10" x2="12" y2="18" />
             <line x1="8" y1="14" x2="16" y2="14" />
           </svg>
         </div>
         <span className="text-xl font-bold text-gray-900">MedAssist</span>
-      </div>
-
-      {/* Role badge */}
-      <div className="mb-6 px-4 py-1.5 bg-primary-50 text-primary-700 rounded-full text-sm font-medium">
-        {getRoleLabelAr(role)}
       </div>
 
       {/* Tabs */}
@@ -310,42 +274,6 @@ function AuthContent() {
             </div>
           )}
 
-          {/* Specialty (doctor register only) */}
-          {activeTab === 'register' && role === 'doctor' && (
-            <div ref={specialtyRef} className="relative">
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">{ar.specialty}</label>
-              <input
-                type="text"
-                value={specialtySearch || SPECIALTIES.find(s => s.value === specialty)?.label || ''}
-                onChange={(e) => {
-                  setSpecialtySearch(e.target.value)
-                  setSpecialty('')
-                  setShowSpecialtyDropdown(true)
-                }}
-                onFocus={() => setShowSpecialtyDropdown(true)}
-                placeholder={ar.specialtyPlaceholder}
-                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-              />
-              {showSpecialtyDropdown && filteredSpecialties.length > 0 && (
-                <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto">
-                  {filteredSpecialties.map((s) => (
-                    <button
-                      key={s.value}
-                      onClick={() => {
-                        setSpecialty(s.value)
-                        setSpecialtySearch(s.label)
-                        setShowSpecialtyDropdown(false)
-                      }}
-                      className="w-full text-right px-4 py-2.5 text-sm hover:bg-primary-50 transition-colors"
-                    >
-                      {s.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
           {/* Password */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">{ar.password}</label>
@@ -374,7 +302,9 @@ function AuthContent() {
             </div>
           )}
 
-          {/* Forgot Password (login only) */}
+          {/* Forgot Password (login only) — patient app links to /reset-password
+              per D-082 (password-only sign-in spec); SMS-OTP becomes the
+              recovery channel when password-reset ships (Prompt 10 territory). */}
           {activeTab === 'login' && (
             <div className="text-left">
               <button
@@ -397,13 +327,15 @@ function AuthContent() {
         </div>
       </div>
 
-      {/* Back to role selection */}
-      <button
-        onClick={() => router.push('/choose-role')}
+      {/* Back to /intro (K-3c, 2026-05-15) — was `/choose-role` (404, I-12)
+          pre-fix; now points at the canonical first-time landing the
+          patient app actually has. */}
+      <Link
+        href="/intro"
         className="mt-6 text-sm text-gray-500 hover:text-gray-700"
       >
-        ← {ar.chooseYourRole}
-      </button>
+        ← العودة
+      </Link>
     </div>
   )
 }

@@ -126,15 +126,12 @@ function OTPVerificationContent() {
         if (loginRes.ok) {
           router.refresh()
           await new Promise(r => setTimeout(r, 150))
-          const redirects: Record<string, string> = {
-            doctor: '/doctor/dashboard',
-            patient: '/patient/dashboard',
-            frontdesk: '/frontdesk/dashboard',
-          }
-          router.push(redirects[regData.role] || '/doctor/dashboard')
+          // Patient-only app (D-085); the multi-role redirect map is gone.
+          // regData.role is hardcoded 'patient' by the K-3b auth page.
+          router.push('/patient/dashboard')
         } else {
-          // Fallback to login page
-          router.push(`/auth?role=${regData.role}`)
+          // Fallback to login page (patient-only per D-085 — no role param).
+          router.push('/auth')
         }
       } else if (purpose === 'password_reset') {
         // Pass the single-use resetToken to the reset-password page so the

@@ -1,4 +1,4 @@
-import type { Metadata } from "next"
+import type { Metadata, Viewport } from "next"
 import "@shared/styles/globals.css"
 
 export const metadata: Metadata = {
@@ -6,6 +6,14 @@ export const metadata: Metadata = {
   description: "تابع صحتك، احجز مواعيدك، واطمّن على نفسك.",
   keywords: ["patient", "health", "egypt", "medical", "صحة", "مريض"],
   manifest: '/manifest.json',
+}
+
+// K-3 (2026-05-15): Next 14 requires themeColor in a separate `viewport`
+// export, not inside `metadata`. Pre-fix builds emitted deprecation
+// warnings on every static page that inherited this layout (/, /_not-found,
+// /otp, /reset-password, /auth). Single-location fix at the root layout
+// silences all 5 warnings.
+export const viewport: Viewport = {
   themeColor: '#2DBE5C',
 }
 
