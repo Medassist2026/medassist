@@ -91,11 +91,9 @@ const nextConfig = {
     serverActions: {
       bodySizeLimit: '25mb',
     },
-    // L-4 / Bundle 6 (2026-05-16): enable Next 14.2 instrumentation hook so
-    // apps/clinic/instrumentation.ts runs at server boot to initialize
-    // Sentry. Flag becomes obsolete in Next 15 (default-on); leave it here
-    // until L-7 lands so we don't regress.
-    instrumentationHook: true,
+    // L-4 / Bundle 6 (2026-05-16): instrumentation.ts auto-loads in Next 15+
+    // by default. The Next 14.2 `experimental.instrumentationHook: true` flag
+    // was removed by L-7 (2026-05-16) when the Next 15 migration landed.
   },
   transpilePackages: ['@medassist/shared', '@medassist/ui-clinic'],
   webpack: (config) => {

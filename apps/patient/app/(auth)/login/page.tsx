@@ -14,11 +14,13 @@ import { redirect } from 'next/navigation'
  * autofills targeting `/login?tab=register` continue to work post-
  * redirect.
  */
-export default function LoginAlias({
+export default async function LoginAlias({
   searchParams,
 }: {
-  searchParams: { tab?: string }
+  // Next 15 (L-7, 2026-05-16): searchParams is now a Promise that must be awaited.
+  searchParams: Promise<{ tab?: string }>
 }) {
-  const tab = searchParams?.tab === 'register' ? 'register' : 'login'
+  const params = await searchParams
+  const tab = params?.tab === 'register' ? 'register' : 'login'
   redirect(`/auth?tab=${tab}`)
 }

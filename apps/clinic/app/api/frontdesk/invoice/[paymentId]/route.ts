@@ -15,7 +15,7 @@ import { createClient } from '@shared/lib/supabase/server'
 
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { paymentId: string } }
+  { params }: { params: Promise<{ paymentId: string }> }
 ) {
   try {
     const user = await requireApiRole('frontdesk')
@@ -27,7 +27,7 @@ export async function GET(
       return NextResponse.json({ error: 'لا يوجد عيادة مرتبطة' }, { status: 403 })
     }
 
-    const { paymentId } = params
+    const { paymentId } = await params
 
     // ── Fetch payment (must belong to this clinic) ──
     const { data: payment, error: paymentError } = await admin
@@ -172,16 +172,17 @@ export async function GET(
 
 export async function POST(
   _req: NextRequest,
-  { params }: { params: { paymentId: string } }
+  { params }: { params: Promise<{ paymentId: string }> }
 ) {
   try {
     await requireApiRole('frontdesk')
     const admin = createAdminClient()
+    const { paymentId } = await params
 
     await admin
       .from('invoice_requests')
       .update({ sms_sent: true, sms_sent_at: new Date().toISOString() })
-      .eq('payment_id', params.paymentId)
+      .eq('payment_id', paymentId)
 
     return NextResponse.json({ ok: true })
   } catch (error: any) {

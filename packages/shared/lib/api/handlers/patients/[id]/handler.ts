@@ -7,11 +7,11 @@ import { NextResponse } from 'next/server'
 
 export async function GET(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const user = await requireApiRole('doctor')
-    const patientId = params.id
+    const { id: patientId } = await params
     
     if (!patientId) {
       return NextResponse.json(

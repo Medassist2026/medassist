@@ -12,12 +12,13 @@ import { NextResponse } from 'next/server'
  */
 export async function GET(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const user = await requireApiRole('doctor')
-    const relationship = await getDoctorPatientRelationship(user.id, params.id)
-    const canMessage = await canMessagePatient(user.id, params.id)
+    const { id } = await params
+    const relationship = await getDoctorPatientRelationship(user.id, id)
+    const canMessage = await canMessagePatient(user.id, id)
     
     return NextResponse.json({
       success: true,
@@ -43,20 +44,21 @@ export async function GET(
  */
 export async function POST(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const user = await requireApiRole('doctor')
+    const { id } = await params
     const { code } = await request.json()
-    
+
     if (!code) {
       return NextResponse.json(
         { success: false, error: 'Patient code is required' },
         { status: 400 }
       )
     }
-    
-    const result = await upgradeRelationship(user.id, params.id, code)
+
+    const result = await upgradeRelationship(user.id, id, code)
     
     if (!result.success) {
       return NextResponse.json(

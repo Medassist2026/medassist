@@ -173,7 +173,7 @@ function WalkInSheet({ onClose, onSuccess }: WalkInSheetProps) {
   const [error, setError] = useState('')
   const [gapSchedule, setGapSchedule] = useState<GapSchedule | null>(null)
   const [loadingGap, setLoadingGap] = useState(false)
-  const searchTimer = useRef<NodeJS.Timeout>()
+  const searchTimer = useRef<NodeJS.Timeout | undefined>(undefined)
 
   useEffect(() => {
     fetch('/api/doctors/list')
@@ -577,7 +577,7 @@ function UrgentBookingSheet({ onClose, onSuccess }: UrgentBookingSheetProps) {
   const [notes, setNotes] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
-  const searchTimer = useRef<NodeJS.Timeout>()
+  const searchTimer = useRef<NodeJS.Timeout | undefined>(undefined)
 
   useEffect(() => {
     fetch('/api/doctors/list').then(r => r.ok ? r.json() : null).then(d => {

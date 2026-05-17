@@ -41,14 +41,15 @@ function isUUID(val: string | undefined): val is string {
 
 export async function PATCH(
   request: Request,
-  context: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   if (process.env[FEATURE_FLAG] !== 'true') {
     return NextResponse.json({ error: 'Not Found' }, { status: 404 })
   }
 
   try {
-    const patientId = context?.params?.id
+    const params = await context.params
+    const patientId = params?.id
     if (!isUUID(patientId)) {
       return NextResponse.json(
         { error: 'معرف المريض غلط', code: 'invalid_param' },

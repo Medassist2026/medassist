@@ -31,14 +31,15 @@ function isUUID(val: string | undefined): val is string {
 
 export async function POST(
   _request: Request,
-  context: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   if (process.env[FEATURE_FLAG] !== 'true') {
     return NextResponse.json({ error: 'Not Found' }, { status: 404 })
   }
 
   try {
-    const requestId = context?.params?.id
+    const params = await context.params
+    const requestId = params?.id
     if (!isUUID(requestId)) {
       return NextResponse.json(
         { error: 'معرف الطلب غلط', code: 'invalid_param' },

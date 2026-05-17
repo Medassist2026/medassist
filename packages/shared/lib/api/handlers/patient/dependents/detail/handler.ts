@@ -36,14 +36,15 @@ import {
 
 export async function GET(
   _request: Request,
-  context: { params: { id: string } | Promise<{ id: string }> }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
     const user = await requireApiRole('patient')
 
-    // Next 14 params can be sync or async depending on the project's
-    // dynamic-API config. Handle both.
-    const params = await Promise.resolve(context.params)
+    // Next 15 (L-7, 2026-05-16): params is now Promise<{...}> exactly;
+    // the prior forward-compat union was rejected by Next 15's stricter
+    // ParamCheck<RouteContext> constraint.
+    const params = await context.params
     const id = params?.id
     if (!id || typeof id !== 'string') {
       return NextResponse.json(

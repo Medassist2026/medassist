@@ -1431,5 +1431,64 @@ Execution lands in a **separate Mac-side cowork session** where:
 
 ---
 
-*Last entry: D-092 | D-091 | D-090 | D-089 | D-088 | D-087 | D-086 | D-085 | D-084 | D-083 | D-082 | D-081 | D-080 | D-079 | D-077 | D-074 (amended 2026-05-07) | 16 May 2026*
+## D-093: Next 14.2.35 → 15.5.18 + React 18.3.1 → 19.2.6 migration (L-7, Dependabot Deferral A closed)
+
+**Decision Date:** 2026-05-16
+**Context:** Phase L Bundle 7 (L-7) execution. D-092 deferred this work because the cowork sandbox cannot safely run `npm install` across npm workspaces (lockfile-churn + the macOS-permission `ENOTEMPTY` blocker on the busboy staging directory rename). Mo cleared the sandbox node_modules state via `rm -rf node_modules package-lock.json && npm install` Mac-side, then handed the migration back to cowork in a fresh session. Cowork made the source-code refactors in the sandbox (which Edit can do without touching node_modules); Mo runs `npm install` + verification + commit Mac-side.
+
+**Decision:** Bump Next.js 14.2.35 → **15.5.18**, React 18.3.1 → **19.2.6**, React-dom 18.3.1 → **19.2.6**, `@types/react` ^18 → ^19, `@types/react-dom` ^18 → ^19, `eslint-config-next` 15.5.18 (unchanged at root and per-app — was already paired with apps at 15.5.18). Pin `next` to `15.5.18` exact (not `^15.x`) to match the existing exact-version-pin convention from 14.2.35.
+
+Migration scope was narrower than the original plan inventory predicted. Verified against current `main` (origin/aef0761):
+
+- **Async params/searchParams:** 8 strict-pattern handler files needed migration to `params: Promise<{ ... }>` + `await params`. The other 7 dynamic API handlers in `packages/shared/lib/api/handlers/patient/*` were ALREADY using a forward-compatible union (`params: { id: string } | Promise<{ id: string }>` with `await Promise.resolve(context.params)`) from earlier B07 work, so they need no change. The 5 dynamic `page.tsx` files all use the client-side `useParams()` hook — unaffected by Next 15's async server-params change.
+- **Async cookies()/headers()/draftMode():** all 5 callsites (`packages/shared/lib/supabase/server.ts`, `apps/clinic/app/api/clinic/leave/route.ts`, `packages/shared/lib/api/handlers/clinic/{set-active-doctor,switch}/handler.ts`, `packages/shared/lib/data/clinic-context.ts`) ALREADY used `await cookies()` — preemptive Next 15 work landed in prior bundles. No change needed.
+- **useFormState → useActionState:** 0 callsites in codebase — never adopted React 18's `useFormState`, so React 19's rename is a no-op.
+- **`experimental.instrumentationHook: true`:** removed from both `apps/{clinic,patient}/next.config.js`. The Next 14.2 flag graduated to default-on in Next 15; the Bundle 6 (L-4) Sentry wiring that added this flag now removes it.
+- **Caching defaults (fetch no-cache):** no `fetch()` callsites in the codebase rely on implicit caching for performance. Quick audit: the only `fetch()` usages are in `packages/shared/lib/sms/twilio-client.ts` (POST, never cached anyway), `packages/shared/lib/security/rate-limit.ts` (no fetch), and Sentry SDK internals. No change needed.
+- **next.config.js other:** no `experimental.bundlePagesRouterDependencies` (Pages Router only; we use App Router exclusively). `serverActions: { bodySizeLimit: '25mb' }` retained — still under `experimental` namespace, still works in Next 15.
+- **vercel.json engines:** not pinned currently; Vercel auto-selects. Next 15 supports Node 18.18+ but recommends 20+. Defer to Vercel auto-select; if Phase M smoke-test surfaces a Node-version issue Mo can pin in Vercel project settings.
+- **`@sentry/nextjs`:** already at 10.42.0 (pre-existing) which supports Next 15. `^10.38.0` constraint will auto-resolve to 10.53.1 (latest) on `npm install`. No manual bump needed.
+
+**Reasoning:**
+1. **Closes Dependabot Deferral A.** Deferral A was the Next 14→15 work; D-092 documented the defer to a Mac-side cowork session. This commit resolves D-092.
+2. **Vuln-count drop.** The pre-migration dependabot dashboard showed 59 vulnerabilities (24 high, 28 moderate, 7 low) per the Bundle 1 push observation. Next 15 + React 19 pull in newer transitive deps that close many of those CVEs; expected drop is significant (precise number captured post-`npm install` via `gh api`).
+3. **Sandbox-feasible mechanical refactors + Mac-side install + verify.** The cowork sandbox cannot run `npm install` cleanly across workspaces but CAN edit source code via Edit. Mo runs install + 4 gates + 2 builds Mac-side via `migrate-next-15-install.sh`. If anything fails, Mo iterates with the migration plan doc in front of him; if catastrophic, the rollback path is `git checkout HEAD -- package.json package-lock.json && rm -rf node_modules && npm install` (restores Next 14 baseline).
+4. **Scope-discovery learning.** The plan inventory in `audits/next-15-migration-plan.md` estimated 18 API routes + 5 pages needed mechanical refactoring. Actual scope was 8 routes (and 0 pages) — the other 7 routes were already forward-compat, and pages use `useParams()` which is hook-not-prop-based. The plan doc captured worst-case; the empirical migration is much smaller. Lesson #24 candidate (file: small migration discoveries beat large migration plans when the codebase was preemptively prepared).
+
+**Rejected alternatives:**
+- **Skip the migration entirely and ship Phase M against Next 14.** Acceptable per Mo's prior closeout for soft-launch, but lingering Deferral A keeps the vuln count high and locks the codebase to a soon-deprecated major version. Production hardening favors closing the deferral.
+- **Migrate to Next 16 instead** (next@latest at the time of execution is 16.2.6). Larger jump = larger breaking change surface. The plan was Next 15; staying with 15 keeps the migration focused. Next 16 follow-up can be a separate bundle when Mo is ready.
+- **Defer `@types/react` bump.** React 19 ships with new types (different ReactNode handling, removed `React.FC` implicit children, etc.). Skipping the types bump would mask real type bugs in the React 19 patterns. Bump.
+- **Use the Next 15 `@next/codemod` CLI** to automate the params migration. Codemod runs in the sandbox would touch node_modules and might trip the same install hazard. The 8 files affected are easy to refactor manually via Edit; codemod is overkill.
+- **Add `withSentryConfig` wrapper at the same time.** Bundle 6 (L-4) explicitly deferred source-map upload to a Mo wall-time follow-up (`SENTRY_AUTH_TOKEN` required). Adding `withSentryConfig` here would tangle scope. Keep L-7 focused on the Next 15 migration; the Sentry source-map upload remains a separate Mo-step.
+
+**Implications:**
+- 5 package.json files bumped (root + apps/{clinic,patient} + packages/{shared,ui-clinic}).
+- 8 source files refactored:
+  - `packages/shared/lib/api/handlers/patients/[id]/handler.ts` (GET)
+  - `packages/shared/lib/api/handlers/patients/[id]/relationship/handler.ts` (GET + POST)
+  - `packages/shared/lib/api/handlers/frontdesk/patients/[id]/phone-correction/handler.ts` (PATCH)
+  - `packages/shared/lib/api/handlers/clinic/phone-change-requests/[id]/reject/handler.ts` (POST)
+  - `packages/shared/lib/api/handlers/clinic/phone-change-requests/[id]/approve/handler.ts` (POST)
+  - `apps/clinic/app/api/frontdesk/invoice/[paymentId]/route.ts` (GET + POST)
+  - `apps/clinic/app/api/public/invoice/[paymentId]/route.ts` (GET)
+  - `apps/patient/app/api/patient/medications/[id]/route.ts` (DELETE + PATCH)
+- 2 `next.config.js` files: `experimental.instrumentationHook: true` removed (with a comment cross-referencing L-4 / L-7).
+- `package-lock.json` regenerated by Mo's Mac-side `npm install` (large diff; expected for a major-version bump).
+- Mac-side verification via `migrate-next-15-install.sh` (cowork-shipped script).
+- Mac-side commit via `migrate-next-15-commit.sh` (cowork-shipped script).
+- `audits/dependabot-triage-2026-05-08.md` Deferral A status moves from "plan ready; execution pending" → "Resolved 2026-05-16" with post-`npm install` vuln-count drop captured.
+- ARCHITECTURE.md §3 Technology Stack rows updated for Next 15.5.18 + React 19.2.6.
+- Next 16 follow-up tracked as a future bundle (not in this commit's scope).
+
+**Trade-offs accepted:**
+- React 19 has subtle render-cycle behavior changes (automatic batching tweaks, `useEffect` cleanup timing, `Suspense` boundary changes). Any production regression that surfaces post-migration would be caught by Phase M re-verification. If a flagship feature breaks (A2 delegation, Phase F.5, K-3 patient-only auth) per STOP condition #2 — rollback is available via the documented git-revert path.
+- Sentry SDK at 10.42→10.53 auto-resolved by ^constraint. If Sentry's Next 15 support has a known bug at 10.53.x, pin to a tested version in a follow-up.
+- `package-lock.json` diff is enormous (~3800 lines, transitive dep cascade from Next 15 + React 19). The committed lockfile is regenerated under the Mac-side `npm install`. Vercel deploys from the committed lockfile.
+
+**Outcome:** Live in B07 Phase L Bundle 7 (commit pending Mac-side). Resolves D-092 (the defer rationale). Closes Dependabot Deferral A. Pairs with D-091 (Sentry wired pre-Next-15 — verified post-migration).
+
+---
+
+*Last entry: D-093 | D-092 | D-091 | D-090 | D-089 | D-088 | D-087 | D-086 | D-085 | D-084 | D-083 | D-082 | D-081 | D-080 | D-079 | D-077 | D-074 (amended 2026-05-07) | 16 May 2026*
 *Add new decisions at the bottom with sequential ID.*

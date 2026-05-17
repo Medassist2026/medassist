@@ -30,13 +30,13 @@ import { DelegateNotAuthorizedError } from '@shared/lib/auth/patient-context'
 
 export async function POST(
   request: Request,
-  context: { params: { shareId: string } | Promise<{ shareId: string }> }
+  context: { params: Promise<{ shareId: string }> }
 ) {
   try {
     const session = await requireApiAuth()
     const userId = session.id
 
-    const params = await Promise.resolve(context.params)
+    const params = await context.params
     const shareId =
       typeof params?.shareId === 'string' ? params.shareId : null
     if (!shareId) {

@@ -56,12 +56,12 @@ interface PatchBody {
 
 export async function PATCH(
   request: Request,
-  context: { params: { id: string } | Promise<{ id: string }> }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
     const user = await requireApiRole('patient')
 
-    const params = await Promise.resolve(context.params)
+    const params = await context.params
     const id = params?.id
     if (!id || typeof id !== 'string') {
       return NextResponse.json(

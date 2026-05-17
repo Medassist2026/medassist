@@ -13,11 +13,11 @@ import { createAdminClient } from '@shared/lib/supabase/admin'
 
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { paymentId: string } }
+  { params }: { params: Promise<{ paymentId: string }> }
 ) {
   try {
     const admin = createAdminClient()
-    const { paymentId } = params
+    const { paymentId } = await params
 
     // Must have an issued invoice_request to be publicly accessible
     const { data: invoiceReq } = await admin

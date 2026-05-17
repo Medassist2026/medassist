@@ -15,10 +15,11 @@ import { requireCapability } from '@shared/lib/auth/authority'
 
 export async function DELETE(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const user = await requireApiRole('patient')
+    const { id } = await params
     const ctx = await resolvePatientContext({
       request,
       userId: user.id,
@@ -38,7 +39,7 @@ export async function DELETE(
     const { error } = await supabase
       .from('patient_medications')
       .delete()
-      .eq('id', params.id)
+      .eq('id', id)
       .eq('patient_id', ctx.resolvedPatientId)
 
     if (error) throw error
@@ -52,10 +53,11 @@ export async function DELETE(
 
 export async function PATCH(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const user = await requireApiRole('patient')
+    const { id } = await params
     const ctx = await resolvePatientContext({
       request,
       userId: user.id,
@@ -91,7 +93,7 @@ export async function PATCH(
     const { data, error } = await supabase
       .from('patient_medications')
       .update(updates)
-      .eq('id', params.id)
+      .eq('id', id)
       .eq('patient_id', ctx.resolvedPatientId)
       .select()
       .single()

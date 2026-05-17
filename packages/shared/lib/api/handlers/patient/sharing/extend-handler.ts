@@ -40,13 +40,13 @@ const VALID_DURATIONS: ExtendDuration[] = ['90_DAYS', '1_YEAR', 'PERMANENT']
 
 export async function POST(
   request: Request,
-  context: { params: { shareId: string } | Promise<{ shareId: string }> }
+  context: { params: Promise<{ shareId: string }> }
 ) {
   try {
     const session = await requireApiAuth()
     const userId = session.id
 
-    const params = await Promise.resolve(context.params)
+    const params = await context.params
     const shareId =
       typeof params?.shareId === 'string' ? params.shareId : null
     if (!shareId) {
