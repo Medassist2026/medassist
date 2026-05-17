@@ -364,6 +364,92 @@ The Section 0 cleanup approach is preferred for transient test infrastructure th
 - **Lesson #16** (verify against ground truth — Lesson #21's symptom is a fixture-FK error on the second matrix run, surfaced empirically rather than predicted from teardown function scope).
 - **Lesson #19** (smoke probe authoring discipline) — both lessons codify failure modes in test infrastructure that don't surface until a specific re-run scenario.
 
+### Lesson 22 (B07 Phase I.A — RLS impersonation test-tooling, 2026-05-12)
+
+**`SET LOCAL ROLE 'authenticated'` MUST be a standalone SQL statement before the SELECT/INSERT under test. Inline `set_config('role', 'authenticated', TRUE)` inside a `WITH` clause does not engage RLS.**
+
+When authoring RLS test scenarios, the cowork-natural pattern of inlining the role switch via `set_config` inside a CTE produces FALSE-POSITIVE PASS results. The query plan is built under `session_user`'s `BYPASSRLS` attribute (the default for the Supabase migration role), and a row-mid-query `set_config('role', ...)` call doesn't change which RLS policies are evaluated for the plan — the role switch becomes cosmetic. The query returns rows the impersonated role would have been denied.
+
+**Correct pattern:**
+
+```sql
+SET LOCAL ROLE 'authenticated';
+SET LOCAL "request.jwt.claim.sub" = '<test-user-uuid>';
+SELECT * FROM public.global_patients WHERE id = '<gp>'::uuid;
+-- RLS evaluated; row hidden if policy denies.
+RESET ROLE;
+```
+
+**Anti-pattern (FALSE PASS):**
+
+```sql
+WITH _ AS (SELECT set_config('role', 'authenticated', TRUE),
+                  set_config('request.jwt.claim.sub', '<uuid>', TRUE))
+SELECT * FROM public.global_patients WHERE id = '<gp>'::uuid;
+-- Plan still under session_user/BYPASSRLS; row visible regardless of RLS policy.
+```
+
+**Rule extends to ALL RLS test infrastructure:** migration smoke-probes (already covered by Lesson #3 in spirit), RLS matrix scenarios (`audits/rls-test-matrix.sql`), harness probes, ad-hoc "let me just verify RLS lets X do Y" forensic queries.
+
+**Origin:** Phase I.A Finding I-3 (`audits/b07-phase-i-execution-2026-05-12.md`). Initial scenario authoring used the inline `set_config` pattern; produced false-positive PASS results. The Phase H matrix at run_no = 3.x was rewritten to use the standalone `SET LOCAL ROLE` pattern, achieving the real 192/192 PASS at run_no = 4.1 (Phase H.1, 2026-05-12).
+
+**Apply to:**
+- Any new RLS scenario in `audits/rls-test-matrix.sql`
+- Any RLS forensic query (`audits/database-audit/`)
+- Any ad-hoc verification SQL — even "I just want to confirm this one row is hidden"
+
+**Pairs with:**
+- **Lesson #3** (migration smoke-probes — `SET LOCAL` discipline). Lesson #22 is the test-tooling-specific generalization.
+- **Lesson #19** (smoke-probe authoring discipline) — same family of "the probe must actually exercise the thing it claims to exercise."
+- **D-064** (RLS rewrite forensics).
+
+### Lesson 23 (B07 Phase K-6 — Legacy data cleanup operational traps, 2026-05-15)
+
+**When deleting `patients` rows on staging or production, follow the explicit transactional pre-clean order. Naïve `DELETE FROM patients` blocks on two operational traps that aren't obvious from the schema alone.**
+
+The CASCADE rules on `patients` foreign keys handle most dependent tables automatically. Two cases require explicit pre-delete:
+
+**Trap 1 — `conversations.created_from_appointment_id` is `NO ACTION` (not `CASCADE`).** The `DELETE FROM appointments` cascade fired by `DELETE FROM patients` runs BEFORE the conversations cascade, but `conversations.created_from_appointment_id` references those appointment rows with `ON DELETE NO ACTION`. Result: a foreign-key violation on `appointments` deletion. Workaround: pre-delete `conversations` rows for the target patients.
+
+**Trap 2 — mig 081's `tg_derive_patient_global_refs()` compat trigger fires on the SET NULL cascade.** When `DELETE FROM patients` triggers `appointments.patient_id` → `SET NULL`, the row update fires the post-mig-081 trigger which tries to resolve `(gp_id, clinic_id)` from a row whose `patient_id` is now `NULL`. Result: `RAISE EXCEPTION 'tg_derive_patient_global_refs: missing patient context'`. Workaround: pre-delete `appointments` rows so the cascade has no rows to fire on.
+
+**Correct order (transactional `DO $$ ... $$` block with pre-check assertion):**
+
+```sql
+DO $$
+DECLARE
+  v_target_count integer;
+BEGIN
+  SELECT COUNT(*) INTO v_target_count FROM public.users WHERE phone IN (...);
+  IF v_target_count != <expected> THEN
+    RAISE EXCEPTION 'Expected % targets, found %', <expected>, v_target_count;
+  END IF;
+
+  -- 1. sms_reminders WHERE patient_id IN (...)   — pre-clean NO ACTION FK
+  -- 2. conversations WHERE patient_id IN (...)   — pre-clean NO ACTION FK on appointments
+  -- 3. appointments WHERE patient_id IN (...)    — pre-clean to avoid mig 081 trigger
+  -- 4. patients WHERE id IN (...)                 — CASCADE handles the rest
+  -- 5. public.users WHERE id IN (...)
+  -- 6. auth.users WHERE id IN (...)
+END $$;
+```
+
+The pre-check assertion guarantees transactional atomicity — if the target count drifts, the block aborts before any DELETE fires.
+
+**Origin:** B07 Phase K-6 legacy test-account cleanup (`audits/legacy-test-account-cleanup-2026-05-15.md`). Initial naïve `DELETE FROM patients WHERE id IN (33 targets)` blocked on Trap 1 (`conversations.created_from_appointment_id` NO ACTION FK) and Trap 2 (mig 081 trigger raising EXCEPTION on SET NULL cascade). Workarounds discovered iteratively; codified into the final transactional block; deletion succeeded on the second apply attempt.
+
+**Apply to:**
+- Any future `patients` row deletion (staging or production)
+- B07 cleanup workstreams (closeout cleanups, prompt 6.5 legacy patients table deprecation work)
+- Operational SQL for any cohort-scoped patient removal (e.g., GDPR/PDPL right-to-be-forgotten endpoints when they ship)
+
+**Pairs with:**
+- **D-041** (TD-005 multi-tenant FK chain — the cascade design Lesson #23 navigates)
+- **mig 081** (the trigger that fires on SET NULL cascade)
+- **Lesson #1** (transactional discipline — `DO $$ ... $$` block with pre-check assertion is the standard apply pattern)
+
+**Cross-reference:** `audits/legacy-test-account-cleanup-2026-05-15.md` (the full operational log with exact SQL).
+
 ---
 
 ```
