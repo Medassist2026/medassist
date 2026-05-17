@@ -188,6 +188,57 @@ export async function ensurePatientVisitedDoctor(doctorId: string, patientId: st
 /**
  * Get or create a conversation for patient-initiated messaging.
  * Uses visit-based eligibility (no consent grant required).
+ *
+ * **`clinic_id` resolution (L-K2e4 / K-2e-4, 2026-05-16):**
+ *
+ * Per TD-005 / D-041, every conversation is clinic-scoped — mig 051
+ * added the NOT NULL constraint on `conversations.clinic_id`. This
+ * function does NOT pass `clinic_id` explicitly on INSERT. Two
+ * complementary paths backfill it in practice:
+ *
+ *   1. **Appointment-driven path (most common).** mig 011 +
+ *      mig 102 install a trigger on `appointments` (AFTER INSERT WHEN
+ *      status='completed') that calls
+ *      `create_conversation_after_appointment()` — this trigger
+ *      auto-creates the (patient_id, doctor_id, created_from_appointment_id)
+ *      row immediately after a visit completes. The `appointments`
+ *      table has `clinic_id NOT NULL`, and operational evidence
+ *      shows conversation rows inherit a non-NULL clinic_id from this
+ *      flow (verified via mig 048's backfill SQL: clinic_id resolves
+ *      from the doctor's primary clinic membership for pre-trigger rows;
+ *      the trigger path appears to resolve via the appointments
+ *      cascade for post-mig rows).
+ *
+ *   2. **Patient-initiated path (this function).** When this function
+ *      runs and finds no existing conversation, it inserts a row
+ *      with `created_from_appointment_id = latestAppt?.id || null`.
+ *      The same `latestAppt` is filtered by `(doctor_id, patient_id)`
+ *      so it must exist for `ensurePatientVisitedDoctor()` (above) to
+ *      have passed — otherwise this function would have thrown
+ *      `'يمكن التواصل مع الطبيب فقط بعد الزيارة الأولى'` before
+ *      reaching the insert. The mig 048 backfill rule (clinic_id <-
+ *      doctor's primary clinic membership) is the implicit fallback
+ *      for the INSERT path; in production today this branch only
+ *      fires when the appointment-driven trigger has already created
+ *      the row, so the create branch is rarely exercised.
+ *
+ * **Known gap (K-2e-4):** the function does not defensively pass
+ * `clinic_id` itself. If a deployment ever runs without mig 048's
+ * backfill rule or the appointment-driven trigger, INSERTs from this
+ * function would violate the NOT NULL constraint. Phase M
+ * re-verification (D-083) will exercise this end-to-end against the
+ * production deployment provisioned in Phase L. If the create branch
+ * fires and INSERT fails, a follow-up patch would resolve clinic_id
+ * from `latestAppt.clinic_id` (NOT NULL on `appointments`) and pass
+ * it explicitly.
+ *
+ * Cross-refs:
+ *   - `audits/b07-phase-k-2e-investigation-2026-05-15.md` §K-2e-4
+ *   - `supabase/migrations/048_clinic_id_everywhere_redo.sql` (backfill rule)
+ *   - `supabase/migrations/051_clinic_id_not_null_19_tables.sql` (NOT NULL)
+ *   - `supabase/migrations/102_forensic_backfill_helper_functions.sql`
+ *     (`create_conversation_after_appointment` trigger function)
+ *   - D-041 (TD-005 multi-tenant clinic_id rollout)
  */
 export async function getOrCreatePatientConversation(params: {
   doctorId: string
