@@ -102,6 +102,7 @@ const ALLOWED_ADMIN_SCOPES = new Set([
   'patient-create-clinic',           // doctor-side handler that creates patients in clinic
   'patient-messaging-conversation',
   'patient-messaging-eligibility',
+  'doctor-messages-delegate-lookup',  // L-K2e2 — surfaces delegate display name on doctor-side messages UI (D-068 actor ≠ subject)
   'patient-prescriptions',
   'patient-reconsent-list',
   'patient-reconsent-record',

@@ -24,6 +24,11 @@ interface Message {
   sending?: boolean   // optimistic: true while awaiting server confirmation
   failed?: boolean    // optimistic: true if send failed
   attachment?: { url: string; name: string; type: 'image' | 'file' } | null
+  // L-K2e2 (2026-05-16): set when a delegate sent on behalf of the principal
+  // patient (D-068 actor ≠ subject). Doctor-side UI renders a small "تم
+  // الإرسال بواسطة <name>" badge above the bubble so the doctor knows who
+  // composed the message. Server omits this for principal-sent messages.
+  sender_name?: string | null
 }
 
 interface Conversation {
@@ -607,12 +612,27 @@ function ChatView({
             // ── Message bubble ──────────────────────────────────────
             const { text, attachment } = decodeMessage(msg.content)
             const isDoctor = msg.sender_type === 'doctor'
+            // L-K2e2 — delegate attribution badge: patient-side message
+            // composed by someone other than the principal (e.g., a son
+            // messaging for his father). Server only sets sender_name in
+            // that case; doctor-side messages and principal-sent patient
+            // messages have sender_name undefined/null.
+            const delegateName =
+              !isDoctor && msg.sender_name ? msg.sender_name : null
 
             items.push(
               <div
                 key={msg.id}
-                className={`flex mb-2 ${isDoctor ? 'justify-start' : 'justify-end'} ${msg.sending ? 'opacity-70' : ''}`}
+                className={`flex flex-col mb-2 ${isDoctor ? 'items-start' : 'items-end'} ${msg.sending ? 'opacity-70' : ''}`}
               >
+                {delegateName && (
+                  <span
+                    className="font-cairo text-[11px] text-[#6B7280] mb-0.5 px-1"
+                    title="رسالة من نائب عن المريض"
+                  >
+                    تم الإرسال بواسطة {delegateName}
+                  </span>
+                )}
                 <div
                   className={`max-w-[75%] rounded-[16px] px-4 py-2.5 ${
                     isDoctor

@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic'
 
 import { requireApiRole, toApiErrorResponse } from '@shared/lib/auth/session'
 import { createClient } from '@shared/lib/supabase/server'
+import { createAdminClient } from '@shared/lib/supabase/admin'
 import {
   ensureMessagingConsent,
   getOrCreateConsentedConversation,
@@ -36,7 +37,7 @@ export async function GET(request: Request) {
 
     const { data: messages, error: messagesError } = await supabase
       .from('messages')
-      .select('id, sender_type, content, sent_at, created_at, read_at')
+      .select('id, sender_id, sender_type, content, sent_at, created_at, read_at')
       .eq('conversation_id', conversation.id)
       .order('sent_at', { ascending: true })
 
@@ -54,13 +55,71 @@ export async function GET(request: Request) {
       .update({ doctor_unread_count: 0 })
       .eq('id', conversation.id)
 
-    const mapped = (messages || []).map((m: any) => ({
-      id: m.id,
-      sender_type: m.sender_type,
-      content: m.content,
-      created_at: m.sent_at || m.created_at,
-      is_read: !!m.read_at
-    }))
+    // ── Delegate-attribution lookup (L-K2e2 / K-2e-2, 2026-05-16) ──
+    // Per D-068 (actor != subject) a delegate may send on behalf of a
+    // principal patient. messages.sender_id is the acting user (e.g., the
+    // son), while the conversation is owned by the principal's global
+    // patient (e.g., the father). When sender_id != principal_user_id and
+    // sender_type='patient', surface the actual sender's name so the
+    // doctor knows who composed the message. We resolve the principal
+    // via patients.global_patient_id -> global_patients.claimed_user_id,
+    // then batch-fetch the delegate users.full_name via admin (RLS would
+    // otherwise hide users rows the doctor can't read).
+    const admin = createAdminClient('doctor-messages-delegate-lookup')
+    const { data: patientRow } = await admin
+      .from('patients')
+      .select('global_patient_id')
+      .eq('id', patientId)
+      .maybeSingle()
+    let principalUserId: string | null = null
+    if (patientRow?.global_patient_id) {
+      const { data: gpRow } = await admin
+        .from('global_patients')
+        .select('claimed_user_id')
+        .eq('id', patientRow.global_patient_id)
+        .maybeSingle()
+      principalUserId = gpRow?.claimed_user_id ?? null
+    }
+    const delegateIds = Array.from(
+      new Set(
+        (messages || [])
+          .filter((m: any) =>
+            m.sender_type === 'patient' &&
+            !!m.sender_id &&
+            (!principalUserId || m.sender_id !== principalUserId)
+          )
+          .map((m: any) => m.sender_id as string)
+      )
+    )
+    const delegateNames = new Map<string, string>()
+    if (delegateIds.length > 0) {
+      const { data: delegateUsers } = await admin
+        .from('users')
+        .select('id, full_name')
+        .in('id', delegateIds)
+      ;(delegateUsers || []).forEach((u: any) => {
+        if (u?.id && u?.full_name) delegateNames.set(u.id, u.full_name)
+      })
+    }
+
+    const mapped = (messages || []).map((m: any) => {
+      const isDelegated =
+        m.sender_type === 'patient' &&
+        !!m.sender_id &&
+        principalUserId !== null &&
+        m.sender_id !== principalUserId
+      return {
+        id: m.id,
+        sender_type: m.sender_type,
+        content: m.content,
+        created_at: m.sent_at || m.created_at,
+        is_read: !!m.read_at,
+        // Only attached for delegated patient-side sends. Doctor-side messages
+        // and direct-principal patient sends omit sender_name to keep the
+        // common case lean.
+        sender_name: isDelegated ? (delegateNames.get(m.sender_id) ?? null) : undefined,
+      }
+    })
 
     return NextResponse.json({ success: true, messages: mapped })
   } catch (error: any) {
