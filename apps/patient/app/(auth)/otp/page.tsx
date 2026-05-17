@@ -11,7 +11,11 @@ function OTPVerificationContent() {
   const phone = searchParams.get('phone') || ''
   const purpose = searchParams.get('purpose') || 'registration'
 
-  const [otp, setOtp] = useState(['', '', '', ''])
+  // K-4 (2026-05-15, D-088): OTP bumped 4 → 6 digits for healthcare-data
+  // security posture (Egyptian PDPL + medical records sensitivity); D-082
+  // makes OTP rare (registration verification + future password-reset only),
+  // so one-time UX friction is acceptable.
+  const [otp, setOtp] = useState(['', '', '', '', '', ''])
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [countdown, setCountdown] = useState(30)
@@ -43,12 +47,12 @@ function OTPVerificationContent() {
     setError('')
 
     // Auto-advance to next input
-    if (value && index < 3) {
+    if (value && index < 5) {
       inputRefs.current[index + 1]?.focus()
     }
 
-    // Auto-submit when all 4 digits filled
-    if (value && index === 3 && newOtp.every(d => d)) {
+    // Auto-submit when all 6 digits filled
+    if (value && index === 5 && newOtp.every(d => d)) {
       handleVerify(newOtp.join(''))
     }
   }
@@ -61,8 +65,8 @@ function OTPVerificationContent() {
 
   const handleVerify = async (code?: string) => {
     const otpCode = code || otp.join('')
-    if (otpCode.length !== 4) {
-      setError('أدخل الرمز المكون من ٤ أرقام')
+    if (otpCode.length !== 6) {
+      setError('أدخل الرمز المكون من ٦ أرقام')
       return
     }
 

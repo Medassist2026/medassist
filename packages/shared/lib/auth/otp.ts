@@ -2,10 +2,17 @@ import { createAdminClient } from '@shared/lib/supabase/admin'
 import crypto from 'crypto'
 
 /**
- * Generate a 4-digit OTP code
+ * Generate a 6-digit OTP code.
+ *
+ * K-4 (2026-05-15, D-088): bumped from 4 to 6 digits. Rationale: healthcare-
+ * data context (Egyptian PDPL accounting + medical-records sensitivity)
+ * warrants the stronger security posture; D-082 confined OTP scope to
+ * registration verification + future password-reset recovery so the
+ * one-time UX friction is rare. Industry baseline for healthcare apps
+ * (Apple Health, banking, most medical apps) is 6 digits.
  */
 export function generateOTPCode(): string {
-  return crypto.randomInt(1000, 10000).toString()
+  return crypto.randomInt(100000, 1000000).toString()
 }
 
 /**

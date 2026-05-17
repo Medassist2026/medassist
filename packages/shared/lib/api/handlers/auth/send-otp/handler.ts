@@ -8,7 +8,8 @@ import { enforceRateLimit } from '@shared/lib/security/rate-limit'
 /**
  * DEV_BYPASS_OTP: When true, skips OTP creation and SMS entirely.
  * Set to 'true' in .env.local during testing.
- * The OTP page will accept any 4-digit code (handled in verify-otp).
+ * The OTP page will accept any 6-digit code (handled in verify-otp).
+ * (Pre-K-4 the OTP was 4 digits; bumped 2026-05-15 per D-088.)
  */
 const DEV_BYPASS_OTP = process.env.DEV_BYPASS_OTP === 'true'
 

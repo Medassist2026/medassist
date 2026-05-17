@@ -19,7 +19,9 @@ function OTPVerificationPageInner() {
   const phone = searchParams.get('phone') || ''
   const purpose = searchParams.get('purpose') || 'registration'
 
-  const [otp, setOtp] = useState(['', '', '', ''])
+  // K-4 (2026-05-15, D-088): OTP bumped 4 → 6 digits for healthcare-data
+  // security posture; D-082 makes OTP rare so one-time friction is fine.
+  const [otp, setOtp] = useState(['', '', '', '', '', ''])
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [countdown, setCountdown] = useState(30)
@@ -50,10 +52,10 @@ function OTPVerificationPageInner() {
     setOtp(newOtp)
     setError('')
 
-    if (value && index < 3) {
+    if (value && index < 5) {
       inputRefs.current[index + 1]?.focus()
     }
-    if (value && index === 3 && newOtp.every(d => d)) {
+    if (value && index === 5 && newOtp.every(d => d)) {
       handleVerify(newOtp.join(''))
     }
   }
@@ -66,8 +68,8 @@ function OTPVerificationPageInner() {
 
   const handleVerify = async (code?: string) => {
     const otpCode = code || otp.join('')
-    if (otpCode.length !== 4) {
-      setError('أدخل الرمز المكون من ٤ أرقام')
+    if (otpCode.length !== 6) {
+      setError('أدخل الرمز المكون من ٦ أرقام')
       return
     }
 
@@ -199,7 +201,7 @@ function OTPVerificationPageInner() {
             {phone}
           </span>
 
-          {/* Dev bypass hint — visible when DEV_BYPASS_OTP is active (any 4-digit code works) */}
+          {/* Dev bypass hint — visible when DEV_BYPASS_OTP is active (any 6-digit code works) */}
           {process.env.NEXT_PUBLIC_OTP_BYPASS_HINT === 'true' && (
             <div className="mt-4 px-4 py-2 rounded-lg bg-amber-50 border border-amber-200 text-center">
               <p className="font-mono text-[13px] text-amber-700">
@@ -207,7 +209,7 @@ function OTPVerificationPageInner() {
                 <button
                   type="button"
                   className="font-bold underline cursor-pointer"
-                  onClick={() => setOtp(['1','2','3','4'])}
+                  onClick={() => setOtp(['1','2','3','4','5','6'])}
                 >
                   1234
                 </button>
