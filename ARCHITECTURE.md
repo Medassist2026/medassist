@@ -119,6 +119,17 @@ medassist/
 | Build | Turborepo | — | Pipeline: lint → type-check → build. Config in `turbo.json`. |
 | Git Hooks | Husky | 9.x | `pre-push`: 5 passes — (1) root `npm run type-check` (D-045, catches phantom imports invisible to per-workspace tsconfig); (2) clinic workspace `type-check -w @medassist/clinic` (D-042, fast app-scoped feedback after `b724eb1` incident); (3) `lint:scopes` (D-008 Amendment 2026-05-09 / Phase F Task 20, custom eslint rule `medassist-local/no-unregistered-admin-scope`); (4) `next build` clinic and (5) `next build` patient (Empirical Lesson #17, route-handler type contract enforcement that `tsc --noEmit` does not see — added 2026-05-09 closing Lesson #17's operational follow-up). Skip with `--no-verify` for WIP branches. |
 
+### 3.1 Deployment Model (B07 Phase L, 2026-05-16)
+
+The monorepo deploys as **two independent Vercel projects** — one per app — both sourcing from the same Git repository:
+
+| Vercel project | Root directory | Build script | vercel.json | Crons |
+|---|---|---|---|---|
+| `medassist-clinic` | `apps/clinic/` | `cd ../.. && npm run build:clinic` | `apps/clinic/vercel.json` | 3 (`appointment-reminders` 07:00 UTC, `expire-stale-shares` 02:00 UTC, `expire-stale-delegations` 03:00 UTC) |
+| `medassist-patient` | `apps/patient/` | `cd ../.. && npm run build:patient` | `apps/patient/vercel.json` | None today |
+
+Both `vercel.json` files set `installCommand: cd ../.. && npm install` so the npm workspaces install lands at the repo root (the monorepo install is what gives the workspace-scoped `build:*` scripts their dependencies). Per-environment env vars (`DEV_BYPASS_OTP`, `NEXT_PUBLIC_OTP_BYPASS_HINT`) are baked into the Preview-env defaults via the `env` block in each `vercel.json`; Production-env values are set via the Vercel dashboard (no value in committing real-OTP behavior to the repo). `.env.example` files in each app workspace document the full per-environment env-var inventory (Supabase, `NEXT_PUBLIC_APP_URL`, OTP behavior, SMS Gateway vendor placeholders, Security, Feature Flags, Observability, Cron auth). See B07 Phase L Bundle 1 (2026-05-16) for the provisioning specifics.
+
 ---
 
 ## 4. Authentication & Authorization
