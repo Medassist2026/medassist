@@ -1,8 +1,12 @@
 # next-pwa → @serwist/next Migration Plan (B07 Phase L Bundle 8 / L-8)
 
-**Status:** PLANNED — cowork ships this plan in Bundle 8 (2026-05-16) but **defers execution to the same Mac-side cowork session as Bundle 7 (L-7 Next 14→15).** Bundle 8 depends on Bundle 7's `npm install next@15` landing first.
+**Status:** CLOSED-AS-NOT-NEEDED 2026-05-16 (Phase L closure, D-094). Reclassified from "required Phase L Bundle 8" to "future modernization workstream (non-urgent)." The triggering assumption — that `next-pwa@5.6.0` is incompatible with Next 15 — was empirically refuted by the Bundle 7 Mac-side build at commit `feae943`. The clinic-app's `npm run build` under Next 15.5.18 successfully compiled the service worker via `next-pwa@5.6.0` (visible in build output: `> [PWA] Service worker: …/apps/clinic/public/sw.js`). The stale `peer react: ^16 || ^17 || ^18` constraint that triggered the original deferral is upstream metadata lag; `.npmrc legacy-peer-deps=true` (shipped as part of Bundle 7) handles peer resolution.
 
-**Estimated execution time:** 0.5-1 day cowork on Mac side (smaller than L-7).
+**Why this plan remains in the repo:** historical record + ready-to-use when next-pwa eventually does break (it's unmaintained upstream; a future Next major-version bump will likely force the move). Mo or future cowork can pick up Option B (@serwist/next) when the trigger arrives.
+
+**Original "Status:" framing (kept for context):** PLANNED — cowork ships this plan in Bundle 8 (2026-05-16) but **defers execution to the same Mac-side cowork session as Bundle 7 (L-7 Next 14→15).** Bundle 8 depends on Bundle 7's `npm install next@15` landing first.
+
+**Estimated execution time (if/when triggered):** 0.5-1 day cowork on Mac side (smaller than L-7).
 
 ## Current state (verified 2026-05-16)
 

@@ -450,6 +450,65 @@ The pre-check assertion guarantees transactional atomicity — if the target cou
 
 **Cross-reference:** `audits/legacy-test-account-cleanup-2026-05-15.md` (the full operational log with exact SQL).
 
+### Lesson 24 (B07 Phase L Bundle 7 — Next 15 ParamCheck rejects forward-compat unions, 2026-05-16)
+
+**Forward-compat union signatures `params: T | Promise<T>` LOOK Next-15-compatible from source but are REJECTED by Next 15's generated `.next/types/app/.../route.ts` `ParamCheck<RouteContext>` constraint. Use exact `Promise<T>` only.**
+
+Earlier B07 work introduced a forward-compat pattern in 7 patient/* API handlers anticipating Next 15's async-params migration:
+
+```ts
+// EARLIER (B07 forward-compat — LOOKS Next-15-ready):
+context: { params: { shareId: string } | Promise<{ shareId: string }> }
+const params = await Promise.resolve(context.params)  // works for both shapes
+```
+
+The source code compiles cleanly under Next 14.x AND passes `tsc --noEmit` under Next 15.x. But the patient-app's `npm run build` under Next 15.5.18 fails 7 type errors of the form:
+
+```
+.next/types/app/api/patient/sharing/[shareId]/extend/route.ts:166:7 - error TS2344:
+  Type '{ __tag__: "POST"; __param_position__: "second"; __param_type__:
+    { params: { shareId: string; } | Promise<{ shareId: string; }>; }; }'
+  does not satisfy the constraint 'ParamCheck<RouteContext>'.
+    The types of '__param_type__.params' are incompatible between these types.
+      Type '{ shareId: string; } | Promise<{ shareId: string; }>' is not assignable
+      to type 'Promise<any>'.
+        Type '{ shareId: string; }' is missing the following properties from
+        type 'Promise<any>': then, catch, finally, [Symbol.toStringTag]
+```
+
+Next 15's route-handler type system generates per-route stubs in `.next/types/app/...` that constrain the second-argument's `params` field to **exactly** `Promise<any>`. The non-Promise branch of the union (`{ shareId: string }`) is missing `Promise.prototype` methods (`.then`, `.catch`, `.finally`, `[Symbol.toStringTag]`), so the union as a whole doesn't satisfy the constraint.
+
+The fix is mechanical — drop the union, use exact `Promise<T>`:
+
+```ts
+// CORRECT (Next 15):
+context: { params: Promise<{ shareId: string }> }
+const params = await context.params
+```
+
+`await context.params` works identically whether the underlying value is a Promise or a sync object resolved to one — but the type expression must declare it as `Promise<T>` exactly.
+
+**Why this is non-obvious:**
+- Source `tsc --noEmit` passes under both Next 14 and Next 15.
+- `eslint` passes.
+- Only the generated route-stub type-check (inside `next build`) surfaces the error.
+- The clinic app's `next build` PASSED in the same migration session because clinic-app doesn't import these specific patient/* handlers — the issue only manifests in routes wired to the patient app.
+
+**Apply to:**
+- All future Next major-version migrations — verify that the new version's generated route stubs (`.next/types/app/...`) accept your existing param signatures BEFORE assuming "forward-compat union" idioms are safe.
+- All new dynamic route handlers — use exact `Promise<T>` from the start. Don't write union shapes.
+- Code review: if you see `params: T | Promise<T>` in a route handler, flag for replacement.
+
+**Origin:** B07 Phase L Bundle 7 (`feae943`, 2026-05-16). Initial Bundle 7 commit assumed the 7 forward-compat handlers needed no change; D-093's "scope-discovery learning" framed it as a positive (preemptive forward-compat absorbed the migration). Mac-side build empirically disproved that — the patient build failed on all 7. The corrective work landed in the same amended commit. D-094 captures the authoritative scope correction.
+
+**Pairs with:**
+- **D-093** (Next 14 → 15 migration execution).
+- **D-094** (this lesson + Bundle 8 closure + scope correction).
+- **Lesson #16** (verify against ground truth — the assumption that the union pattern was forward-compat survived 6+ months of B07 work because no one ran `next build` against Next 15 until today).
+- **Lesson #17** (the husky pre-push 5-pass gate, including `next build` for both apps, IS the verification surface that catches this class of issue; `tsc --noEmit` alone is not sufficient).
+
+**Cross-reference:** `audits/next-15-migration-plan.md` (scope inventory; the original plan also missed this); `audits/dependabot-triage-2026-05-08.md` Tier 3 closure entry; commit `feae943`.
+
 ---
 
 ```

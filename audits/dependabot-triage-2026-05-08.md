@@ -408,7 +408,9 @@ Closes 2 high (mwv6, 5j59) + 3 medium (g5qg, xv57, 4342) + 2 low (223j, 3h52) at
 
 Estimated effort: s. Surface as a separate workstream after this batch closes.
 
-### Tier 3 — deferred to Next 15 migration workstream
+### Tier 3 — deferred to Next 15 migration workstream — **RESOLVED 2026-05-16 (Phase L Bundle 7 + closure)**
+
+**Original framing (kept for historical record):**
 
 **6.3 Major bump 14 → 15** to close the remaining 5 next advisories:
 
@@ -426,6 +428,20 @@ Next 15.x has documented breaking changes:
 - Middleware `request.ip` removed; replaced by Vercel-specific `requestContext`.
 
 This is a multi-week migration, not a batch task. Add to `Open strategic decisions` in STATE_OF_WORK.md.
+
+**RESOLUTION (Phase L Bundle 7, commit `feae943`, 2026-05-16):**
+
+Deferral A (Next 14 → 15) **shipped Mac-side at commit `feae943`** (D-093 + D-094). Bundle 7 took 3 verification iterations — see D-094 for the scope-discovery correction.
+
+**Vuln count delta (empirical):**
+- Pre-Bundle-7: 59 advisories (24 high, 28 moderate, 7 low)
+- Post-Bundle-7: 60 advisories (24 high, 29 moderate, 7 low)
+
+The "significant drop" the Bundle 7 plan predicted **did not materialize**. The 5 Next 14-specific advisories cited above CLOSED, but Next 15 + React 19 pulled in newer transitive deps (some with their own CVEs), net of which the total ticked from 59 → 60. Most of the remaining surface is dev-tooling / build-pipeline transitives (Tier 4), consistent with the §0.5 empirical-correction analysis. Worth recording as a counter-example to "major-version migrations always reduce vuln count" — they sometimes shift the surface instead of shrinking it. Adjust future migration expectations accordingly.
+
+**Deferral B (`next-pwa` migration) — CLOSED-AS-NOT-NEEDED:** the original triage assumed `next-pwa@5.6.0` was incompatible with Next 15. The Bundle 7 Mac-side build empirically refuted that — `next-pwa@5.6.0` compiled the service worker cleanly under Next 15.5.18 (visible in the clinic build output: `> [PWA] Service worker: …/public/sw.js`). The `peer react: ^16 || ^17 || ^18` constraint that triggered the original deferral is stale upstream metadata; `.npmrc legacy-peer-deps=true` (shipped as part of Bundle 7) lets npm install + at runtime everything works. The `@serwist/next` migration is reclassified from "Phase L Bundle 8 (required)" to "future modernization workstream (non-urgent)." Full rationale in D-094.
+
+**What's now needed for vuln-count progress:** Tier 4 quarterly dep-update sprint, plus the upstream peer-range catch-up (lucide-react, cmdk transitives, possibly framer-motion) which will let us remove `.npmrc legacy-peer-deps=true` and align with strict npm 7+ resolution.
 
 ### Tier 4 — quarterly dep-update sprint
 

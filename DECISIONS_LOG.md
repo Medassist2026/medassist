@@ -1490,5 +1490,49 @@ Migration scope was narrower than the original plan inventory predicted. Verifie
 
 ---
 
-*Last entry: D-093 | D-092 | D-091 | D-090 | D-089 | D-088 | D-087 | D-086 | D-085 | D-084 | D-083 | D-082 | D-081 | D-080 | D-079 | D-077 | D-074 (amended 2026-05-07) | 16 May 2026*
+## D-094: Phase L closure — Bundle 8 (next-pwa) closed-as-not-needed; `.npmrc legacy-peer-deps=true` is the long-pole; D-093 scope-discovery correction
+
+**Decision Date:** 2026-05-16
+**Context:** Bundle 7 (D-093, Next 14.2.35 → 15.5.18 + React 18.3.1 → 19.2.6) shipped at commit `feae943` after 3 verification iterations + a forward-compat-union scope-discovery correction. Bundle 8 was planned as next-pwa → @serwist/next migration per `audits/next-pwa-migration-plan.md` because the original dependabot triage assumed `next-pwa@5.6.0` was incompatible with Next 15. **The Bundle 7 Mac-side build empirically refuted that assumption** — `next-pwa@5.6.0` compiled the service worker cleanly under Next 15.5.18 (visible in the clinic build's `> [PWA] Service worker: …/public/sw.js` output). The `peer react: ^16 || ^17 || ^18` constraint that triggered the original deferral is stale upstream metadata; `.npmrc legacy-peer-deps=true` (shipped as part of Bundle 7) lets npm install it and at runtime everything works. Three corrections lock in here.
+
+**Decision:**
+
+**(1) Bundle 8 closed-as-not-needed.** Dependabot Deferral B (next-pwa migration) is closed not by code change but by empirical verification: `next-pwa@5.6.0` works under Next 15.5.18. The `@serwist/next` migration from `audits/next-pwa-migration-plan.md` is reclassified from "Phase L Bundle 8 (required)" to "future modernization workstream (non-urgent)." `next-pwa` IS unmaintained upstream (last release 2023), so the move to `@serwist/next` remains valuable forward-looking maintenance — but it's no longer load-bearing for Phase L closure.
+
+**(2) Empirical Lesson #24 codified** in `audits/EXECUTION_PROMPTS.md`. Forward-compat union signatures (`params: T | Promise<T>` from earlier B07 work) LOOK Next-15-compatible from source-code perspective but are REJECTED by Next 15's generated `.next/types/app/.../route.ts` `ParamCheck<RouteContext>` constraint, which requires `params` to be EXACTLY `Promise<any>` — not a union, because the non-Promise branch of the union is missing Promise.prototype methods. Affected pattern: 7 patient/* handlers in Bundle 7 (sharing/extend, sharing/revoke, dependents/detail, dependents/update, delegations/accept, delegations/capabilities, delegations/revoke). Each required dropping the union to exact `Promise<T>` and changing `await Promise.resolve(context.params)` to `await context.params`. The candidate Lesson noted in the Bundle 7 commit message as "forward-compat unions absorb major-version upgrades with zero code change" is FALSE — they don't, when the upgraded version's generated type stubs scrutinize the type expression.
+
+**(3) D-093 scope-discovery correction.** The Bundle 7 commit message (`feae943`) and the original D-093 entry stated that the 7 forward-compat handlers in `packages/shared/lib/api/handlers/patient/{sharing,dependents,delegations}/*` needed no change. This was wrong — they DID need migration (per finding #2 above). The actual Bundle 7 migration scope was **15 source-file refactors** (8 strict-pattern + 7 union-pattern + 1 `/login` searchParams Promise + 2 `useRef` initialValue), not the 9 originally documented. The git diff at `feae943` reflects all 15. This D-094 entry is the authoritative record; readers of D-093 should refer here for the accurate scope.
+
+**Reasoning:**
+1. **Empirical observation beats planning-doc assumption.** The next-pwa-migration-plan.md was authored before any Next 15 build was actually run. The Mac-side build trumps the plan. Close the Deferral on observed behavior.
+2. **`.npmrc legacy-peer-deps=true` is the load-bearing config.** Several deps (lucide-react@0.344, cmdk@0.2 before bump, others) had stale peer ranges that strict npm 7+ resolution rejected. `.npmrc` flips to npm-6-era resolution (warn-not-error on peer mismatch) which makes Next 15 installable without bumping every long-tail dep. This is the maintained-by-cowork-not-Mo escape hatch for major-version migrations; document it explicitly.
+3. **Lesson #24 is non-obvious.** Future cowork sessions looking at `params: T | Promise<T>` in a Next 14.x codebase would naturally think "great, this is forward-compatible." It isn't, and the failure mode is opaque (the type error surfaces in `.next/types/app/.../route.ts`, not in source). Codifying the lesson prevents a future cowork session from replicating today's 3-iteration debugging.
+4. **D-093 correction in a separate D-094 (not an inline edit of D-093).** Per the decisions-log convention, D-NNN entries are append-only; corrections land as new entries that cross-reference. D-093 stays as the historical record of the migration; D-094 is the authoritative correction.
+
+**Rejected alternatives:**
+- **Inline edit of D-093.** Violates append-only convention. Loses the historical record that the original migration ran with an inaccurate scope assumption.
+- **Ship the @serwist/next migration anyway.** Non-urgent; next-pwa@5.6.0 works; the iteration time isn't justified by current evidence. Revisit when (a) next-pwa actually breaks under a future Next bump, (b) Mo wants a security review forcing the swap, or (c) the offline-first feature set grows enough to need Serwist's modern API.
+- **Bump every peer-conflicting dep instead of `.npmrc`.** lucide-react@0.344 → 1.x is a major version with potential icon-name churn (200+ imports in codebase). framer-motion 11 → motion 12 is a rename + API split. Each is its own workstream. `.npmrc` is the surgical close.
+
+**Implications:**
+- Dependabot Deferrals A + B both closed (A by Bundle 7 code; B by D-094 empirical-verification documentation).
+- `audits/EXECUTION_PROMPTS.md` Lesson #24 added (forward-compat union gotcha).
+- `audits/dependabot-triage-2026-05-08.md` Tier 3 closure annotated with the empirical findings.
+- `audits/next-pwa-migration-plan.md` updated to mark @serwist/next migration as "future modernization, not load-bearing for Phase L."
+- `audits/phase-l-mo-walltime-tracker.md` no L-8 entry needed (closure is in `STATE_OF_WORK.md` / `PROGRAM_STATE.md`).
+- Phase L cowork portion = **100% complete** (all 9 cowork-executable bundles done; Bundle 7 shipped Mac-side; Bundle 8 closed-as-not-needed).
+- Phase L Tier 3 (Mo wall-time — L-2 SMS vendor, L-4 Sentry DSN, L-5 domain, L-6 legal) still open, tracked separately.
+- Vuln count: pre-Bundle-7 = 59 (24 high, 28 moderate, 7 low); post-Bundle-7 = 60 (24 high, 29 moderate, 7 low). Major-version migrations sometimes shift the surface rather than shrink it; the dependabot-triage doc records this empirical correction to the Bundle 7 expectation of "significant drop."
+- Phase M is now unblocked end-to-end (subject to Mo wall-time L-2 SMS vendor for real-OTP testing; closed-beta with bypass-mode is feasible today).
+
+**Trade-offs accepted:**
+- `next-pwa` is unmaintained; eventually a future Next major-version bump will break it. Track future breakage as the trigger for the @serwist/next migration.
+- `.npmrc legacy-peer-deps=true` accepts that some libs (lucide-react@0.344, etc.) advertise stale peer ranges. When their authors ship React 19 peer support, the flag can be removed without code change.
+- D-093 historical record contains an inaccurate scope summary; readers must cross-reference D-094.
+
+**Outcome:** Live in Phase L cowork closure (commit pending). Resolves Dependabot Deferral B + D-093 scope inaccuracy + Lesson #24 codification. Phase L Tier 2 fully closed. Pairs with D-092 (defer rationale that started this chain) + D-093 (migration execution).
+
+---
+
+*Last entry: D-094 | D-093 | D-092 | D-091 | D-090 | D-089 | D-088 | D-087 | D-086 | D-085 | D-084 | D-083 | D-082 | D-081 | D-080 | D-079 | D-077 | D-074 (amended 2026-05-07) | 16 May 2026*
 *Add new decisions at the bottom with sequential ID.*
